@@ -1,0 +1,280 @@
+TextusAi
+============
+
+This document is a literate model for the TextusAi component.
+It is designed to remain executable as CML input while also acting as
+human-readable specification text.
+
+The model keeps domain structure and operational intent in a single source:
+
+- `# COMPONENT` defines the TextusAi component boundary.
+- `# SERVICE` and nested `# OPERATION` definitions explain behavior.
+- `# ENTITY`, `# COMMAND`, and `# QUERY` define the executable domain model.
+- `# OPERATION` binds service operations to command/query inputs and outputs.
+- `TYPE` is optional and is normally inferred from the `INPUT` value object.
+
+Provider-specific behavior is intentionally excluded from the model surface.
+It is resolved through adapter and runtime configuration outside the DSL.
+
+# VISION
+
+## AIComponentCapability
+
+### SUMMARY
+
+Provide a provider-agnostic TextusAi capability for Textus.
+
+### GOAL
+
+Establish a coherent TextusAi capability boundary that can generate text and continue conversations while remaining provider-neutral.
+
+### PRECONDITION
+
+Textus treats TextusAi behavior as a first-class component concern rather than a library detail.
+
+### POSTCONDITION
+
+The domain has a clear strategic direction for TextusAi component and service design.
+
+# COMPONENT
+
+## TextusAi
+
+### PACKAGE
+
+org.simplemodeling.textus.ai
+
+### DESCRIPTION
+
+TextusAi component for language-model generation and chat.
+
+### SPECIFICATION
+
+This component is a bounded context for AI capability inside Textus.
+The source is intentionally executable as model input and readable as
+component documentation.
+
+### DOMAIN_INTENT
+
+Two provider-agnostic operations are modeled:
+1. `generate`: produce text from a prompt.
+2. `chat`: produce the next assistant message from a message history.
+
+Provider selection and fallback are resolved by CNCF binding and adapter
+configuration.
+
+### USE CASE
+
+#### generate_and_chat_capability
+
+##### SUMMARY
+
+Cover prompt generation and conversation continuation within one component boundary.
+
+##### ACTOR
+
+Application developer and runtime operator.
+
+##### PRIMARY ACTOR
+
+EndUser
+
+##### SECONDARY ACTOR
+
+BackOfficeOperator
+
+##### GOAL
+
+Support prompt completion and chat completion as one coherent AI capability.
+
+##### PRECONDITION
+
+The system is configured to host AI generation operations for both prompt and chat contexts.
+
+##### POSTCONDITION
+
+The component can represent generation and chat behavior and expose the corresponding executable services.
+
+### DOC_USAGE
+
+Descriptions under `COMPONENT`, `SERVICE`, `ENTITY`, `COMMAND`, `QUERY`, and `OPERATION` are intended to be reused for generated program comments and user-facing artifacts such as help text.
+
+`OPERATION` kinds are usually inferred from `INPUT`. A `TYPE` section is only
+needed when you want to assert the intended kind explicitly and check it
+against the input value object. In normal use, the `COMMAND` / `QUERY`
+classification comes from the `INPUT` value object shape.
+
+# SERVICE
+
+## Llm
+
+### DESCRIPTION
+
+Llm groups operations that use an LLM provider through an adapter.
+The service surface stays stable while providers may change at runtime.
+
+### OPERATION
+
+## generate
+
+### INPUT
+
+GenerateRequest
+
+### OUTPUT
+
+GenerateResponse
+
+### DESCRIPTION
+
+Generate accepts a prompt and produces generated text.
+
+### ACCESS
+
+###### POLICY
+
+anonymous_only
+
+### PRECONDITION
+
+The request provides the prompt text.
+
+### POSTCONDITION
+
+The component produces a generated-text response.
+
+### RULE
+
+- Prompt text is request-only input.
+- Provider selection remains outside the operation surface.
+
+## chat
+
+### INPUT
+
+ChatRequest
+
+### OUTPUT
+
+ChatResponse
+
+### DESCRIPTION
+
+Chat accepts a sequence of messages and produces the next message in the
+conversation.
+
+### ACCESS
+
+###### POLICY
+
+anonymous_only
+
+### PRECONDITION
+
+The request provides a message history.
+
+### POSTCONDITION
+
+The component produces the next assistant message.
+
+### RULE
+
+- Message history is request-only input.
+- Provider selection remains outside the operation surface.
+
+# ENTITY
+
+## LlmSession
+
+### DESCRIPTION
+
+Shared session state for a conversational LLM exchange.
+
+### ATTRIBUTE
+
+| name | type | multiplicity |
+|------|------|--------------|
+| id | entityid | 1 |
+| model | string | 1 |
+| provider | string | ? |
+
+# COMMAND
+
+## GenerateRequest
+
+### DESCRIPTION
+
+Input command for text generation.
+
+### ATTRIBUTE
+
+| name | type | multiplicity |
+|------|------|--------------|
+| prompt | string | 1 |
+| temperature | float | ? |
+| maxTokens | int | ? |
+
+## ChatRequest
+
+### DESCRIPTION
+
+Input command for chat completion.
+
+### ATTRIBUTE
+
+| name | type | multiplicity |
+|------|------|--------------|
+| messages | Message | * |
+
+# QUERY
+
+## GenerateResponse
+
+### DESCRIPTION
+
+Output query for text generation.
+
+### ATTRIBUTE
+
+| name | type | multiplicity |
+|------|------|--------------|
+| text | string | 1 |
+
+## ChatResponse
+
+### DESCRIPTION
+
+Output query for chat completion.
+
+### ATTRIBUTE
+
+| name | type | multiplicity |
+|------|------|--------------|
+| message | Message | 1 |
+
+# VALUE
+
+## Message
+
+### ATTRIBUTE
+
+- name: role
+  type: MessageRole
+  multiplicity: "1"
+- name: content
+  type: String
+  multiplicity: "1"
+
+### DESCRIPTION
+
+Typed chat message.
+
+## MessageRole
+
+### DESCRIPTION
+
+Conversation participant role.
+
+### REMARKS
+
+- supported roles are system, user, and assistant
