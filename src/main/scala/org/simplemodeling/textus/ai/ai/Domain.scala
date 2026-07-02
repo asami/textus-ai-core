@@ -1,7 +1,6 @@
 package org.simplemodeling.textus.ai.ai
 
-enum MessageRole:
-  case System, User, Assistant
+import org.simplemodeling.model.value.MessageRole
 
 final case class Message(
   role: MessageRole,

@@ -160,5 +160,5 @@ class GenerateOperation extends Operation {
 
 - Use `generate` and `chat` as the initial scope
 - Defer `embed` as optional
-- Keep provider-specific configuration inside runtime
+- Keep provider-specific configuration inside the AI runtime
 - Collect observation as shared operation metadata

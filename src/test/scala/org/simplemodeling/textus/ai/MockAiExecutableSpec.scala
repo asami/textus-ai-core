@@ -2,6 +2,7 @@ package org.simplemodeling.textus.ai
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
 
 final class MockAiExecutableSpec extends AnyFunSuite with Matchers {

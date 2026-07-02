@@ -1,10 +1,10 @@
-# textus-ai
+# textus-ai-runtime
 
-TextusAi component development repository.
+Textus AI runtime development repository.
 
 Purpose:
 
-1. Use Cozy/CNCF features in the AI/LLM domain in a production-like way and identify gaps
+1. Use Cozy/CNCF features in the AI runtime domain in a production-like way and identify gaps
 2. Extend `sbt-cozy`, `cozy`, or `cloud-native-component-framework` when needed
 3. As a secondary goal, produce distributable component artifacts
 
@@ -17,13 +17,16 @@ Purpose:
 Notes:
 
 - `src/main/cozy/ai.cml` uses the `.cml` extension, but its content is written in the Dox style consumed by the `cozy` modeler
-- Provider-specific logic must not appear in the DSL; keep it in the adapter layer
+- Provider-specific logic must not appear in the DSL; keep it in the runtime adapter layer
 - `OPERATION` kinds are usually inferred from `INPUT`. A `TYPE` section is
   only needed when you want to assert the intended kind explicitly and check it
   against the input value object.
 - `AI_LLM_MODE=local` allows local Ollama first with optional fallback
 - `AI_LLM_MODE=local-first` means local endpoint first, then fallback endpoint
 - `AI_LLM_MODE=remote` means the primary endpoint only, without fallback
+- `AI_LLM_PROVIDER=gemma|openai|google` selects the runtime provider
+- `OPENAI_API_KEY` with `AI_OPENAI_MODEL` enables the OpenAI runtime adapter
+- `GOOGLE_API_KEY` or `GEMINI_API_KEY` with `AI_GOOGLE_MODEL` enables the Google runtime adapter
 
 Example:
 
@@ -37,17 +40,23 @@ AI_LLM_MODEL=gemma:2b \
 The script delegates to `CncfMain` and lets the CNCF CLI handle routing,
 help, and component discovery.
 
-`textus-ai` is intended to behave as a CNCF component first, so the same
-component can be used as an implementation artifact and as a CLI command.
+Provider-specific endpoints:
+
+- Gemma/Ollama: `AI_LLM_ENDPOINT`, `AI_LLM_FALLBACK_ENDPOINT`, `AI_GEMMA_MODEL`
+- OpenAI: `AI_OPENAI_ENDPOINT`, `OPENAI_API_KEY`, `AI_OPENAI_MODEL`
+- Google Gemini: `AI_GOOGLE_ENDPOINT`, `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `AI_GOOGLE_MODEL`
+
+`textus-ai-runtime` is intended to behave as a CNCF AI runtime first, so the
+same component can be used as an implementation artifact and as a CLI command.
 
 The bootstrap layer follows the `textus-user-account` pattern:
 
 - `TextusAiComponent` is generated from `src/main/cozy/ai.cml`.
-- `ComponentFactory` owns the CNCF adapter wiring, including Gemma bindings.
+- `ComponentFactory` owns the CNCF runtime adapter wiring, including Gemma bindings.
 - `GeneratedDomainComponentLoader` provides a stable component creation entry point.
 - `TextusAiComponentMain` exposes the component as a runtime-facing entry point.
 
-This keeps generated code separate from adapter setup and mirrors the CNCF
+This keeps generated code separate from runtime adapter setup and mirrors the CNCF
 component/factory split used in other Textus repositories.
 
 ## Initial Setup

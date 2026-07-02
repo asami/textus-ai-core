@@ -8,11 +8,11 @@ tag=cncf, ai, llm, gemma, adapter, docker, ollama
 # Overview
 
 This note defines the recommended architecture for integrating Gemma
-as a lightweight LLM within a CNCF-based TextusAi component.
+as a lightweight LLM within a CNCF-based Textus AI runtime component.
 
 The design establishes:
 
-- a stable, provider-independent TextusAi component interface
+- a stable, provider-independent Textus AI runtime interface
 - Gemma as the primary lightweight local LLM backend
 - Docker-based deployment using Ollama as the default runtime
 - configuration-based switching to remote LLM services

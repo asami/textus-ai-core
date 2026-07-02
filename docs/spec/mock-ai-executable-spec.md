@@ -2,7 +2,7 @@ Mock AI Executable Specification
 ================================
 
 This spec describes the deterministic mock AI used as a working
-specification for the TextusAi component.
+specification for the TextusAi runtime component.
 
 Purpose
 
