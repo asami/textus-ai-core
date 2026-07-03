@@ -1,7 +1,10 @@
 import org.goldenport.cozy.CozyPlugin.autoImport._
+import sbt.Keys.*
 
 ThisBuild / organization := "org.textus"
 ThisBuild / version := "0.1.1-SNAPSHOT"
+
+val cncfVersion = "0.4.13-SNAPSHOT"
 
 lazy val root = (project in file("."))
   .enablePlugins(org.goldenport.cozy.CozyPlugin)
@@ -17,7 +20,7 @@ lazy val root = (project in file("."))
       "SimpleModeling.org" at "https://www.simplemodeling.org/repository/maven"
     ),
     libraryDependencies ++= Seq(
-      "org.goldenport" %% "goldenport-cncf" % "0.4.13-SNAPSHOT",
+      "org.goldenport" %% "goldenport-cncf" % cncfVersion,
       "org.simplemodeling" %% "simplemodeling-model" % "0.1.7",
       "org.scalatest" %% "scalatest" % "3.2.19" % Test
     ),
@@ -29,5 +32,13 @@ lazy val root = (project in file("."))
       "boundedContext" -> "platform",
       "domain" -> "ai-runtime"
     ),
+    publish := {
+      val _ = cozyPublishCar.value
+      ()
+    },
+    publishLocal := {
+      val _ = cozyPublishLocalCar.value
+      ()
+    },
     Test / fork := false
   )

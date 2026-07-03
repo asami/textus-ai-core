@@ -3,12 +3,15 @@ package org.simplemodeling.textus.ai.provider.google
 import java.net.URI
 
 import io.circe.{ACursor, HCursor, Json, JsonObject}
+import scala.util.Try
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{ExtensionPoint, ServiceContract, VariationSelection}
+import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
-import org.simplemodeling.textus.ai.runtime.{ChatService, GenerateService, HttpSupport}
+import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport}
 
 final case class GoogleRuntimeConfig(
   provider: String = "google",
@@ -21,6 +24,48 @@ final case class GoogleRuntimeConfig(
 )
 
 object GoogleConfig:
+  def fromConfiguration(
+    configuration: ResolvedConfiguration
+  ): Option[GoogleRuntimeConfig] =
+    for
+      apiKey <- _config_strings(configuration, Vector(
+        "textus.ai.google.api-key",
+        "textus.ai.google.apiKey",
+        "textus.runtime.ai.google.api-key",
+        "cncf.ai.google.api-key",
+        "cncf.runtime.ai.google.api-key"
+      )).headOption
+      model <- _config_strings(configuration, Vector(
+        "textus.ai.google.model",
+        "textus.runtime.ai.google.model",
+        "cncf.ai.google.model",
+        "cncf.runtime.ai.google.model",
+        "textus.ai.llm.model",
+        "cncf.ai.llm.model"
+      )).headOption
+    yield
+      GoogleRuntimeConfig(
+        endpoint = URI.create(
+          _config_strings(configuration, Vector(
+            "textus.ai.google.endpoint",
+            "textus.runtime.ai.google.endpoint",
+            "cncf.ai.google.endpoint",
+            "cncf.runtime.ai.google.endpoint"
+          )).headOption.getOrElse("https://generativelanguage.googleapis.com")
+        ),
+        apiKey = apiKey,
+        model = model,
+        timeoutSeconds = _config_strings(configuration, Vector(
+          "textus.ai.google.timeout-seconds",
+          "textus.runtime.ai.google.timeout-seconds",
+          "cncf.ai.google.timeout-seconds",
+          "cncf.runtime.ai.google.timeout-seconds"
+        )).headOption
+          .orElse(sys.env.get("AI_GOOGLE_TIMEOUT_SECONDS"))
+          .flatMap(_.toLongOption)
+          .getOrElse(30L)
+      )
+
   def fromEnvironment(): Option[GoogleRuntimeConfig] =
     for
       apiKey <- sys.env.get("GOOGLE_API_KEY").orElse(sys.env.get("GEMINI_API_KEY")).orElse(sys.env.get("AI_GOOGLE_API_KEY"))
@@ -33,13 +78,25 @@ object GoogleConfig:
         timeoutSeconds = sys.env.get("AI_GOOGLE_TIMEOUT_SECONDS").flatMap(_.toLongOption).getOrElse(30L)
       )
 
+  private def _config_strings(
+    configuration: ResolvedConfiguration,
+    keys: Vector[String]
+  ): Vector[String] =
+    keys.flatMap(key => Try(RuntimeConfig.getString(configuration, key)).toOption.flatten)
+      .flatMap(value => Option(value))
+      .map(_.trim)
+      .filter(_.nonEmpty)
+
 private object GoogleJson:
+  private def _safe_string(value: String): String =
+    Option(value).getOrElse("")
+
   def generateRequest(request: GenerateRequest): Json =
     Json.obj(
       "contents" -> Json.arr(
         Json.obj(
           "role" -> Json.fromString("user"),
-          "parts" -> Json.arr(Json.obj("text" -> Json.fromString(request.prompt)))
+          "parts" -> Json.arr(Json.obj("text" -> Json.fromString(_safe_string(request.prompt))))
         )
       ),
       "generationConfig" -> _generation_config(request.temperature, request.maxTokens)
@@ -49,7 +106,7 @@ private object GoogleJson:
     val (systemMessages, nonSystemMessages) = request.messages.partition(_.role == MessageRole.System)
     val base = JsonObject(
       "contents" -> Json.fromValues(nonSystemMessages.map(_message)),
-      "generationConfig" -> Json.obj()
+      "generationConfig" -> _generation_config(request.temperature, request.maxTokens)
     )
     val withSystem =
       if systemMessages.isEmpty then
@@ -58,7 +115,7 @@ private object GoogleJson:
         base.add(
           "systemInstruction",
           Json.obj(
-            "parts" -> Json.fromValues(systemMessages.map(x => Json.obj("text" -> Json.fromString(x.content))))
+            "parts" -> Json.fromValues(systemMessages.map(x => Json.obj("text" -> Json.fromString(_safe_string(x.content)))))
           )
         )
     Json.fromJsonObject(withSystem)
@@ -84,7 +141,7 @@ private object GoogleJson:
   private def _message(message: Message): Json =
     Json.obj(
       "role" -> Json.fromString(_role(message.role)),
-      "parts" -> Json.arr(Json.obj("text" -> Json.fromString(message.content)))
+      "parts" -> Json.arr(Json.obj("text" -> Json.fromString(_safe_string(message.content))))
     )
 
   private def _role(role: MessageRole): String = role match
@@ -109,29 +166,42 @@ private object GoogleJson:
       case _ =>
         Consequence.valueInvalid(s"Missing path: ${path.mkString(".")}")
 
-final class GoogleGenerateService(config: GoogleRuntimeConfig) extends GenerateService:
-  private val _client = HttpSupport.client(config.timeoutSeconds)
-
+final class GoogleGenerateService(config: GoogleRuntimeConfig, context: ExecutionContext) extends GenerateService:
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
-    HttpSupport.post(
-      _client,
-      config.endpoint,
-      s"/v1beta/models/${config.model}:generateContent?key=${config.apiKey}",
-      GoogleJson.generateRequest(req),
-      config.timeoutSeconds
-    ).flatMap(GoogleJson.extractText).map(GenerateResponse.apply)
+    given ExecutionContext = context
+    GoogleRuntimeException.guard("google generate") {
+      HttpSupport.post(
+        config.endpoint,
+        s"/v1beta/models/${Option(config.model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
+        GoogleJson.generateRequest(req),
+        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+        properties = req.properties
+      ).flatMap(GoogleJson.extractText).map(text => GenerateResponse(text, Some(config.model)))
+    }
 
-final class GoogleChatService(config: GoogleRuntimeConfig) extends ChatService:
-  private val _client = HttpSupport.client(config.timeoutSeconds)
-
+final class GoogleChatService(config: GoogleRuntimeConfig, context: ExecutionContext) extends ChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
-    HttpSupport.post(
-      _client,
-      config.endpoint,
-      s"/v1beta/models/${config.model}:generateContent?key=${config.apiKey}",
-      GoogleJson.chatRequest(req),
-      config.timeoutSeconds
-    ).flatMap(GoogleJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x)))
+    given ExecutionContext = context
+    GoogleRuntimeException.guard("google chat") {
+      HttpSupport.post(
+        config.endpoint,
+        s"/v1beta/models/${Option(config.model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
+        GoogleJson.chatRequest(req),
+        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+        properties = req.properties
+      ).flatMap(GoogleJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x), Some(config.model)))
+    }
+
+private object GoogleRuntimeException:
+  def guard[A](label: String)(body: => Consequence[A]): Consequence[A] =
+    try
+      body
+    catch
+      case e: Throwable =>
+        val at = e.getStackTrace.headOption.map(_.toString).getOrElse("unknown")
+        Consequence.serviceUnavailable(
+          HttpSupport.redactSensitive(s"$label failed: ${e.getClass.getName}: ${Option(e.getMessage).getOrElse("")} at $at")
+        )
 
 final class GoogleGenerateExtensionPoint(config: GoogleRuntimeConfig)
   extends ExtensionPoint[GenerateService]:
@@ -141,7 +211,7 @@ final class GoogleGenerateExtensionPoint(config: GoogleRuntimeConfig)
       variation.engine.contains("gemini")
 
   override def provide(contract: ServiceContract[GenerateService], variation: VariationSelection)(using ExecutionContext): Consequence[GenerateService] =
-    Consequence.success(new GoogleGenerateService(config))
+    Consequence.success(new GoogleGenerateService(config, summon[ExecutionContext]))
 
 final class GoogleChatExtensionPoint(config: GoogleRuntimeConfig)
   extends ExtensionPoint[ChatService]:
@@ -151,4 +221,4 @@ final class GoogleChatExtensionPoint(config: GoogleRuntimeConfig)
       variation.engine.contains("gemini")
 
   override def provide(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Consequence[ChatService] =
-    Consequence.success(new GoogleChatService(config))
+    Consequence.success(new GoogleChatService(config, summon[ExecutionContext]))

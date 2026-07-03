@@ -46,6 +46,34 @@ Provider-specific endpoints:
 - OpenAI: `AI_OPENAI_ENDPOINT`, `OPENAI_API_KEY`, `AI_OPENAI_MODEL`
 - Google Gemini: `AI_GOOGLE_ENDPOINT`, `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `AI_GOOGLE_MODEL`
 
+OpenAI can also be configured through CNCF runtime configuration. The same
+configuration keys can be supplied from user-local configuration and from
+project-local `conf/cncf/config.yaml`; the split below is an operational rule,
+not a different schema. Keep sensitive values in the user-local/private
+configuration file and keep ordinary runtime selection in the project
+configuration.
+
+User-local/private CNCF runtime configuration (`~/.cncf/config.yaml`):
+
+```yaml
+textus:
+  ai:
+    openai:
+      api-key: "sk-..."
+      model: "gpt-4.1-mini"
+      timeout-seconds: 180
+```
+
+Project configuration (`conf/cncf/config.yaml`):
+
+```yaml
+textus:
+  ai:
+    provider: openai
+    mode: remote
+    engine: openai
+```
+
 `textus-ai-runtime` is intended to behave as a CNCF AI runtime first, so the
 same component can be used as an implementation artifact and as a CLI command.
 

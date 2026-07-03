@@ -16,7 +16,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul.  2, 2026
+ * @version Jul.  4, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -24,30 +24,205 @@ final class TextusAiRunner(
   selection: SpiSelection
 ) extends AiRunner {
   def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] =
-    for {
-      service <- provider.generateService(_effective_selection(req.requirement))
-      response <- service.generate(
-        GenerateRequest(
-          prompt = req.prompt,
-          temperature = req.temperature,
-          maxTokens = req.maxTokens
+    _with_generate_calltree(req) {
+      for {
+        service <- provider.generateService(_effective_selection(req.requirement))
+        response <- service.generate(
+          GenerateRequest(
+            prompt = req.prompt,
+            temperature = req.temperature,
+            maxTokens = req.maxTokens,
+            properties = req.properties
+          )
         )
-      )
-    } yield _to_ai_generate_response(response)
+      } yield _to_ai_generate_response(response)
+    }
 
   def chat(req: AiChatRequest)(using ExecutionContext): Consequence[AiChatResponse] =
-    for {
-      service <- provider.chatService(_effective_selection(req.requirement))
-      response <- service.chat(
-        ChatRequest(
-          messages = req.messages.map(_to_textus_message)
+    _with_chat_calltree(req) {
+      for {
+        service <- provider.chatService(_effective_selection(req.requirement))
+        response <- service.chat(
+          ChatRequest(
+            messages = req.messages.map(_to_textus_message),
+            temperature = req.temperature,
+            maxTokens = req.maxTokens,
+            properties = req.properties
+          )
         )
+      } yield _to_ai_chat_response(response)
+    }
+
+  private def _with_generate_calltree(
+    req: AiGenerateRequest
+  )(
+    body: => Consequence[AiGenerateResponse]
+  )(using ctx: ExecutionContext): Consequence[AiGenerateResponse] = {
+    val calltree = ctx.observability.callTreeContext
+    if (calltree.isEnabled) {
+      calltree.enter(
+        "provider:textus-ai-runner:generate",
+        _generate_request_calltree_attributes(req)
       )
-    } yield _to_ai_chat_response(response)
+      try {
+        val result = body
+        result match {
+          case Consequence.Success(response) =>
+            calltree.leave(_generate_response_calltree_attributes(req, response))
+          case Consequence.Failure(conclusion) =>
+            calltree.leave(Map(
+              "outcome" -> "failure",
+              "status" -> conclusion.status.webCode.code.toString,
+              "error" -> conclusion.display
+            ))
+        }
+        result
+      } catch {
+        case e: Throwable =>
+          calltree.leave(Map(
+            "outcome" -> "failure",
+            "error" -> Option(e.getMessage).getOrElse(e.getClass.getName)
+          ))
+          throw e
+      }
+    } else {
+      body
+    }
+  }
+
+  private def _with_chat_calltree(
+    req: AiChatRequest
+  )(
+    body: => Consequence[AiChatResponse]
+  )(using ctx: ExecutionContext): Consequence[AiChatResponse] = {
+    val calltree = ctx.observability.callTreeContext
+    if (calltree.isEnabled) {
+      calltree.enter(
+        "provider:textus-ai-runner:chat",
+        _chat_request_calltree_attributes(req)
+      )
+      try {
+        val result = body
+        result match {
+          case Consequence.Success(response) =>
+            calltree.leave(_chat_response_calltree_attributes(req, response))
+          case Consequence.Failure(conclusion) =>
+            calltree.leave(Map(
+              "outcome" -> "failure",
+              "status" -> conclusion.status.webCode.code.toString,
+              "error" -> conclusion.display
+            ))
+        }
+        result
+      } catch {
+        case e: Throwable =>
+          calltree.leave(Map(
+            "outcome" -> "failure",
+            "error" -> Option(e.getMessage).getOrElse(e.getClass.getName)
+          ))
+          throw e
+      }
+    } else {
+      body
+    }
+  }
+
+  private def _generate_request_calltree_attributes(
+    req: AiGenerateRequest
+  ): Map[String, String] =
+    _common_request_calltree_attributes(
+      req.requirement,
+      req.temperature,
+      req.maxTokens,
+      req.trace.promptConfidentiality.label,
+      req.trace.responseConfidentiality.label,
+      req.metadata
+    ) ++ Map(
+      "prompt_chars" -> req.prompt.length.toString,
+      "prompt" -> req.trace.calltreePrompt(req.prompt),
+      "prompt_preview" -> _calltree_text_preview(req.trace.calltreePrompt(req.prompt))
+    )
+
+  private def _chat_request_calltree_attributes(
+    req: AiChatRequest
+  ): Map[String, String] = {
+    val prompttext = req.messages.map(message => s"${message.role}: ${message.content}").mkString("\n")
+    _common_request_calltree_attributes(
+      req.requirement,
+      req.temperature,
+      req.maxTokens,
+      req.trace.promptConfidentiality.label,
+      req.trace.responseConfidentiality.label,
+      req.metadata
+    ) ++ Map(
+      "message_count" -> req.messages.length.toString,
+      "prompt_chars" -> prompttext.length.toString,
+      "prompt" -> req.trace.calltreePrompt(prompttext),
+      "prompt_preview" -> _calltree_text_preview(req.trace.calltreePrompt(prompttext))
+    )
+  }
+
+  private def _common_request_calltree_attributes(
+    requirement: AiRunnerRequirement,
+    temperature: Option[Double],
+    maxtokens: Option[Int],
+    promptconfidentiality: String,
+    responseconfidentiality: String,
+    metadata: Map[String, String]
+  ): Map[String, String] =
+    Map(
+      "calltree_kind" -> "provider-step",
+      "operation" -> metadata.getOrElse("operation", ""),
+      "task" -> metadata.getOrElse("task", metadata.getOrElse("dsl", "")),
+      "provider" -> requirement.provider.orElse(selection.provider).getOrElse(""),
+      "mode" -> requirement.mode.orElse(selection.mode).getOrElse(""),
+      "engine" -> requirement.engine.orElse(selection.engine).getOrElse(""),
+      "temperature" -> temperature.map(_.toString).getOrElse(""),
+      "max_tokens" -> maxtokens.map(_.toString).getOrElse(""),
+      "prompt_confidentiality" -> promptconfidentiality,
+      "response_confidentiality" -> responseconfidentiality
+    ) ++ metadata.toVector.map { case (key, value) => s"metadata.$key" -> value }.toMap
+
+  private def _generate_response_calltree_attributes(
+    req: AiGenerateRequest,
+    response: AiGenerateResponse
+  ): Map[String, String] =
+    Map(
+      "outcome" -> "success",
+      "model" -> response.model.getOrElse(""),
+      "response_chars" -> response.text.length.toString,
+      "response" -> req.trace.calltreeResponse(response.text),
+      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(response.text))
+    ) ++ response.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
+
+  private def _chat_response_calltree_attributes(
+    req: AiChatRequest,
+    response: AiChatResponse
+  ): Map[String, String] = {
+    val responsetext = response.message.content
+    Map(
+      "outcome" -> "success",
+      "model" -> response.model.getOrElse(""),
+      "response_chars" -> responsetext.length.toString,
+      "response" -> req.trace.calltreeResponse(responsetext),
+      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(responsetext))
+    ) ++ response.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
+  }
+
+  private def _calltree_text_preview(text: String): String = {
+    val normalized = text.replace("\r\n", "\n")
+    val limit = 6000
+    if (normalized.length <= limit)
+      normalized
+    else
+      normalized.take(limit) + s"\n... truncated (${normalized.length - limit} chars omitted)"
+  }
 
   private def _effective_selection(
     requirement: AiRunnerRequirement
-  ): SpiSelection =
+  ): SpiSelection = {
+    val provider = requirement.provider.orElse(selection.provider)
+    val shouldinherit = requirement.provider.isEmpty || requirement.provider == selection.provider
     if (
       requirement.provider.isEmpty &&
       requirement.mode.isEmpty &&
@@ -56,20 +231,26 @@ final class TextusAiRunner(
       selection
     else
       SpiSelection(
-        provider = requirement.provider.orElse(selection.provider),
-        mode = requirement.mode.orElse(selection.mode),
-        engine = requirement.engine.orElse(selection.engine)
+        provider = provider,
+        mode = requirement.mode.orElse(if (shouldinherit) selection.mode else None),
+        engine = requirement.engine.orElse(if (shouldinherit) selection.engine else None)
       )
+  }
 
   private def _to_ai_generate_response(
     response: GenerateResponse
   ): AiGenerateResponse =
-    AiGenerateResponse(response.text)
+    AiGenerateResponse(response.text, _effective_model(response.model))
 
   private def _to_ai_chat_response(
     response: ChatResponse
   ): AiChatResponse =
-    AiChatResponse(_to_ai_message(response.message))
+    AiChatResponse(_to_ai_message(response.message), _effective_model(response.model))
+
+  private def _effective_model(
+    model: Option[String]
+  ): Option[String] =
+    model.orElse(selection.engine).orElse(selection.provider)
 
   private def _to_textus_message(
     message: AiMessage
@@ -89,7 +270,8 @@ final class TextusAiRunner(
 }
 
 final class TextusAiRunnerProvider(
-  component: Component
+  component: Component,
+  defaultselection: SpiSelection = SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))
 ) extends SpiProvider[AiRunner] {
   def supports(
     contract: SpiContract[AiRunner],
@@ -104,10 +286,11 @@ final class TextusAiRunnerProvider(
     contract: SpiContract[AiRunner],
     selection: SpiSelection
   )(using ExecutionContext): Consequence[AiRunner] = {
+    val effective = _effective_selection(selection)
     for {
-      generate <- generateService(selection)
-      chat <- chatService(selection)
-    } yield new TextusAiRunner(this, selection)
+      generate <- generateService(effective)
+      chat <- chatService(effective)
+    } yield new TextusAiRunner(this, effective)
   }
 
   def generateService(
@@ -117,7 +300,7 @@ final class TextusAiRunnerProvider(
       case Some(binding: Component.Binding[?, ?]) =>
         binding
           .asInstanceOf[Component.Binding[GenerateRequirement, GenerateService]]
-          .bind(_requirement(selection))
+          .bind(_requirement(_effective_selection(selection)))
       case None =>
         Consequence.serviceUnavailable("generate binding not found")
     }
@@ -129,19 +312,49 @@ final class TextusAiRunnerProvider(
       case Some(binding: Component.Binding[?, ?]) =>
         binding
           .asInstanceOf[Component.Binding[GenerateRequirement, ChatService]]
-          .bind(_requirement(selection))
+          .bind(_requirement(_effective_selection(selection)))
       case None =>
         Consequence.serviceUnavailable("chat binding not found")
     }
 
+  private def _effective_selection(
+    selection: SpiSelection
+  ): SpiSelection = {
+    val provider = selection.provider.orElse(defaultselection.provider)
+    val inheritsdefault =
+      selection.provider.isEmpty ||
+      selection.provider == defaultselection.provider
+    val providername = provider.getOrElse("gemma")
+    SpiSelection(
+      provider = provider,
+      mode = selection.mode.orElse(if (inheritsdefault) defaultselection.mode else Some(_default_mode(providername))),
+      engine = selection.engine.orElse(if (inheritsdefault) defaultselection.engine else Some(_default_engine(providername)))
+    )
+  }
+
   private def _requirement(
     selection: SpiSelection
-  ): GenerateRequirement =
+  ): GenerateRequirement = {
+    val provider = selection.provider.getOrElse("gemma")
     GenerateRequirement(
-      provider = selection.provider.orElse(Some("gemma")),
-      mode = selection.mode.orElse(Some("local")),
-      engine = selection.engine.orElse(Some("ollama"))
+      provider = Some(provider),
+      mode = selection.mode.orElse(Some(_default_mode(provider))),
+      engine = selection.engine.orElse(Some(_default_engine(provider)))
     )
+  }
+
+  private def _default_mode(provider: String): String =
+    provider match {
+      case "google" | "openai" => "remote"
+      case _ => "local"
+    }
+
+  private def _default_engine(provider: String): String =
+    provider match {
+      case "google" => "gemini"
+      case "openai" => "openai"
+      case _ => "ollama"
+    }
 
   private def _is_success[A](p: Consequence[A]): Boolean =
     p match {

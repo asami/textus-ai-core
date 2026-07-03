@@ -6,9 +6,10 @@ import io.circe.Json
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{ExtensionPoint, ServiceContract, VariationSelection}
 import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.protocol.Property
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
-import org.simplemodeling.textus.ai.runtime.{ChatService, GenerateService, HttpSupport}
+import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport}
 
 final case class GemmaRuntimeConfig(
   provider: String = "gemma",
@@ -45,37 +46,42 @@ private object GemmaSupport:
       case "remote" => Vector(config.endpoint)
       case _ => Vector(config.endpoint) ++ config.fallbackEndpoint.toVector
 
-final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig) extends GenerateService:
-  private val _client = HttpSupport.client(config.timeoutSeconds)
-
+final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: ExecutionContext) extends GenerateService:
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
+    given ExecutionContext = context
     val body = Json.obj(
       "model" -> Json.fromString(config.model),
       "prompt" -> Json.fromString(req.prompt),
       "stream" -> Json.False
     )
-    _request_with_fallback(GemmaSupport.endpoints(config), "/api/generate", body) { json =>
+    _request_with_fallback(GemmaSupport.endpoints(config), "/api/generate", body, req.properties) { json =>
       json.hcursor.get[String]("response") match
-        case Right(text) => Consequence.success(GenerateResponse(text))
+        case Right(text) => Consequence.success(GenerateResponse(text, Some(config.model)))
         case Left(e) => Consequence.valueInvalid(e.getMessage)
     }
 
   private def _request_with_fallback[A](
     endpoints: Vector[URI],
     path: String,
-    body: Json
-  )(extract: Json => Consequence[A]): Consequence[A] =
+    body: Json,
+    properties: Vector[Property]
+  )(extract: Json => Consequence[A])(using ExecutionContext): Consequence[A] =
     endpoints.toList match
       case Nil => Consequence.serviceUnavailable("Gemma/Ollama request failed")
       case x :: xs =>
-        HttpSupport.post(_client, x, path, body, config.timeoutSeconds).flatMap(extract) recoverWith {
-          case _ => _request_with_fallback(xs.toVector, path, body)(extract)
+        HttpSupport.post(
+          x,
+          path,
+          body,
+          AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, properties),
+          properties = properties
+        ).flatMap(extract) recoverWith {
+          case _ => _request_with_fallback(xs.toVector, path, body, properties)(extract)
         }
 
-final class GemmaOllamaChatService(config: GemmaRuntimeConfig) extends ChatService:
-  private val _client = HttpSupport.client(config.timeoutSeconds)
-
+final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: ExecutionContext) extends ChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
+    given ExecutionContext = context
     val body = Json.obj(
       "model" -> Json.fromString(config.model),
       "messages" -> Json.fromValues(
@@ -88,22 +94,29 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig) extends ChatServi
       ),
       "stream" -> Json.False
     )
-    _request_with_fallback(GemmaSupport.endpoints(config), "/api/chat", body) { json =>
+    _request_with_fallback(GemmaSupport.endpoints(config), "/api/chat", body, req.properties) { json =>
       json.hcursor.downField("message").get[String]("content") match
-        case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text)))
+        case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(config.model)))
         case Left(e) => Consequence.valueInvalid(e.getMessage)
     }
 
   private def _request_with_fallback[A](
     endpoints: Vector[URI],
     path: String,
-    body: Json
-  )(extract: Json => Consequence[A]): Consequence[A] =
+    body: Json,
+    properties: Vector[Property]
+  )(extract: Json => Consequence[A])(using ExecutionContext): Consequence[A] =
     endpoints.toList match
       case Nil => Consequence.serviceUnavailable("Gemma/Ollama request failed")
       case x :: xs =>
-        HttpSupport.post(_client, x, path, body, config.timeoutSeconds).flatMap(extract) recoverWith {
-          case _ => _request_with_fallback(xs.toVector, path, body)(extract)
+        HttpSupport.post(
+          x,
+          path,
+          body,
+          AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, properties),
+          properties = properties
+        ).flatMap(extract) recoverWith {
+          case _ => _request_with_fallback(xs.toVector, path, body, properties)(extract)
         }
 
 final class GemmaGenerateExtensionPoint(config: GemmaRuntimeConfig)
@@ -114,7 +127,7 @@ final class GemmaGenerateExtensionPoint(config: GemmaRuntimeConfig)
       variation.engine.contains("ollama")
 
   override def provide(contract: ServiceContract[GenerateService], variation: VariationSelection)(using ExecutionContext): Consequence[GenerateService] =
-    Consequence.success(new GemmaOllamaGenerateService(config))
+    Consequence.success(new GemmaOllamaGenerateService(config, summon[ExecutionContext]))
 
 final class GemmaChatExtensionPoint(config: GemmaRuntimeConfig)
   extends ExtensionPoint[ChatService]:
@@ -124,4 +137,4 @@ final class GemmaChatExtensionPoint(config: GemmaRuntimeConfig)
       variation.engine.contains("ollama")
 
   override def provide(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Consequence[ChatService] =
-    Consequence.success(new GemmaOllamaChatService(config))
+    Consequence.success(new GemmaOllamaChatService(config, summon[ExecutionContext]))
