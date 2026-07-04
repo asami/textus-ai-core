@@ -49,14 +49,15 @@ private object GemmaSupport:
 final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: ExecutionContext) extends GenerateService:
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
     given ExecutionContext = context
+    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
     val body = Json.obj(
-      "model" -> Json.fromString(config.model),
+      "model" -> Json.fromString(model),
       "prompt" -> Json.fromString(req.prompt),
       "stream" -> Json.False
     )
     _request_with_fallback(GemmaSupport.endpoints(config), "/api/generate", body, req.properties) { json =>
       json.hcursor.get[String]("response") match
-        case Right(text) => Consequence.success(GenerateResponse(text, Some(config.model)))
+        case Right(text) => Consequence.success(GenerateResponse(text, Some(model)))
         case Left(e) => Consequence.valueInvalid(e.getMessage)
     }
 
@@ -82,8 +83,9 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
 final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: ExecutionContext) extends ChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
     given ExecutionContext = context
+    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
     val body = Json.obj(
-      "model" -> Json.fromString(config.model),
+      "model" -> Json.fromString(model),
       "messages" -> Json.fromValues(
         req.messages.map { message =>
           Json.obj(
@@ -96,7 +98,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
     )
     _request_with_fallback(GemmaSupport.endpoints(config), "/api/chat", body, req.properties) { json =>
       json.hcursor.downField("message").get[String]("content") match
-        case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(config.model)))
+        case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(model)))
         case Left(e) => Consequence.valueInvalid(e.getMessage)
     }
 

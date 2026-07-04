@@ -10,6 +10,29 @@ import org.goldenport.cncf.unitofwork.UnitOfWorkOp
 import org.goldenport.protocol.Property
 
 private[textus] object AiRequestProperties:
+  def model(
+    properties: Vector[Property],
+    provider: String
+  ): Option[String] = {
+    val normalized = provider.trim.toLowerCase(java.util.Locale.ROOT)
+    _property_string(properties, Vector(
+      s"ai.$normalized.model",
+      s"textus.ai.$normalized.model",
+      s"cncf.ai.$normalized.model",
+      "ai.model",
+      "textus.ai.model",
+      "cncf.ai.model",
+      "model"
+    ))
+  }
+
+  def effectiveModel(
+    configured: String,
+    properties: Vector[Property],
+    provider: String
+  ): String =
+    model(properties, provider).getOrElse(configured)
+
   def timeoutSeconds(
     properties: Vector[Property]
   ): Option[Long] =

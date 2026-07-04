@@ -8,11 +8,11 @@ import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.textus.ai.provider.gemma.GemmaConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
-import org.simplemodeling.textus.ai.runtime.{AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
+import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul.  3, 2026
+ * @version Jul.  5, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -37,11 +37,12 @@ object ComponentFactory:
     val openai = configuration.flatMap(OpenAiConfig.fromConfiguration).orElse(OpenAiConfig.fromEnvironment())
     val google = configuration.flatMap(GoogleConfig.fromConfiguration).orElse(GoogleConfig.fromEnvironment())
     val defaultselection = _default_selection(configuration, openai.nonEmpty, google.nonEmpty)
+    val profiles = AiProfileConfig.fromConfiguration(configuration)
     AiRuntimeGenerateBinding.register(component, gemma, openai, google)
     AiRuntimeChatBinding.register(component, gemma, openai, google)
     component.withPort(
       Component.Port
-        .of(new TextusAiRunnerProvider(component, defaultselection))
+        .of(new TextusAiRunnerProvider(component, defaultselection, profiles))
         .orElse(component.port)
     )
 
@@ -101,6 +102,6 @@ object ComponentFactory:
   private def _default_engine(provider: String): String =
     provider match {
       case "google" => "gemini"
-      case "openai" => "openai"
+      case "openai" => "gpt"
       case _ => "ollama"
     }

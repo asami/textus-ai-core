@@ -21,7 +21,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul.  4, 2026
+ * @version Jul.  5, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -109,6 +109,30 @@ final class TextusAiRunnerSpec
       generated.toOption.get.text shouldBe "generated:google:hello"
     }
 
+    "use GPT engine default when a request switches to the OpenAI provider" in {
+      Given("an AI runner bound with the default local Gemma selection and an OpenAI runtime is available")
+      given ExecutionContext = ExecutionContext.create()
+      val provider = new TextusAiRunnerProvider(_component())
+      val runner = provider
+        .provide(
+          SpiContract("ai-runner", classOf[AiRunner]),
+          SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))
+        )
+        .toOption
+        .get
+
+      When("a generate request asks only for the OpenAI provider")
+      val generated = runner.generate(
+        AiGenerateRequest(
+          prompt = "hello",
+          requirement = AiRunnerRequirement(provider = Some("openai"))
+        )
+      )
+
+      Then("the runner uses the canonical GPT engine for the OpenAI runtime")
+      generated.toOption.get.text shouldBe "generated:openai:hello"
+    }
+
     "use configured default selection when the SPI socket does not request a provider" in {
       Given("an AI runner provider configured to default to Google")
       given ExecutionContext = ExecutionContext.create()
@@ -152,6 +176,107 @@ final class TextusAiRunnerSpec
 
       Then("the property is preserved for provider-side execution")
       generated.toOption.get.text shouldBe "timeout:180"
+    }
+
+    "propagate request purpose and model to provider-side execution" in {
+      Given("an AI runner created from existing Textus AI bindings")
+      given ExecutionContext = ExecutionContext.create()
+      val runner = new TextusAiRunnerProvider(_component())
+        .provide(
+          SpiContract("ai-runner", classOf[AiRunner]),
+          SpiSelection(mode = Some("remote"), engine = Some("http"))
+        )
+        .toOption
+        .get
+
+      When("a generate request carries a purpose-specific model requirement")
+      val generated = runner.generate(
+        AiGenerateRequest(
+          prompt = "inspect-ai-selection",
+          requirement = AiRunnerRequirement(
+            purpose = Some("linear-feature.worker.anchor-plan"),
+            model = Some("gpt-4.1-mini")
+          )
+        )
+      )
+
+      Then("the requirement is visible to the concrete provider request")
+      generated.toOption.get.text shouldBe "purpose:linear-feature.worker.anchor-plan;model:gpt-4.1-mini"
+    }
+
+    "resolve purpose-specific model profiles from CNCF configuration" in {
+      Given("an AI runner configured with a purpose profile and a model profile")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.linear-feature.worker.anchor-plan.model-profile" -> ConfigurationValue.StringValue("linear-worker"),
+          "textus.ai.model-profiles.linear-worker.provider" -> ConfigurationValue.StringValue("google"),
+          "textus.ai.model-profiles.linear-worker.model" -> ConfigurationValue.StringValue("gemini-worker"),
+          "textus.ai.model-profiles.linear-worker.role" -> ConfigurationValue.StringValue("worker"),
+          "textus.ai.model-profiles.linear-worker.quality" -> ConfigurationValue.StringValue("standard"),
+          "textus.ai.model-profiles.linear-worker.cost" -> ConfigurationValue.StringValue("low"),
+          "textus.ai.model-profiles.linear-worker.latency" -> ConfigurationValue.StringValue("low")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("a generate request specifies only the purpose")
+      val generated = runner.generate(
+        AiGenerateRequest(
+          prompt = "inspect-ai-selection",
+          requirement = AiRunnerRequirement(
+            purpose = Some("linear-feature.worker.anchor-plan")
+          )
+        )
+      )
+
+      Then("the configured profile chooses the provider and model for that purpose")
+      generated.toOption.get.text shouldBe "purpose:linear-feature.worker.anchor-plan;model:gemini-worker"
+      generated.toOption.get.model shouldBe Some("google")
+    }
+
+    "prefer direct request model over a configured purpose profile" in {
+      Given("an AI runner configured with a purpose model profile")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.linear-feature.judge.ambiguity-resolution.model-profile" -> ConfigurationValue.StringValue("linear-judge"),
+          "textus.ai.model-profiles.linear-judge.provider" -> ConfigurationValue.StringValue("google"),
+          "textus.ai.model-profiles.linear-judge.model" -> ConfigurationValue.StringValue("gemini-judge")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("a generate request explicitly specifies a model")
+      val generated = runner.generate(
+        AiGenerateRequest(
+          prompt = "inspect-ai-selection",
+          requirement = AiRunnerRequirement(
+            purpose = Some("linear-feature.judge.ambiguity-resolution"),
+            model = Some("operator-selected-model")
+          )
+        )
+      )
+
+      Then("the profile may choose the provider but does not override the request model")
+      generated.toOption.get.text shouldBe "purpose:linear-feature.judge.ambiguity-resolution;model:operator-selected-model"
+      generated.toOption.get.model shouldBe Some("google")
     }
 
     "record direct SPI generate calls in the CNCF CallTree" in {
@@ -211,7 +336,7 @@ final class TextusAiRunnerSpec
           "textus.ai.openai.timeout-seconds" -> ConfigurationValue.StringValue("180"),
           "textus.ai.provider" -> ConfigurationValue.StringValue("openai"),
           "textus.ai.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.engine" -> ConfigurationValue.StringValue("openai")
+          "textus.ai.engine" -> ConfigurationValue.StringValue("gpt")
         )),
         ConfigurationTrace.empty
       )
@@ -252,7 +377,8 @@ final class TextusAiRunnerSpec
         spi = Vector(
           _GenerateExtension("local", "local", "ollama"),
           _GenerateExtension("remote", "remote", "http"),
-          _GenerateExtension("google", "remote", "gemini", provider = "google")
+          _GenerateExtension("google", "remote", "gemini", provider = "google"),
+          _GenerateExtension("openai", "remote", "gpt", provider = "openai")
         ),
         variation = new GenerateVariationPoint {}
       )
@@ -265,7 +391,8 @@ final class TextusAiRunnerSpec
         spi = Vector(
           _ChatExtension("local", "local", "ollama"),
           _ChatExtension("remote", "remote", "http"),
-          _ChatExtension("google", "remote", "gemini", provider = "google")
+          _ChatExtension("google", "remote", "gemini", provider = "google"),
+          _ChatExtension("openai", "remote", "gpt", provider = "openai")
         ),
         variation = new GenerateVariationPoint {}
       )
@@ -321,6 +448,11 @@ final class TextusAiRunnerSpec
     def generate(req: GenerateRequest): Consequence[GenerateResponse] =
       if (req.prompt == "inspect-properties")
         Consequence.success(GenerateResponse(s"timeout:${_property(req, "ai.timeout-seconds").getOrElse("none")}", Some(name)))
+      else if (req.prompt == "inspect-ai-selection")
+        Consequence.success(GenerateResponse(
+          s"purpose:${_property(req, "ai.purpose").getOrElse("none")};model:${_property(req, "ai.model").getOrElse("none")}",
+          Some(name)
+        ))
       else
         Consequence.success(GenerateResponse(s"generated:$name:${req.prompt}", Some(name)))
 

@@ -169,27 +169,29 @@ private object GoogleJson:
 final class GoogleGenerateService(config: GoogleRuntimeConfig, context: ExecutionContext) extends GenerateService:
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
     given ExecutionContext = context
+    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "google")
     GoogleRuntimeException.guard("google generate") {
       HttpSupport.post(
         config.endpoint,
-        s"/v1beta/models/${Option(config.model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
+        s"/v1beta/models/${Option(model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
         GoogleJson.generateRequest(req),
         AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
         properties = req.properties
-      ).flatMap(GoogleJson.extractText).map(text => GenerateResponse(text, Some(config.model)))
+      ).flatMap(GoogleJson.extractText).map(text => GenerateResponse(text, Some(model)))
     }
 
 final class GoogleChatService(config: GoogleRuntimeConfig, context: ExecutionContext) extends ChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
     given ExecutionContext = context
+    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "google")
     GoogleRuntimeException.guard("google chat") {
       HttpSupport.post(
         config.endpoint,
-        s"/v1beta/models/${Option(config.model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
+        s"/v1beta/models/${Option(model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
         GoogleJson.chatRequest(req),
         AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
         properties = req.properties
-      ).flatMap(GoogleJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x), Some(config.model)))
+      ).flatMap(GoogleJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x), Some(model)))
     }
 
 private object GoogleRuntimeException:

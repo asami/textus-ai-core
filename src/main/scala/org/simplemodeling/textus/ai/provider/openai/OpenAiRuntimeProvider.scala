@@ -16,7 +16,7 @@ import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, G
 final case class OpenAiRuntimeConfig(
   provider: String = "openai",
   mode: String = "remote",
-  engine: String = "openai",
+  engine: String = "gpt",
   endpoint: URI,
   apiKey: String,
   model: String,
@@ -156,33 +156,35 @@ private object OpenAiJson:
 final class OpenAiGenerateService(config: OpenAiRuntimeConfig, context: ExecutionContext) extends GenerateService:
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
     given ExecutionContext = context
+    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "openai")
     HttpSupport.post(
       config.endpoint,
       "/v1/chat/completions",
-      OpenAiJson.generateRequest(req, config.model),
+      OpenAiJson.generateRequest(req, model),
       AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
       headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
       properties = req.properties
-    ).flatMap(OpenAiJson.extractText).map(text => GenerateResponse(text, Some(config.model)))
+    ).flatMap(OpenAiJson.extractText).map(text => GenerateResponse(text, Some(model)))
 
 final class OpenAiChatService(config: OpenAiRuntimeConfig, context: ExecutionContext) extends ChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
     given ExecutionContext = context
+    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "openai")
     HttpSupport.post(
       config.endpoint,
       "/v1/chat/completions",
-      OpenAiJson.chatRequest(req, config.model),
+      OpenAiJson.chatRequest(req, model),
       AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
       headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
       properties = req.properties
-    ).flatMap(OpenAiJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x), Some(config.model)))
+    ).flatMap(OpenAiJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x), Some(model)))
 
 final class OpenAiGenerateExtensionPoint(config: OpenAiRuntimeConfig)
   extends ExtensionPoint[GenerateService]:
   override def supports(contract: ServiceContract[GenerateService], variation: VariationSelection)(using ExecutionContext): Boolean =
     contract.name == "generate-service" &&
       variation.provider.contains("openai") &&
-      variation.engine.contains("openai")
+      variation.engine.contains("gpt")
 
   override def provide(contract: ServiceContract[GenerateService], variation: VariationSelection)(using ExecutionContext): Consequence[GenerateService] =
     Consequence.success(new OpenAiGenerateService(config, summon[ExecutionContext]))
@@ -192,7 +194,7 @@ final class OpenAiChatExtensionPoint(config: OpenAiRuntimeConfig)
   override def supports(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Boolean =
     contract.name == "chat-service" &&
       variation.provider.contains("openai") &&
-      variation.engine.contains("openai")
+      variation.engine.contains("gpt")
 
   override def provide(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Consequence[ChatService] =
     Consequence.success(new OpenAiChatService(config, summon[ExecutionContext]))

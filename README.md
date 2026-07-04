@@ -71,8 +71,43 @@ textus:
   ai:
     provider: openai
     mode: remote
-    engine: openai
+    engine: gpt
+
+    model-profiles:
+      linear-worker:
+        provider: openai
+        model: gpt-4.1-mini
+        role: worker
+        quality: standard
+        cost: low
+        latency: low
+      linear-judge:
+        provider: openai
+        model: gpt-5.5
+        role: judge
+        quality: high
+        cost: high
+        latency: high
+
+    purposes:
+      linear-feature:
+        worker:
+          anchor-plan:
+            model-profile: linear-worker
+          route-validation:
+            model-profile: linear-worker
+          osm-route-validation:
+            model-profile: linear-worker
+        judge:
+          ambiguity-resolution:
+            model-profile: linear-judge
 ```
+
+`purposes` lets application components pass `AiRunnerRequirement.purpose`
+without hard-coding a concrete model. Direct request-level provider/model
+requirements still win over configured profiles. The performance fields
+(`role`, `quality`, `cost`, and `latency`) are operator metadata in this slice;
+they document selection intent and prepare later automatic escalation policies.
 
 `textus-ai-runtime` is intended to behave as a CNCF AI runtime first, so the
 same component can be used as an implementation artifact and as a CLI command.
