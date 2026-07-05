@@ -2,9 +2,9 @@ import org.goldenport.cozy.CozyPlugin.autoImport._
 import sbt.Keys.*
 
 ThisBuild / organization := "org.textus"
-ThisBuild / version := "0.1.1-SNAPSHOT"
+ThisBuild / version := "0.1.1"
 
-val cncfVersion = "0.4.13-SNAPSHOT"
+val cncfVersion = "0.4.13"
 
 lazy val root = (project in file("."))
   .enablePlugins(org.goldenport.cozy.CozyPlugin)

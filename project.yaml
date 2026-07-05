@@ -8,7 +8,7 @@ project:
     name: "textus-ai-runtime"
     className: "TextusAi"
     displayName: "Textus AI Runtime"
-    version: "0.1.1-SNAPSHOT"
+    version: "0.1.1"
 
 publication:
   source_manifest:
@@ -19,10 +19,10 @@ packaging:
   car:
     runtime:
       cncf:
-        minimum: "0.4.13-SNAPSHOT"
+        minimum: "0.4.13"
         excluded: []
         tested:
-          - "0.4.13-SNAPSHOT"
+          - "0.4.13"
 
 warehouse:
   repository_artifacts:
