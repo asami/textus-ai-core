@@ -8,6 +8,7 @@ import org.goldenport.Consequence
 import org.goldenport.cncf.component.{ExtensionPoint, ServiceContract, VariationSelection}
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
@@ -123,6 +124,38 @@ private object GoogleJson:
   def extractText(json: Json): Consequence[String] =
     _string_at(json.hcursor, List("candidates", "0", "content", "parts", "0", "text"))
 
+  def interactionGenerateRequest(request: GenerateRequest, model: String): Json =
+    _interaction_request(model, Json.fromString(_safe_string(request.prompt)), request.properties)
+
+  def interactionChatRequest(request: ChatRequest, model: String): Json =
+    val input = Json.fromValues(
+      request.messages.map { message =>
+        Json.obj(
+          "role" -> Json.fromString(_role(message.role)),
+          "content" -> Json.fromString(_safe_string(message.content))
+        )
+      }
+    )
+    _interaction_request(model, input, request.properties)
+
+  def extractInteractionText(json: Json): Consequence[String] =
+    json.hcursor.get[String]("output_text") match
+      case Right(s) => Consequence.success(s)
+      case Left(_) =>
+        _string_at(json.hcursor, List("steps", "0", "content", "0", "text"))
+
+  def interactionMetadata(json: Json, properties: Vector[org.goldenport.protocol.Property]): Map[String, String] =
+    val tools = AiRequestProperties.tools(properties)
+    val steps = json.hcursor.downField("steps").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    Map(
+      "ai.tools" -> tools.map(_.id).mkString(","),
+      "ai.provider_tools" -> _provider_tools(tools).map(_._1).mkString(","),
+      "google.google_search_calls" -> _count_steps(steps, "google_search_call").toString,
+      "google.google_search_results" -> _count_steps(steps, "google_search_result").toString,
+      "google.url_context_calls" -> _count_steps(steps, "url_context_call").toString,
+      "google.url_citations" -> _count_annotations(steps, "url_citation").toString
+    )
+
   private def _generation_config(
     temperature: Option[Double],
     maxTokens: Option[Int]
@@ -149,6 +182,34 @@ private object GoogleJson:
     case MessageRole.User => "user"
     case MessageRole.Assistant => "model"
 
+  private def _interaction_request(
+    model: String,
+    input: Json,
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Json =
+    Json.obj(
+      "model" -> Json.fromString(model),
+      "input" -> input,
+      "tools" -> Json.fromValues(_provider_tools(AiRequestProperties.tools(properties)).map(_._2))
+    )
+
+  private def _provider_tools(tools: Vector[AiTool]): Vector[(String, Json)] =
+    tools.distinct.flatMap {
+      case AiTool.UrlContext => Some("url_context" -> Json.obj("type" -> Json.fromString("url_context")))
+      case AiTool.WebSearch => Some("google_search" -> Json.obj("type" -> Json.fromString("google_search")))
+      case AiTool.Unknown(_) => None
+    }
+
+  private def _count_steps(steps: Vector[Json], kind: String): Int =
+    steps.count(_.hcursor.get[String]("type").toOption.contains(kind))
+
+  private def _count_annotations(steps: Vector[Json], kind: String): Int =
+    steps.flatMap { step =>
+      step.hcursor.downField("content").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    }.flatMap { content =>
+      content.hcursor.downField("annotations").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    }.count(_.hcursor.get[String]("type").toOption.contains(kind))
+
   private def _string_at(cursor: HCursor, path: List[String]): Consequence[String] =
     path.foldLeft(Option(cursor: ACursor)) { (z, key) =>
       z.map { c =>
@@ -171,13 +232,29 @@ final class GoogleGenerateService(config: GoogleRuntimeConfig, context: Executio
     given ExecutionContext = context
     val model = AiRequestProperties.effectiveModel(config.model, req.properties, "google")
     GoogleRuntimeException.guard("google generate") {
-      HttpSupport.post(
-        config.endpoint,
-        s"/v1beta/models/${Option(model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
-        GoogleJson.generateRequest(req),
-        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
-        properties = req.properties
-      ).flatMap(GoogleJson.extractText).map(text => GenerateResponse(text, Some(model)))
+      AiRequestProperties.validateTools(req.properties).flatMap { tools =>
+      if (tools.isEmpty)
+        HttpSupport.post(
+          config.endpoint,
+          s"/v1beta/models/${Option(model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
+          GoogleJson.generateRequest(req),
+          AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+          properties = req.properties
+        ).flatMap(GoogleJson.extractText).map(text => GenerateResponse(text, Some(model)))
+      else
+        HttpSupport.post(
+          config.endpoint,
+          "/v1beta/interactions",
+          GoogleJson.interactionGenerateRequest(req, model),
+          AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+          headers = Vector("x-goog-api-key" -> Option(config.apiKey).getOrElse("")),
+          properties = req.properties
+        ).flatMap { json =>
+          GoogleJson.extractInteractionText(json).map { text =>
+            GenerateResponse(text, Some(model), GoogleJson.interactionMetadata(json, req.properties))
+          }
+        }
+      }
     }
 
 final class GoogleChatService(config: GoogleRuntimeConfig, context: ExecutionContext) extends ChatService:
@@ -185,13 +262,29 @@ final class GoogleChatService(config: GoogleRuntimeConfig, context: ExecutionCon
     given ExecutionContext = context
     val model = AiRequestProperties.effectiveModel(config.model, req.properties, "google")
     GoogleRuntimeException.guard("google chat") {
-      HttpSupport.post(
-        config.endpoint,
-        s"/v1beta/models/${Option(model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
-        GoogleJson.chatRequest(req),
-        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
-        properties = req.properties
-      ).flatMap(GoogleJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x), Some(model)))
+      AiRequestProperties.validateTools(req.properties).flatMap { tools =>
+      if (tools.isEmpty)
+        HttpSupport.post(
+          config.endpoint,
+          s"/v1beta/models/${Option(model).getOrElse("")}:generateContent?key=${Option(config.apiKey).getOrElse("")}",
+          GoogleJson.chatRequest(req),
+          AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+          properties = req.properties
+        ).flatMap(GoogleJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x), Some(model)))
+      else
+        HttpSupport.post(
+          config.endpoint,
+          "/v1beta/interactions",
+          GoogleJson.interactionChatRequest(req, model),
+          AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+          headers = Vector("x-goog-api-key" -> Option(config.apiKey).getOrElse("")),
+          properties = req.properties
+        ).flatMap { json =>
+          GoogleJson.extractInteractionText(json).map { text =>
+            ChatResponse(Message(MessageRole.Assistant, text), Some(model), GoogleJson.interactionMetadata(json, req.properties))
+          }
+        }
+      }
     }
 
 private object GoogleRuntimeException:

@@ -17,7 +17,8 @@ final case class GenerateRequest(
 
 final case class GenerateResponse(
   text: String,
-  model: Option[String] = None
+  model: Option[String] = None,
+  metadata: Map[String, String] = Map.empty
 )
 
 final case class ChatRequest(
@@ -29,7 +30,8 @@ final case class ChatRequest(
 
 final case class ChatResponse(
   message: Message,
-  model: Option[String] = None
+  model: Option[String] = None,
+  metadata: Map[String, String] = Map.empty
 )
 
 trait LlmAdapter:

@@ -4,7 +4,7 @@ import sbt.Keys.*
 ThisBuild / organization := "org.textus"
 ThisBuild / version := "0.2.0-SNAPSHOT"
 
-val cncfVersion = "0.4.13"
+val cncfVersion = "0.5.0-SNAPSHOT"
 
 lazy val root = (project in file("."))
   .enablePlugins(org.goldenport.cozy.CozyPlugin)

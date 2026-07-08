@@ -17,7 +17,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul.  5, 2026
+ * @version Jul.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -190,6 +190,7 @@ final class TextusAiRunner(
       "engine" -> effective.engine.getOrElse(""),
       "purpose" -> requirement.purpose.getOrElse(""),
       "requested_model" -> requirement.model.getOrElse(""),
+      "ai_tools" -> requirement.tools.map(_.id).mkString(","),
       "temperature" -> temperature.map(_.toString).getOrElse(""),
       "max_tokens" -> maxtokens.map(_.toString).getOrElse(""),
       "prompt_confidentiality" -> promptconfidentiality,
@@ -267,18 +268,22 @@ final class TextusAiRunner(
   ): Vector[Property] = {
     val modelproperty = requirement.model.map(value => Property("ai.model", value, None))
     val purposeproperty = requirement.purpose.map(value => Property("ai.purpose", value, None))
-    properties ++ modelproperty ++ purposeproperty
+    val toolsproperty =
+      Option.when(requirement.tools.nonEmpty)(
+        Property("ai.tools", requirement.tools.map(_.id).mkString(","), None)
+      )
+    properties ++ modelproperty ++ purposeproperty ++ toolsproperty
   }
 
   private def _to_ai_generate_response(
     response: GenerateResponse
   ): AiGenerateResponse =
-    AiGenerateResponse(response.text, _effective_model(response.model))
+    AiGenerateResponse(response.text, _effective_model(response.model), response.metadata)
 
   private def _to_ai_chat_response(
     response: ChatResponse
   ): AiChatResponse =
-    AiChatResponse(_to_ai_message(response.message), _effective_model(response.model))
+    AiChatResponse(_to_ai_message(response.message), _effective_model(response.model), response.metadata)
 
   private def _effective_model(
     model: Option[String]

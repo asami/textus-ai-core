@@ -49,17 +49,20 @@ private object GemmaSupport:
 final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: ExecutionContext) extends GenerateService:
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
     given ExecutionContext = context
-    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
-    val body = Json.obj(
-      "model" -> Json.fromString(model),
-      "prompt" -> Json.fromString(req.prompt),
-      "stream" -> Json.False
-    )
-    _request_with_fallback(GemmaSupport.endpoints(config), "/api/generate", body, req.properties) { json =>
-      json.hcursor.get[String]("response") match
-        case Right(text) => Consequence.success(GenerateResponse(text, Some(model)))
-        case Left(e) => Consequence.valueInvalid(e.getMessage)
-    }
+    for
+      _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
+      model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
+      body = Json.obj(
+        "model" -> Json.fromString(model),
+        "prompt" -> Json.fromString(req.prompt),
+        "stream" -> Json.False
+      )
+      response <- _request_with_fallback(GemmaSupport.endpoints(config), "/api/generate", body, req.properties) { json =>
+        json.hcursor.get[String]("response") match
+          case Right(text) => Consequence.success(GenerateResponse(text, Some(model)))
+          case Left(e) => Consequence.valueInvalid(e.getMessage)
+      }
+    yield response
 
   private def _request_with_fallback[A](
     endpoints: Vector[URI],
@@ -83,24 +86,27 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
 final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: ExecutionContext) extends ChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
     given ExecutionContext = context
-    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
-    val body = Json.obj(
-      "model" -> Json.fromString(model),
-      "messages" -> Json.fromValues(
-        req.messages.map { message =>
-          Json.obj(
-            "role" -> Json.fromString(message.role.toString.toLowerCase),
-            "content" -> Json.fromString(message.content)
-          )
-        }
-      ),
-      "stream" -> Json.False
-    )
-    _request_with_fallback(GemmaSupport.endpoints(config), "/api/chat", body, req.properties) { json =>
-      json.hcursor.downField("message").get[String]("content") match
-        case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(model)))
-        case Left(e) => Consequence.valueInvalid(e.getMessage)
-    }
+    for
+      _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
+      model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
+      body = Json.obj(
+        "model" -> Json.fromString(model),
+        "messages" -> Json.fromValues(
+          req.messages.map { message =>
+            Json.obj(
+              "role" -> Json.fromString(message.role.toString.toLowerCase),
+              "content" -> Json.fromString(message.content)
+            )
+          }
+        ),
+        "stream" -> Json.False
+      )
+      response <- _request_with_fallback(GemmaSupport.endpoints(config), "/api/chat", body, req.properties) { json =>
+        json.hcursor.downField("message").get[String]("content") match
+          case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(model)))
+          case Left(e) => Consequence.valueInvalid(e.getMessage)
+      }
+    yield response
 
   private def _request_with_fallback[A](
     endpoints: Vector[URI],

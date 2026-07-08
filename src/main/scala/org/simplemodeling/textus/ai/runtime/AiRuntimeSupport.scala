@@ -6,6 +6,7 @@ import io.circe.Json
 import io.circe.parser.parse
 import org.goldenport.Consequence
 import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.cncf.unitofwork.UnitOfWorkOp
 import org.goldenport.protocol.Property
 
@@ -53,6 +54,62 @@ private[textus] object AiRequestProperties:
     properties: Vector[Property]
   ): Long =
     timeoutSeconds(properties).getOrElse(configured)
+
+  def string(
+    properties: Vector[Property],
+    names: Vector[String]
+  ): Option[String] =
+    _property_string(properties, names)
+
+  def boolean(
+    properties: Vector[Property],
+    names: Vector[String]
+  ): Option[Boolean] =
+    _property_string(properties, names).flatMap { value =>
+      value.toLowerCase(java.util.Locale.ROOT) match
+        case "true" | "yes" | "on" | "1" => Some(true)
+        case "false" | "no" | "off" | "0" => Some(false)
+        case _ => None
+    }
+
+  def tools(
+    properties: Vector[Property]
+  ): Vector[AiTool] =
+    _tool_parse_result(properties).map(_.tools).getOrElse(Vector.empty)
+
+  def validateTools(
+    properties: Vector[Property]
+  ): Consequence[Vector[AiTool]] =
+    _tool_parse_result(properties) match
+      case Some(result) if result.unknown.nonEmpty =>
+        Consequence.configurationInvalid(s"Unknown AI tools: ${result.unknown.mkString(",")}")
+      case Some(result) =>
+        Consequence.success(result.tools)
+      case None =>
+        Consequence.success(Vector.empty)
+
+  private def _tool_parse_result(
+    properties: Vector[Property]
+  ): Option[AiTool.ParseResult] =
+    _property_string(properties, Vector(
+      "ai.tools",
+      "textus.ai.tools",
+      "cncf.ai.tools",
+      "tools"
+    )).map(AiTool.parseResult)
+
+  def requireNoUnsupportedTools(
+    provider: String,
+    properties: Vector[Property]
+  ): Consequence[Unit] =
+    validateTools(properties).flatMap { requested =>
+      if (requested.isEmpty)
+        Consequence.success(())
+      else
+        Consequence.configurationInvalid(
+          s"AI tools are not supported by provider '$provider': ${requested.map(_.id).mkString(",")}"
+        )
+    }
 
   private def _property_string(
     properties: Vector[Property],

@@ -1,12 +1,20 @@
 package org.simplemodeling.textus.ai.runtime
 
+import java.net.URI
+import java.nio.charset.StandardCharsets
+import cats.~>
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{Component, ExtensionPoint, Port}
-import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext}
+import org.goldenport.cncf.http.HttpDriver
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiSelection}
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRunner, AiRunnerRequirement, AiRunnerTracePolicy}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRunner, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
+import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
+import org.goldenport.bag.Bag
+import org.goldenport.datatype.{ContentType, MimeType}
+import org.goldenport.http.{HttpResponse, HttpStatus}
 import org.goldenport.protocol.Property
 import org.goldenport.record.Record
 import org.goldenport.schema.DataConfidentiality
@@ -17,11 +25,14 @@ import org.scalatest.wordspec.AnyWordSpec
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ComponentFactory
 import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
+import org.simplemodeling.textus.ai.provider.gemma.{GemmaOllamaGenerateService, GemmaRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.google.{GoogleGenerateService, GoogleRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.openai.{OpenAiGenerateService, OpenAiRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul.  8, 2026
+ * @version Jul.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -279,6 +290,165 @@ final class TextusAiRunnerSpec
       generated.toOption.get.model shouldBe Some("google")
     }
 
+    "resolve purpose-specific AI tools and pass them to provider requests" in {
+      Given("an AI runner configured with purpose-level tool defaults")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-fetch.provider" -> ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-fetch.tools" -> ConfigurationValue.StringValue("url_context, web_search")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("a generate request specifies only the purpose")
+      val generated = runner.generate(
+        AiGenerateRequest(
+          prompt = "inspect-ai-tools",
+          requirement = AiRunnerRequirement(purpose = Some("artscene-exhibition-fetch"))
+        )
+      )
+
+      Then("the configured tools are visible to the concrete provider request")
+      generated.toOption.get.text shouldBe "tools:url_context,web_search"
+    }
+
+    "prefer direct request tools over configured purpose tools" in {
+      Given("an AI runner configured with purpose-level tool defaults")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.tool-defaults.provider" -> ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.tool-defaults.tools" -> ConfigurationValue.StringValue("url_context, web_search")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("a generate request explicitly specifies one tool")
+      val generated = runner.generate(
+        AiGenerateRequest(
+          prompt = "inspect-ai-tools",
+          requirement = AiRunnerRequirement(
+            purpose = Some("tool-defaults"),
+            tools = Vector(AiTool.UrlContext)
+          )
+        )
+      )
+
+      Then("the request-level tool set is used")
+      generated.toOption.get.text shouldBe "tools:url_context"
+    }
+
+    "send Gemini tool requests through the Interactions API" in {
+      Given("a Google provider service with a fake HTTP driver")
+      val driver = new _FakeHttpDriver(
+        """{"output_text":"grounded","steps":[{"type":"google_search_call"},{"type":"model_output","content":[{"type":"text","text":"grounded","annotations":[{"type":"url_citation"}]}]}]}"""
+      )
+      given ExecutionContext = _context(driver)
+      val service = new GoogleGenerateService(
+        GoogleRuntimeConfig(
+          endpoint = URI.create("https://generativelanguage.googleapis.com"),
+          apiKey = "test-google-key",
+          model = "gemini-test"
+        ),
+        summon[ExecutionContext]
+      )
+
+      When("a generate request enables URL context and web search")
+      val response = service.generate(
+        GenerateRequest(
+          prompt = "find official page",
+          properties = Vector(Property("ai.tools", "url_context,web_search", None))
+        )
+      ).toOption.get
+
+      Then("the provider maps logical tools to Gemini tool names")
+      driver.calls.head should include ("/v1beta/interactions")
+      driver.headers.get("x-goog-api-key") shouldBe Some("test-google-key")
+      driver.body.value should include (""""type":"url_context"""")
+      driver.body.value should include (""""type":"google_search"""")
+      response.metadata("ai.provider_tools") shouldBe "url_context,google_search"
+      response.metadata("google.google_search_calls") shouldBe "1"
+      response.metadata("google.url_citations") shouldBe "1"
+    }
+
+    "send OpenAI tool requests through the Responses API" in {
+      Given("an OpenAI provider service with a fake HTTP driver")
+      val driver = new _FakeHttpDriver(
+        """{"id":"resp_test","output_text":"grounded","output":[{"type":"web_search_call"}]}"""
+      )
+      given ExecutionContext = _context(driver)
+      val service = new OpenAiGenerateService(
+        OpenAiRuntimeConfig(
+          endpoint = URI.create("https://api.openai.com"),
+          apiKey = "test-openai-key",
+          model = "gpt-test"
+        ),
+        summon[ExecutionContext]
+      )
+
+      When("a generate request enables URL context through the provider-neutral tool contract")
+      val response = service.generate(
+        GenerateRequest(
+          prompt = "find official page",
+          properties = Vector(
+            Property("ai.tools", "url_context", None),
+            Property("ai.openai.web_search.search_context_size", "low", None)
+          )
+        )
+      ).toOption.get
+
+      Then("the provider maps the logical tool to OpenAI web search")
+      driver.calls.head should include ("/v1/responses")
+      driver.headers.get("Authorization") shouldBe Some("Bearer test-openai-key")
+      driver.body.value should include (""""type":"web_search"""")
+      driver.body.value should include (""""search_context_size":"low"""")
+      response.metadata("ai.provider_tools") shouldBe "web_search"
+      response.metadata("openai.web_search_calls") shouldBe "1"
+      response.metadata("openai.response_id") shouldBe "resp_test"
+    }
+
+    "reject unknown AI tool names before provider execution" in {
+      Given("a local provider service and a request with an unknown tool")
+      given ExecutionContext = ExecutionContext.create()
+      val service = new GemmaOllamaGenerateService(
+        GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")),
+        summon[ExecutionContext]
+      )
+
+      When("the generate request is executed")
+      val result = service.generate(
+        GenerateRequest(
+          prompt = "hello",
+          properties = Vector(Property("ai.tools", "vendor_special", None))
+        )
+      )
+
+      Then("the request fails before the provider silently ignores the tool")
+      result shouldBe a[Consequence.Failure[_]]
+      result match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("Unknown AI tools: vendor_special")
+        case _ =>
+          fail("unknown AI tool request should fail")
+    }
+
     "record direct SPI generate calls in the CNCF CallTree" in {
       Given("an AI runner invoked directly through the SPI surface")
       given ExecutionContext =
@@ -458,6 +628,11 @@ final class TextusAiRunnerSpec
           s"purpose:${_property(req, "ai.purpose").getOrElse("none")};model:${_property(req, "ai.model").getOrElse("none")}",
           Some(name)
         ))
+      else if (req.prompt == "inspect-ai-tools")
+        Consequence.success(GenerateResponse(
+          s"tools:${_property(req, "ai.tools").getOrElse("none")}",
+          Some(name)
+        ))
       else
         Consequence.success(GenerateResponse(s"generated:$name:${req.prompt}", Some(name)))
 
@@ -481,5 +656,70 @@ final class TextusAiRunnerSpec
         )
       )
     }
+  }
+
+  private final class _FakeHttpDriver(response: String) extends HttpDriver {
+    var calls: Vector[String] = Vector.empty
+    var body: Option[String] = None
+    var headers: Map[String, String] = Map.empty
+
+    override def get(
+      path: String,
+      headers: Map[String, String],
+      properties: Vector[Property] = Vector.empty
+    ): HttpResponse =
+      _http_response(response)
+
+    override def post(
+      path: String,
+      body: Option[String],
+      headers: Map[String, String],
+      properties: Vector[Property] = Vector.empty
+    ): HttpResponse = {
+      calls = calls :+ s"POST $path"
+      this.body = body
+      this.headers = headers
+      _http_response(response)
+    }
+
+    override def put(
+      path: String,
+      body: Option[String],
+      headers: Map[String, String],
+      properties: Vector[Property] = Vector.empty
+    ): HttpResponse =
+      _http_response(response)
+  }
+
+  private def _http_response(body: String): HttpResponse =
+    HttpResponse.Text(
+      HttpStatus.Ok,
+      ContentType(MimeType("application/json"), Some(StandardCharsets.UTF_8)),
+      Bag.text(body, StandardCharsets.UTF_8)
+    )
+
+  private def _context(driver: HttpDriver): ExecutionContext = {
+    val base = ExecutionContext.create()
+    var runtime: RuntimeContext = null
+    lazy val context: ExecutionContext = ExecutionContext.withRuntimeContext(base, runtime)
+    lazy val uow = new UnitOfWork(context)
+    runtime = new RuntimeContext(
+      core = RuntimeContext.core(
+        name = "textus-ai-runtime-spec",
+        parent = None,
+        observabilityContext = base.observability,
+        httpDriverOption = Some(driver)
+      ),
+      unitOfWorkSupplier = () => uow,
+      unitOfWorkInterpreterFn = new (UnitOfWorkOp ~> Consequence) {
+        def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] =
+          new UnitOfWorkInterpreter(uow).interpret(fa)
+      },
+      commitAction = _ => (),
+      abortAction = _ => (),
+      disposeAction = _ => (),
+      token = "textus-ai-runtime-spec"
+    )
+    context
   }
 }

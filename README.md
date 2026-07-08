@@ -109,6 +109,45 @@ requirements still win over configured profiles. The performance fields
 (`role`, `quality`, `cost`, and `latency`) are operator metadata in this slice;
 they document selection intent and prepare later automatic escalation policies.
 
+AI runner tool support is exposed through `AiRunnerRequirement.tools` and
+purpose profiles. Use provider-neutral logical tool names:
+
+- `url_context`
+- `web_search`
+
+Purpose profiles can enable tools without application code becoming provider
+specific:
+
+```yaml
+textus:
+  ai:
+    purposes:
+      artscene-exhibition-fetch:
+        provider: google
+        model: gemini-3.5-flash
+        tools: url_context, web_search
+```
+
+Request-level tools still win over profile tools. The runtime maps logical
+tools to provider-specific APIs:
+
+- Google Gemini: `url_context` and `web_search` use the Gemini Interactions API
+  and map `web_search` to Google's `google_search` tool.
+- OpenAI: `url_context` and `web_search` use the OpenAI Responses API with the
+  `web_search` tool.
+- Gemma/Ollama: tool requests fail explicitly because local Ollama does not
+  provide these provider web tools.
+
+Provider-local parameters should be passed as request `Property` values rather
+than as global system properties. Supported property keys include:
+
+- `ai.tools`: comma-separated logical tools for direct request-level use.
+- `ai.model`: request-level model override.
+- `ai.timeout-seconds`: request-level HTTP timeout.
+- `ai.openai.web_search.search_context_size`: OpenAI web search context size.
+- `ai.openai.web_search.return_token_budget`: OpenAI web search token budget.
+- `ai.openai.reasoning.effort`: OpenAI Responses API reasoning effort.
+
 `textus-ai-runtime` is intended to behave as a CNCF AI runtime first, so the
 same component can be used as an implementation artifact and as a CLI command.
 

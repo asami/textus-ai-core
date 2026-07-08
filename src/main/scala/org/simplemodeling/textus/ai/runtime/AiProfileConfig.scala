@@ -2,7 +2,7 @@ package org.simplemodeling.textus.ai.runtime
 
 import scala.util.Try
 import org.goldenport.cncf.config.RuntimeConfig
-import org.goldenport.cncf.spi.ai.runner.AiRunnerRequirement
+import org.goldenport.cncf.spi.ai.runner.{AiRunnerRequirement, AiTool}
 import org.goldenport.configuration.ResolvedConfiguration
 
 /*
@@ -18,6 +18,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.purposes.<purpose>.model-profile
  * - textus.ai.purposes.<purpose>.provider
  * - textus.ai.purposes.<purpose>.model
+ * - textus.ai.purposes.<purpose>.tools
  * - textus.ai.model-profiles.<profile>.provider
  * - textus.ai.model-profiles.<profile>.model
  * - textus.ai.model-profiles.<profile>.role
@@ -26,7 +27,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.model-profiles.<profile>.latency
  *
  * @since   Jul.  4, 2026
- * @version Jul.  4, 2026
+ * @version Jul.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] final case class AiModelProfile(
@@ -48,7 +49,8 @@ private[textus] final case class AiPurposeProfile(
   role: Option[String] = None,
   quality: Option[String] = None,
   cost: Option[String] = None,
-  latency: Option[String] = None
+  latency: Option[String] = None,
+  tools: Vector[AiTool] = Vector.empty
 ) {
   def applyTo(
     requirement: AiRunnerRequirement,
@@ -56,7 +58,8 @@ private[textus] final case class AiPurposeProfile(
   ): AiRunnerRequirement =
     requirement.copy(
       provider = requirement.provider.orElse(provider).orElse(modelprofile.flatMap(_.provider)),
-      model = requirement.model.orElse(model).orElse(modelprofile.flatMap(_.model))
+      model = requirement.model.orElse(model).orElse(modelprofile.flatMap(_.model)),
+      tools = if (requirement.tools.nonEmpty) requirement.tools else tools
     )
 }
 
@@ -86,7 +89,12 @@ private[textus] final class AiProfileConfig(
         role = _config_string(_purpose_keys(normalized, "role")),
         quality = _config_string(_purpose_keys(normalized, "quality")),
         cost = _config_string(_purpose_keys(normalized, "cost")),
-        latency = _config_string(_purpose_keys(normalized, "latency"))
+        latency = _config_string(_purpose_keys(normalized, "latency")),
+        tools = _config_tools(
+          _purpose_keys(normalized, "tools") ++
+            _purpose_keys(normalized, "enabled-tools") ++
+            _purpose_keys(normalized, "enabledTools")
+        )
       )
     }.filter(profile =>
       profile.modelProfile.nonEmpty ||
@@ -95,7 +103,8 @@ private[textus] final class AiProfileConfig(
         profile.role.nonEmpty ||
         profile.quality.nonEmpty ||
         profile.cost.nonEmpty ||
-        profile.latency.nonEmpty
+        profile.latency.nonEmpty ||
+        profile.tools.nonEmpty
     )
 
   def resolveModelProfile(
@@ -157,6 +166,11 @@ private[textus] final class AiProfileConfig(
         .find(_.trim.nonEmpty)
         .map(_.trim)
     }
+
+  private def _config_tools(
+    keys: Vector[String]
+  ): Vector[AiTool] =
+    _config_string(keys).map(AiTool.parseList).getOrElse(Vector.empty)
 }
 
 private[textus] object AiProfileConfig {
