@@ -2,7 +2,7 @@ import org.goldenport.cozy.CozyPlugin.autoImport._
 import sbt.Keys.*
 
 ThisBuild / organization := "org.textus"
-ThisBuild / version := "0.1.1"
+ThisBuild / version := "0.2.0-SNAPSHOT"
 
 val cncfVersion = "0.4.13"
 
@@ -10,7 +10,7 @@ lazy val root = (project in file("."))
   .enablePlugins(org.goldenport.cozy.CozyPlugin)
   .settings(
     name := "textus-ai-runtime",
-    scalaVersion := "3.3.7",
+    scalaVersion := "3.3.8",
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
     cozyGeneratorBackend := "cozy",
     cozyDelegateProjectDir := Some(file("/Users/asami/src/dev2025/cozy")),
@@ -29,6 +29,7 @@ lazy val root = (project in file("."))
     ),
     cozyManifestMetadata ++= Map(
       "component" -> "textus-ai-runtime",
+      "version" -> version.value,
       "boundedContext" -> "platform",
       "domain" -> "ai-runtime"
     ),

@@ -21,7 +21,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul.  5, 2026
+ * @version Jul.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -318,6 +318,7 @@ final class TextusAiRunnerSpec
 
     "register an AI runner provider on standalone component creation" in {
       Given("a standalone Textus AI component")
+      given ExecutionContext = ExecutionContext.create()
       val component = ComponentFactory.createStandalone()
 
       When("the component port is inspected")
@@ -325,6 +326,10 @@ final class TextusAiRunnerSpec
 
       Then("the CNCF AI runner SPI provider is published")
       provider should not be empty
+      provider.value.supports(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ) shouldBe true
     }
 
     "read OpenAI credentials from CNCF configuration while provider selection stays separate" in {

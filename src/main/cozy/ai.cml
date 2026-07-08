@@ -196,8 +196,8 @@ Shared session state for a conversational LLM exchange.
 | name | type | multiplicity |
 |------|------|--------------|
 | id | entityid | 1 |
-| model | string | 1 |
-| provider | string | ? |
+| model | LlmModel | 1 |
+| provider | LlmProvider | ? |
 
 # COMMAND
 
@@ -254,6 +254,30 @@ Output query for chat completion.
 | message | Message | 1 |
 
 # VALUE
+
+## LlmModel
+
+### DESCRIPTION
+
+Provider model identifier used by an LLM session.
+
+### ATTRIBUTE
+
+| name | type | multiplicity |
+|------|------|--------------|
+| value | string | 1 |
+
+## LlmProvider
+
+### DESCRIPTION
+
+Provider identifier used by an LLM session.
+
+### ATTRIBUTE
+
+| name | type | multiplicity |
+|------|------|--------------|
+| value | string | 1 |
 
 ## Message
 

@@ -12,7 +12,7 @@ import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBindi
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul.  5, 2026
+ * @version Jul.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -38,12 +38,12 @@ object ComponentFactory:
     val google = configuration.flatMap(GoogleConfig.fromConfiguration).orElse(GoogleConfig.fromEnvironment())
     val defaultselection = _default_selection(configuration, openai.nonEmpty, google.nonEmpty)
     val profiles = AiProfileConfig.fromConfiguration(configuration)
-    AiRuntimeGenerateBinding.register(component, gemma, openai, google)
-    AiRuntimeChatBinding.register(component, gemma, openai, google)
-    component.withPort(
+    val withgenerate = AiRuntimeGenerateBinding.register(component, gemma, openai, google)
+    val withchat = AiRuntimeChatBinding.register(withgenerate, gemma, openai, google)
+    withchat.withPort(
       Component.Port
-        .of(new TextusAiRunnerProvider(component, defaultselection, profiles))
-        .orElse(component.port)
+        .of(new TextusAiRunnerProvider(withchat, defaultselection, profiles))
+        .orElse(withchat.port)
     )
 
   private def _default_selection(
