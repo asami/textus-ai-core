@@ -8,11 +8,11 @@ import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.textus.ai.provider.gemma.GemmaConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
-import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
+import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunner, TextusAiRunnerProvider}
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul.  8, 2026
+ * @version Jul.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -40,9 +40,13 @@ object ComponentFactory:
     val profiles = AiProfileConfig.fromConfiguration(configuration)
     val withgenerate = AiRuntimeGenerateBinding.register(component, gemma, openai, google)
     val withchat = AiRuntimeChatBinding.register(withgenerate, gemma, openai, google)
+    val runnerprovider = new TextusAiRunnerProvider(withchat, defaultselection, profiles)
     withchat.withPort(
       Component.Port
-        .of(new TextusAiRunnerProvider(withchat, defaultselection, profiles))
+        .of(
+          runnerprovider,
+          new TextusAiRunner(runnerprovider, defaultselection, profiles)
+        )
         .orElse(withchat.port)
     )
 

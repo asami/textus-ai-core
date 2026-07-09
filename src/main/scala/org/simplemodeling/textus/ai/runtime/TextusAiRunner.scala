@@ -1,11 +1,15 @@
 package org.simplemodeling.textus.ai.runtime
 
+import java.util.Locale
+import io.circe.Json
+import io.circe.parser.parse
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.Component
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.spi.{SpiContract, SpiProvider, SpiSelection}
 import org.goldenport.cncf.spi.ai.runner.*
 import org.goldenport.protocol.Property
+import org.goldenport.record.Record
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
 
@@ -42,6 +46,24 @@ final class TextusAiRunner(
     }
   }
 
+  def generateRecord(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] = {
+    val requirement = _effective_requirement(req.requirement)
+    _with_record_calltree(req, requirement) {
+      for {
+        service <- provider.generateService(_effective_selection(requirement))
+        response <- service.generate(
+          GenerateRequest(
+            prompt = req.prompt,
+            temperature = req.temperature,
+            maxTokens = req.maxTokens,
+            properties = _request_properties(req.properties, requirement)
+          )
+        )
+        normalized <- _normalize_record_response(req, response)
+      } yield normalized
+    }
+  }
+
   def chat(req: AiChatRequest)(using ExecutionContext): Consequence[AiChatResponse] = {
     val requirement = _effective_requirement(req.requirement)
     _with_chat_calltree(req, requirement) {
@@ -56,6 +78,44 @@ final class TextusAiRunner(
           )
         )
       } yield _to_ai_chat_response(response)
+    }
+  }
+
+  private def _with_record_calltree(
+    req: AiRecordRequest,
+    requirement: AiRunnerRequirement
+  )(
+    body: => Consequence[AiRecordResponse]
+  )(using ctx: ExecutionContext): Consequence[AiRecordResponse] = {
+    val calltree = ctx.observability.callTreeContext
+    if (calltree.isEnabled) {
+      calltree.enter(
+        "provider:textus-ai-runner:generate-record",
+        _record_request_calltree_attributes(req, requirement)
+      )
+      try {
+        val result = body
+        result match {
+          case Consequence.Success(response) =>
+            calltree.leave(_record_response_calltree_attributes(response))
+          case Consequence.Failure(conclusion) =>
+            calltree.leave(Map(
+              "outcome" -> "failure",
+              "status" -> conclusion.status.webCode.code.toString,
+              "error" -> conclusion.display
+            ))
+        }
+        result
+      } catch {
+        case e: Throwable =>
+          calltree.leave(Map(
+            "outcome" -> "failure",
+            "error" -> Option(e.getMessage).getOrElse(e.getClass.getName)
+          ))
+          throw e
+      }
+    } else {
+      body
     }
   }
 
@@ -172,6 +232,25 @@ final class TextusAiRunner(
     )
   }
 
+  private def _record_request_calltree_attributes(
+    req: AiRecordRequest,
+    requirement: AiRunnerRequirement
+  ): Map[String, String] =
+    _common_request_calltree_attributes(
+      requirement,
+      req.temperature,
+      req.maxTokens,
+      req.trace.promptConfidentiality.label,
+      req.trace.responseConfidentiality.label,
+      req.metadata
+    ) ++ Map(
+      "operation" -> req.metadata.getOrElse("operation", "generate-record"),
+      "record_schema_required" -> _schema_required(req.schema).mkString(","),
+      "prompt_chars" -> req.prompt.length.toString,
+      "prompt" -> req.trace.calltreePrompt(req.prompt),
+      "prompt_preview" -> _calltree_text_preview(req.trace.calltreePrompt(req.prompt))
+    )
+
   private def _common_request_calltree_attributes(
     requirement: AiRunnerRequirement,
     temperature: Option[Double],
@@ -223,6 +302,16 @@ final class TextusAiRunner(
       "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(responsetext))
     ) ++ response.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
   }
+
+  private def _record_response_calltree_attributes(
+    response: AiRecordResponse
+  ): Map[String, String] =
+    Map(
+      "outcome" -> "success",
+      "model" -> response.model.getOrElse(""),
+      "normalization_mode" -> response.metadata.getOrElse("normalization_mode", ""),
+      "response_preview" -> response.metadata.getOrElse("response_preview", "")
+    ) ++ response.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
 
   private def _calltree_text_preview(text: String): String = {
     val normalized = text.replace("\r\n", "\n")
@@ -284,6 +373,211 @@ final class TextusAiRunner(
     response: ChatResponse
   ): AiChatResponse =
     AiChatResponse(_to_ai_message(response.message), _effective_model(response.model), response.metadata)
+
+  private def _normalize_record_response(
+    req: AiRecordRequest,
+    response: GenerateResponse
+  ): Consequence[AiRecordResponse] =
+    _record_candidates(response.text)
+      .iterator
+      .map { candidate =>
+        parse(candidate.text).map(json => candidate.copy(json = Some(json)))
+      }
+      .collectFirst { case Right(candidate) => candidate } match {
+      case Some(candidate) =>
+        candidate.json match {
+          case Some(json) =>
+            val record = _json_to_record(json)
+            _validate_schema(record, req.schema) match {
+              case Right(()) =>
+                Consequence.success(
+                  AiRecordResponse(
+                    record,
+                    _effective_model(response.model),
+                    response.metadata ++ Map(
+                      "normalization_mode" -> candidate.mode,
+                      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(response.text)).take(600)
+                    )
+                  )
+                )
+              case Left(message) =>
+                Consequence.argumentInvalid(s"AI record schema mismatch: $message")
+            }
+          case None =>
+            Consequence.argumentInvalid("AI record normalization failed unexpectedly.")
+        }
+      case None =>
+        Consequence.argumentInvalid(
+          s"AI record response did not contain usable JSON; response_preview=${_calltree_text_preview(req.trace.calltreeResponse(response.text)).take(600)}"
+        )
+    }
+
+  private final case class _RecordCandidate(
+    mode: String,
+    text: String,
+    json: Option[Json] = None
+  )
+
+  private def _record_candidates(text: String): Vector[_RecordCandidate] =
+    (Vector(_RecordCandidate("strict-json", text)) ++
+      _fenced_record_candidates(text) ++
+      _embedded_record_candidates(text))
+      .map(candidate => candidate.copy(text = candidate.text.trim))
+      .filter(_.text.nonEmpty)
+      .foldLeft(Vector.empty[_RecordCandidate]) { (z, candidate) =>
+        if (z.exists(_.text == candidate.text)) z else z :+ candidate
+      }
+
+  private def _fenced_record_candidates(text: String): Vector[_RecordCandidate] =
+    _fenced_code_block.findAllMatchIn(text).flatMap { m =>
+      val language = Option(m.group(1)).map(_.trim.toLowerCase(Locale.ROOT)).getOrElse("")
+      val body = Option(m.group(2)).getOrElse("").trim
+      if (language == "json" || (language.isEmpty && body.startsWith("{")))
+        Some(_RecordCandidate(if (language == "json") "fenced-json" else "fenced", body))
+      else
+        None
+    }.toVector
+
+  private def _embedded_record_candidates(text: String): Vector[_RecordCandidate] =
+    _balanced_json_objects(text).map(_RecordCandidate("embedded-json", _))
+
+  private val _fenced_code_block =
+    """(?is)```[ \t]*(json)?[ \t]*(?:\r?\n)?(.*?)```""".r
+
+  private def _balanced_json_objects(text: String): Vector[String] = {
+    val results = Vector.newBuilder[String]
+    var start = -1
+    var depth = 0
+    var instring = false
+    var escaped = false
+    var i = 0
+    while (i < text.length) {
+      val c = text.charAt(i)
+      if (instring) {
+        if (escaped)
+          escaped = false
+        else if (c == '\\')
+          escaped = true
+        else if (c == '"')
+          instring = false
+      } else {
+        c match {
+          case '"' =>
+            instring = true
+          case '{' =>
+            if (depth == 0)
+              start = i
+            depth += 1
+          case '}' if depth > 0 =>
+            depth -= 1
+            if (depth == 0 && start >= 0) {
+              results += text.substring(start, i + 1)
+              start = -1
+            }
+          case _ =>
+        }
+      }
+      i += 1
+    }
+    results.result()
+  }
+
+  private def _json_to_record(json: Json): Record =
+    json.asObject
+      .map(obj => Record.dataAuto(obj.toVector.map { case (key, value) => key -> _json_to_value(value) }*))
+      .getOrElse(Record.dataAuto("value" -> _json_to_value(json)))
+
+  private def _json_to_value(json: Json): Any =
+    json.fold(
+      jsonNull = null,
+      jsonBoolean = identity,
+      jsonNumber = n => n.toInt.getOrElse(n.toLong.getOrElse(n.toDouble)),
+      jsonString = identity,
+      jsonArray = _.map(_json_to_value).toVector,
+      jsonObject = obj => Record.dataAuto(obj.toVector.map { case (key, value) => key -> _json_to_value(value) }*)
+    )
+
+  private def _validate_schema(
+    record: Record,
+    schema: Record
+  ): Either[String, Unit] = {
+    val missing = _schema_required(schema).filterNot(field => _has_field(record, field))
+    if (missing.nonEmpty)
+      Left(s"missing required fields: ${missing.mkString(",")}")
+    else
+      _schema_array_specs(schema).flatMap(spec => _array_schema_error(record, spec)).headOption match {
+        case Some(message) => Left(message)
+        case None => Right(())
+      }
+  }
+
+  private final case class _ArraySchema(
+    name: String,
+    required: Vector[String]
+  )
+
+  private def _schema_array_specs(schema: Record): Vector[_ArraySchema] =
+    _records(schema.getAny("arrays"))
+      .flatMap { record =>
+        _string(record.getAny("name"))
+          .orElse(_string(record.getAny("field")))
+          .map(name => _ArraySchema(name, _schema_required(record)))
+      }
+
+  private def _array_schema_error(
+    record: Record,
+    spec: _ArraySchema
+  ): Option[String] =
+    record.getAny(spec.name) match {
+      case Some(values) =>
+        _records(values).zipWithIndex.collectFirst {
+          case (item, index) if spec.required.exists(field => !_has_field(item, field)) =>
+            val missing = spec.required.filterNot(field => _has_field(item, field))
+            s"${spec.name}[$index] missing required fields: ${missing.mkString(",")}"
+        }
+      case None =>
+        Some(s"missing array field: ${spec.name}")
+    }
+
+  private def _schema_required(schema: Record): Vector[String] =
+    _strings(schema.getAny("required"))
+
+  private def _has_field(
+    record: Record,
+    field: String
+  ): Boolean =
+    record.getAny(field).exists {
+      case null => false
+      case s: String => s.trim.nonEmpty
+      case xs: Seq[?] => xs.nonEmpty
+      case _ => true
+    }
+
+  private def _records(value: Any): Vector[Record] =
+    value match {
+      case null => Vector.empty
+      case r: Record => Vector(r)
+      case Some(v) => _records(v)
+      case xs: Vector[?] => xs.flatMap(_records)
+      case xs: Seq[?] => xs.toVector.flatMap(_records)
+      case xs: Array[?] => xs.toVector.flatMap(_records)
+      case _ => Vector.empty
+    }
+
+  private def _strings(value: Any): Vector[String] =
+    value match {
+      case null => Vector.empty
+      case r: Record => r.getAny("value").toVector.flatMap(_strings)
+      case Some(v) => _strings(v)
+      case xs: Vector[?] => xs.flatMap(_strings)
+      case xs: Seq[?] => xs.toVector.flatMap(_strings)
+      case xs: Array[?] => xs.toVector.flatMap(_strings)
+      case s: String => s.split("[,\\s]+").toVector.map(_.trim).filter(_.nonEmpty)
+      case other => Vector(other.toString)
+    }
+
+  private def _string(value: Any): Option[String] =
+    _strings(value).headOption
 
   private def _effective_model(
     model: Option[String]

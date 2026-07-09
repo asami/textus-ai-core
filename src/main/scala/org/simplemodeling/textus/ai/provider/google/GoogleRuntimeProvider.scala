@@ -142,7 +142,7 @@ private object GoogleJson:
     json.hcursor.get[String]("output_text") match
       case Right(s) => Consequence.success(s)
       case Left(_) =>
-        _string_at(json.hcursor, List("steps", "0", "content", "0", "text"))
+        _interaction_model_output_text(json)
 
   def interactionMetadata(json: Json, properties: Vector[org.goldenport.protocol.Property]): Map[String, String] =
     val tools = AiRequestProperties.tools(properties)
@@ -209,6 +209,18 @@ private object GoogleJson:
     }.flatMap { content =>
       content.hcursor.downField("annotations").focus.flatMap(_.asArray).getOrElse(Vector.empty)
     }.count(_.hcursor.get[String]("type").toOption.contains(kind))
+
+  private def _interaction_model_output_text(json: Json): Consequence[String] =
+    val steps = json.hcursor.downField("steps").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    steps.collectFirst {
+      case step if step.hcursor.get[String]("type").toOption.contains("model_output") =>
+        step.hcursor.downField("content").focus.flatMap(_.asArray).getOrElse(Vector.empty).collectFirst {
+          case content if content.hcursor.get[String]("type").toOption.forall(_ == "text") =>
+            content.hcursor.get[String]("text").toOption
+        }.flatten
+    }.flatten match
+      case Some(text) => Consequence.success(text)
+      case None => _string_at(json.hcursor, List("steps", "0", "content", "0", "text"))
 
   private def _string_at(cursor: HCursor, path: List[String]): Consequence[String] =
     path.foldLeft(Option(cursor: ACursor)) { (z, key) =>
