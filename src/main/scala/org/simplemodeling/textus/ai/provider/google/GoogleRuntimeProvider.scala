@@ -140,9 +140,8 @@ private object GoogleJson:
 
   def extractInteractionText(json: Json): Consequence[String] =
     json.hcursor.get[String]("output_text") match
-      case Right(s) => Consequence.success(s)
-      case Left(_) =>
-        _interaction_model_output_text(json)
+      case Right(s) if s.trim.nonEmpty => Consequence.success(s)
+      case _ => _interaction_model_output_text(json)
 
   def interactionMetadata(json: Json, properties: Vector[org.goldenport.protocol.Property]): Map[String, String] =
     val tools = AiRequestProperties.tools(properties)
@@ -210,17 +209,34 @@ private object GoogleJson:
       content.hcursor.downField("annotations").focus.flatMap(_.asArray).getOrElse(Vector.empty)
     }.count(_.hcursor.get[String]("type").toOption.contains(kind))
 
-  private def _interaction_model_output_text(json: Json): Consequence[String] =
+  private def _interaction_model_output_text(json: Json): Consequence[String] = {
     val steps = json.hcursor.downField("steps").focus.flatMap(_.asArray).getOrElse(Vector.empty)
-    steps.collectFirst {
-      case step if step.hcursor.get[String]("type").toOption.contains("model_output") =>
-        step.hcursor.downField("content").focus.flatMap(_.asArray).getOrElse(Vector.empty).collectFirst {
-          case content if content.hcursor.get[String]("type").toOption.forall(_ == "text") =>
-            content.hcursor.get[String]("text").toOption
-        }.flatten
-    }.flatten match
+    val texts = steps.flatMap { step =>
+      val steptype = step.hcursor.get[String]("type").toOption
+      if (steptype.contains("model_output"))
+        step.hcursor.downField("content").focus.flatMap(_.asArray).getOrElse(Vector.empty).flatMap(_content_texts)
+      else
+        Vector.empty
+    }.map(_.trim).filter(_.nonEmpty)
+    texts.headOption match
       case Some(text) => Consequence.success(text)
-      case None => _string_at(json.hcursor, List("steps", "0", "content", "0", "text"))
+      case None => _empty_interaction_output(json)
+  }
+
+  private def _content_texts(content: Json): Vector[String] =
+    content.hcursor.get[String]("text").toOption.toVector ++
+      content.hcursor.downField("parts").focus.flatMap(_.asArray).getOrElse(Vector.empty).flatMap { part =>
+        part.hcursor.get[String]("text").toOption.toVector
+      }
+
+  private def _empty_interaction_output(json: Json): Consequence[String] = {
+    val steps = json.hcursor.downField("steps").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    val types = steps.flatMap(_.hcursor.get[String]("type").toOption).distinct.mkString(",")
+    val preview = json.noSpaces.take(600)
+    Consequence.valueInvalid(
+      s"Google Interactions response did not contain model output text; step_types=$types; response_preview=$preview"
+    )
+  }
 
   private def _string_at(cursor: HCursor, path: List[String]): Consequence[String] =
     path.foldLeft(Option(cursor: ACursor)) { (z, key) =>

@@ -8,7 +8,7 @@ import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.textus.ai.provider.gemma.GemmaConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
-import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunner, TextusAiRunnerProvider}
+import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
 
 /*
  * @since   Apr.  9, 2026
@@ -44,8 +44,7 @@ object ComponentFactory:
     withchat.withPort(
       Component.Port
         .of(
-          runnerprovider,
-          new TextusAiRunner(runnerprovider, defaultselection, profiles)
+          runnerprovider
         )
         .orElse(withchat.port)
     )

@@ -51,16 +51,10 @@ final class TextusAiRunner(
     _with_record_calltree(req, requirement) {
       for {
         service <- provider.generateService(_effective_selection(requirement))
-        response <- service.generate(
-          GenerateRequest(
-            prompt = req.prompt,
-            temperature = req.temperature,
-            maxTokens = req.maxTokens,
-            properties = _request_properties(req.properties, requirement)
-          )
-        )
-        normalized <- _normalize_record_response(req, response)
-      } yield normalized
+        response <- _generate_record_raw_with_retry(service, req, requirement, _record_retry_limit(req))
+      } yield response
+    } { response =>
+      _normalize_record_response(req, response)
     }
   }
 
@@ -81,11 +75,65 @@ final class TextusAiRunner(
     }
   }
 
+  private def _generate_record_raw_with_retry(
+    service: GenerateService,
+    req: AiRecordRequest,
+    requirement: AiRunnerRequirement,
+    remainingRetries: Int
+  )(using ExecutionContext): Consequence[GenerateResponse] = {
+    val generated = service.generate(
+      GenerateRequest(
+        prompt = req.prompt,
+        temperature = req.temperature,
+        maxTokens = req.maxTokens,
+        properties = _request_properties(req.properties, requirement)
+      )
+    )
+    generated match {
+      case Consequence.Success(response) if response.text.trim.nonEmpty =>
+        Consequence.success(response)
+      case Consequence.Success(response) if remainingRetries > 0 && _is_record_retryable_empty_response(response) =>
+        _generate_record_raw_with_retry(service, req, requirement, remainingRetries - 1)
+      case Consequence.Success(response) =>
+        Consequence.success(response)
+      case Consequence.Failure(conclusion) if remainingRetries > 0 && _is_record_retryable_failure(conclusion) =>
+        _generate_record_raw_with_retry(service, req, requirement, remainingRetries - 1)
+      case Consequence.Failure(conclusion) =>
+        Consequence.Failure(conclusion)
+    }
+  }
+
+  private def _is_record_retryable_empty_response(
+    response: GenerateResponse
+  ): Boolean =
+    response.text.trim.isEmpty
+
+  private def _is_record_retryable_failure(
+    conclusion: org.goldenport.Conclusion
+  ): Boolean = {
+    val message = conclusion.display.toLowerCase(Locale.ROOT)
+    message.contains("timed out") ||
+      message.contains("timeout") ||
+      message.contains("did not contain model output text") ||
+      message.contains("empty output")
+  }
+
+  private def _record_retry_limit(
+    req: AiRecordRequest
+  ): Int =
+    req.properties.find(_.name == "ai.record.retry-limit")
+      .flatMap(x => Option(x.value).map(_.toString.trim).filter(_.nonEmpty).flatMap(_.toIntOption))
+      .getOrElse(1)
+      .max(0)
+      .min(3)
+
   private def _with_record_calltree(
     req: AiRecordRequest,
     requirement: AiRunnerRequirement
   )(
-    body: => Consequence[AiRecordResponse]
+    body: => Consequence[GenerateResponse]
+  )(
+    normalize: GenerateResponse => Consequence[AiRecordResponse]
   )(using ctx: ExecutionContext): Consequence[AiRecordResponse] = {
     val calltree = ctx.observability.callTreeContext
     if (calltree.isEnabled) {
@@ -94,18 +142,30 @@ final class TextusAiRunner(
         _record_request_calltree_attributes(req, requirement)
       )
       try {
-        val result = body
-        result match {
-          case Consequence.Success(response) =>
-            calltree.leave(_record_response_calltree_attributes(response))
+        val generated = body
+        generated match {
+          case Consequence.Success(rawresponse) =>
+            val result = normalize(rawresponse)
+            result match {
+              case Consequence.Success(response) =>
+                calltree.leave(_record_response_calltree_attributes(req, rawresponse, response))
+              case Consequence.Failure(conclusion) =>
+                calltree.leave(
+                  _record_failure_calltree_attributes(req, rawresponse) ++ Map(
+                    "status" -> conclusion.status.webCode.code.toString,
+                    "error" -> conclusion.display
+                  )
+                )
+            }
+            result
           case Consequence.Failure(conclusion) =>
             calltree.leave(Map(
               "outcome" -> "failure",
               "status" -> conclusion.status.webCode.code.toString,
               "error" -> conclusion.display
             ))
+            Consequence.Failure(conclusion)
         }
-        result
       } catch {
         case e: Throwable =>
           calltree.leave(Map(
@@ -115,7 +175,7 @@ final class TextusAiRunner(
           throw e
       }
     } else {
-      body
+      body.flatMap(normalize)
     }
   }
 
@@ -304,14 +364,30 @@ final class TextusAiRunner(
   }
 
   private def _record_response_calltree_attributes(
+    req: AiRecordRequest,
+    rawresponse: GenerateResponse,
     response: AiRecordResponse
   ): Map[String, String] =
     Map(
       "outcome" -> "success",
       "model" -> response.model.getOrElse(""),
       "normalization_mode" -> response.metadata.getOrElse("normalization_mode", ""),
-      "response_preview" -> response.metadata.getOrElse("response_preview", "")
+      "response_chars" -> rawresponse.text.length.toString,
+      "response" -> req.trace.calltreeResponse(rawresponse.text),
+      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(rawresponse.text))
     ) ++ response.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
+
+  private def _record_failure_calltree_attributes(
+    req: AiRecordRequest,
+    rawresponse: GenerateResponse
+  ): Map[String, String] =
+    Map(
+      "outcome" -> "failure",
+      "model" -> _effective_model(rawresponse.model).getOrElse(""),
+      "response_chars" -> rawresponse.text.length.toString,
+      "response" -> req.trace.calltreeResponse(rawresponse.text),
+      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(rawresponse.text))
+    ) ++ rawresponse.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
 
   private def _calltree_text_preview(text: String): String = {
     val normalized = text.replace("\r\n", "\n")
@@ -378,7 +454,10 @@ final class TextusAiRunner(
     req: AiRecordRequest,
     response: GenerateResponse
   ): Consequence[AiRecordResponse] =
-    _record_candidates(response.text)
+    if (response.text.trim.isEmpty)
+      Consequence.argumentInvalid("AI record response was empty.")
+    else
+      _record_candidates(response.text)
       .iterator
       .map { candidate =>
         parse(candidate.text).map(json => candidate.copy(json = Some(json)))
@@ -410,7 +489,7 @@ final class TextusAiRunner(
         Consequence.argumentInvalid(
           s"AI record response did not contain usable JSON; response_preview=${_calltree_text_preview(req.trace.calltreeResponse(response.text)).take(600)}"
         )
-    }
+      }
 
   private final case class _RecordCandidate(
     mode: String,

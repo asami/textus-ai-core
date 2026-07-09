@@ -416,6 +416,66 @@ final class TextusAiRunnerSpec
       response.metadata("google.url_context_calls") shouldBe "1"
     }
 
+    "classify Gemini Interactions responses with no model output text" in {
+      Given("a Google provider response where tools ran but the model returned no text")
+      val driver = new _FakeHttpDriver(
+        """{"id":"v1_test","status":"completed","steps":[{"type":"google_search_call"},{"type":"google_search_result"},{"type":"url_context_call"}],"model":"gemini-test"}"""
+      )
+      given ExecutionContext = _context(driver)
+      val service = new GoogleGenerateService(
+        GoogleRuntimeConfig(
+          endpoint = URI.create("https://generativelanguage.googleapis.com"),
+          apiKey = "test-google-key",
+          model = "gemini-test"
+        ),
+        summon[ExecutionContext]
+      )
+
+      When("a generate request enables Gemini tools")
+      val response = service.generate(
+        GenerateRequest(
+          prompt = "find official page",
+          properties = Vector(Property("ai.tools", "url_context,web_search", None))
+        )
+      )
+
+      Then("the provider returns a structured diagnostic instead of a fixed-path missing-property error")
+      response shouldBe a[Consequence.Failure[_]]
+      response match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("Google Interactions response did not contain model output text")
+          conclusion.display should include ("google_search_call")
+          conclusion.display should not include ("steps.0.content.0.text")
+        case _ => fail("missing model output should fail")
+    }
+
+    "prefer Gemini Interactions model output when output_text is blank" in {
+      Given("a Google provider response with blank output_text and model output in steps")
+      val driver = new _FakeHttpDriver(
+        """{"id":"v1_test","status":"completed","output_text":"  ","steps":[{"type":"model_output","content":[{"type":"text","text":"{\"exhibitions\":[]}"}]}],"model":"gemini-test"}"""
+      )
+      given ExecutionContext = _context(driver)
+      val service = new GoogleGenerateService(
+        GoogleRuntimeConfig(
+          endpoint = URI.create("https://generativelanguage.googleapis.com"),
+          apiKey = "test-google-key",
+          model = "gemini-test"
+        ),
+        summon[ExecutionContext]
+      )
+
+      When("a generate request enables Gemini tools")
+      val response = service.generate(
+        GenerateRequest(
+          prompt = "find official page",
+          properties = Vector(Property("ai.tools", "url_context,web_search", None))
+        )
+      ).toOption.get
+
+      Then("the blank top-level output does not hide usable model output text")
+      response.text shouldBe """{"exhibitions":[]}"""
+    }
+
     "send OpenAI tool requests through the Responses API" in {
       Given("an OpenAI provider service with a fake HTTP driver")
       val driver = new _FakeHttpDriver(
@@ -514,6 +574,85 @@ final class TextusAiRunnerSpec
       node.getString("model") shouldBe Some("remote")
     }
 
+    "record structured generation prompts and raw responses in the CNCF CallTree" in {
+      Given("an AI runner invoked for structured record generation")
+      given ExecutionContext =
+        ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
+      val runner = new TextusAiRunnerProvider(_component())
+        .provide(
+          SpiContract("ai-runner", classOf[AiRunner]),
+          SpiSelection(mode = Some("remote"), engine = Some("http"))
+        )
+        .toOption
+        .get
+
+      When("generateRecord normalizes a provider response")
+      val generated = runner.generateRecord(
+        AiRecordRequest(
+          prompt = "strict-record",
+          schema = _artscene_record_schema,
+          trace = AiRunnerTracePolicy(
+            promptConfidentiality = DataConfidentiality.Public,
+            responseConfidentiality = DataConfidentiality.Public
+          ),
+          metadata = Map("operation" -> "record-fetch", "task" -> "calltree-record-spec")
+        )
+      )
+
+      Then("the prompt raw response and normalization mode are visible through CallTree metadata")
+      generated.toOption.get.record.getAny("exhibitions") should not be empty
+      val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
+      val record = ObservabilityEngine.callTreeRecord(calltree)
+      val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
+      val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate-record")).value
+      node.getString("operation") shouldBe Some("record-fetch")
+      node.getString("task") shouldBe Some("calltree-record-spec")
+      node.getString("prompt") shouldBe Some("strict-record")
+      node.getString("response").value should include ("Strict Record Exhibition")
+      node.getString("response_chars").value.toInt should be > 0
+      node.getString("normalization_mode") shouldBe Some("strict-json")
+      node.getString("model") shouldBe Some("remote")
+    }
+
+    "record structured generation raw responses when normalization fails" in {
+      Given("an AI runner whose structured response does not satisfy the schema")
+      given ExecutionContext =
+        ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
+      val runner = new TextusAiRunnerProvider(_component())
+        .provide(
+          SpiContract("ai-runner", classOf[AiRunner]),
+          SpiSelection(mode = Some("remote"), engine = Some("http"))
+        )
+        .toOption
+        .get
+
+      When("generateRecord rejects the provider response")
+      val generated = runner.generateRecord(
+        AiRecordRequest(
+          prompt = "missing-record-field",
+          schema = _artscene_record_schema,
+          trace = AiRunnerTracePolicy(
+            promptConfidentiality = DataConfidentiality.Public,
+            responseConfidentiality = DataConfidentiality.Public
+          ),
+          metadata = Map("operation" -> "record-fetch", "task" -> "calltree-record-failure-spec")
+        )
+      )
+
+      Then("the failure still includes the raw AI response in CallTree metadata")
+      generated shouldBe a[Consequence.Failure[_]]
+      val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
+      val record = ObservabilityEngine.callTreeRecord(calltree)
+      val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
+      val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate-record")).value
+      node.getString("outcome") shouldBe Some("failure")
+      node.getString("error").value should include ("AI record schema mismatch")
+      node.getString("prompt") shouldBe Some("missing-record-field")
+      node.getString("response").value should include ("Missing Date")
+      node.getString("response_chars").value.toInt should be > 0
+      node.getString("model") shouldBe Some("remote")
+    }
+
     "normalize structured record generation responses through the AI runner operation" in {
       Given("an AI runner backed by the existing generate service")
       given ExecutionContext = ExecutionContext.create()
@@ -584,6 +723,75 @@ final class TextusAiRunnerSpec
           fail("schema mismatch should fail")
     }
 
+    "retry structured record generation once for empty provider output" in {
+      Given("an AI runner whose first provider response is blank")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "empty-then-strict-record"
+      _GenerateServiceState.reset(prompt)
+      val runner = new TextusAiRunnerProvider(_component())
+        .provide(
+          SpiContract("ai-runner", classOf[AiRunner]),
+          SpiSelection(mode = Some("remote"), engine = Some("http"))
+        )
+        .toOption
+        .get
+
+      When("the retry returns a valid structured record")
+      val result = runner.generateRecord(AiRecordRequest(prompt, _artscene_record_schema))
+
+      Then("the retry result is normalized")
+      result.toOption.get.record.getAny("exhibitions") should not be empty
+      _GenerateServiceState.count(prompt) shouldBe 2
+    }
+
+    "not retry structured record generation for schema mismatches" in {
+      Given("an AI runner that receives schema-invalid JSON")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "missing-record-field-no-retry"
+      _GenerateServiceState.reset(prompt)
+      val runner = new TextusAiRunnerProvider(_component())
+        .provide(
+          SpiContract("ai-runner", classOf[AiRunner]),
+          SpiSelection(mode = Some("remote"), engine = Some("http"))
+        )
+        .toOption
+        .get
+
+      When("the response parses but does not satisfy the requested schema")
+      val result = runner.generateRecord(AiRecordRequest(prompt, _artscene_record_schema))
+
+      Then("the schema failure is returned without another provider call")
+      result shouldBe a[Consequence.Failure[_]]
+      _GenerateServiceState.count(prompt) shouldBe 1
+    }
+
+    "allow structured record retry to be disabled per request" in {
+      Given("an AI runner whose first provider response is blank")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "empty-then-strict-record"
+      _GenerateServiceState.reset(prompt)
+      val runner = new TextusAiRunnerProvider(_component())
+        .provide(
+          SpiContract("ai-runner", classOf[AiRunner]),
+          SpiSelection(mode = Some("remote"), engine = Some("http"))
+        )
+        .toOption
+        .get
+
+      When("the request disables structured generation retry")
+      val result = runner.generateRecord(
+        AiRecordRequest(
+          prompt,
+          _artscene_record_schema,
+          properties = Vector(Property("ai.record.retry-limit", "0", None))
+        )
+      )
+
+      Then("the empty response is reported without a second provider call")
+      result shouldBe a[Consequence.Failure[_]]
+      _GenerateServiceState.count(prompt) shouldBe 1
+    }
+
     "register an AI runner provider on standalone component creation" in {
       Given("a standalone Textus AI component")
       given ExecutionContext = ExecutionContext.create()
@@ -591,15 +799,18 @@ final class TextusAiRunnerSpec
 
       When("the component port is inspected")
       val provider = component.port.get[TextusAiRunnerProvider]
-      val runner = component.port.get[AiRunner]
 
       Then("the CNCF AI runner SPI provider is published")
       provider should not be empty
-      runner should not be empty
       provider.value.supports(
         SpiContract("ai-runner", classOf[AiRunner]),
         SpiSelection()
       ) shouldBe true
+      provider.value.provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption should not be empty
+      component.port.get[AiRunner] shouldBe empty
     }
 
     "read OpenAI credentials from CNCF configuration while provider selection stays separate" in {
@@ -726,10 +937,24 @@ final class TextusAiRunnerSpec
       Consequence.success(_ChatService(name))
   }
 
+  private object _GenerateServiceState {
+    private var _counts: Map[String, Int] = Map.empty
+
+    def record(prompt: String): Unit =
+      _counts = _counts.updated(prompt, count(prompt) + 1)
+
+    def count(prompt: String): Int =
+      _counts.getOrElse(prompt, 0)
+
+    def reset(prompt: String): Unit =
+      _counts = _counts - prompt
+  }
+
   private final case class _GenerateService(
     name: String
   ) extends GenerateService {
-    def generate(req: GenerateRequest): Consequence[GenerateResponse] =
+    def generate(req: GenerateRequest): Consequence[GenerateResponse] = {
+      _GenerateServiceState.record(req.prompt)
       if (req.prompt == "inspect-properties")
         Consequence.success(GenerateResponse(s"timeout:${_property(req, "ai.timeout-seconds").getOrElse("none")}", Some(name)))
       else if (req.prompt == "inspect-ai-selection")
@@ -748,10 +973,15 @@ final class TextusAiRunnerSpec
         Consequence.success(GenerateResponse(s"```json\n${_record_json("Fenced Record Exhibition")}\n```", Some(name)))
       else if (req.prompt == "embedded-record")
         Consequence.success(GenerateResponse(s"Here is the structured result:\n${_record_json("Embedded Record Exhibition")}\nUse it as JSON.", Some(name)))
-      else if (req.prompt == "missing-record-field")
+      else if (req.prompt == "empty-then-strict-record" && _GenerateServiceState.count(req.prompt) == 1)
+        Consequence.success(GenerateResponse("  ", Some(name)))
+      else if (req.prompt == "empty-then-strict-record")
+        Consequence.success(GenerateResponse(_record_json("Retried Record Exhibition"), Some(name)))
+      else if (req.prompt == "missing-record-field" || req.prompt == "missing-record-field-no-retry")
         Consequence.success(GenerateResponse("""{"exhibitions":[{"title":"Missing Date","confidence":51}]}""", Some(name)))
       else
         Consequence.success(GenerateResponse(s"generated:$name:${req.prompt}", Some(name)))
+    }
 
     private def _record_json(
       title: String
