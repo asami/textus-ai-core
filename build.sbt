@@ -2,9 +2,9 @@ import org.goldenport.cozy.CozyPlugin.autoImport._
 import sbt.Keys.*
 
 ThisBuild / organization := "org.textus"
-ThisBuild / version := "0.2.0-SNAPSHOT"
+ThisBuild / version := "0.2.0"
 
-val cncfVersion = "0.5.0-SNAPSHOT"
+val cncfVersion = "0.5.0"
 
 lazy val root = (project in file("."))
   .enablePlugins(org.goldenport.cozy.CozyPlugin)
@@ -20,12 +20,12 @@ lazy val root = (project in file("."))
       "SimpleModeling.org" at "https://www.simplemodeling.org/repository/maven"
     ),
     libraryDependencies ++= Seq(
-      "org.goldenport" %% "goldenport-cncf" % cncfVersion,
-      "org.simplemodeling" %% "simplemodeling-model" % "0.1.7",
+      "org.goldenport" % "goldenport-cncf_3" % cncfVersion,
+      "org.simplemodeling" % "simplemodeling-model_3" % "0.1.7",
       "org.scalatest" %% "scalatest" % "3.2.19" % Test
     ),
     dependencyOverrides ++= Seq(
-      "org.simplemodeling" %% "simplemodeling-model" % "0.1.7"
+      "org.simplemodeling" % "simplemodeling-model_3" % "0.1.7"
     ),
     cozyManifestMetadata ++= Map(
       "component" -> "textus-ai-runtime",
