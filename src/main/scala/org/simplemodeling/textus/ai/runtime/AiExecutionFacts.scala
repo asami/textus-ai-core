@@ -21,6 +21,11 @@ private[textus] object AiExecutionFacts {
   val LOCATION = "ai.execution.location"
   val TOOLS = "ai.execution.tools"
   val NORMALIZATION_MODE = "ai.execution.normalization_mode"
+  val RESPONSE_ID = "ai.execution.response_id"
+  val FINISH_REASON = "ai.execution.finish_reason"
+  val INPUT_TOKENS = "ai.usage.input_tokens"
+  val OUTPUT_TOKENS = "ai.usage.output_tokens"
+  val TOTAL_TOKENS = "ai.usage.total_tokens"
 
   def normalize(
     selection: SpiSelection,
@@ -37,7 +42,12 @@ private[textus] object AiExecutionFacts {
       PURPOSE -> requirement.purpose,
       LOCATION -> _location(selection.mode),
       TOOLS -> _tools(requirement),
-      NORMALIZATION_MODE -> normalizationmode
+      NORMALIZATION_MODE -> normalizationmode,
+      RESPONSE_ID -> _provider_value(selection, providermetadata, "response_id"),
+      FINISH_REASON -> _provider_value(selection, providermetadata, "finish_reason"),
+      INPUT_TOKENS -> _usage_value(selection, providermetadata, "usage.input_tokens"),
+      OUTPUT_TOKENS -> _usage_value(selection, providermetadata, "usage.output_tokens"),
+      TOTAL_TOKENS -> _usage_value(selection, providermetadata, "usage.total_tokens")
     )
     _provider_metadata(providermetadata) ++ _values(values)
   }
@@ -50,6 +60,28 @@ private[textus] object AiExecutionFacts {
         key.startsWith("ai.usage.") ||
         key.startsWith("ai.limitation.")
     }
+
+  private def _provider_value(
+    selection: SpiSelection,
+    metadata: Map[String, String],
+    suffix: String
+  ): Option[String] =
+    selection.provider
+      .map(_.trim.toLowerCase(Locale.ROOT))
+      .filter(_.nonEmpty)
+      .flatMap(provider => metadata.get(s"$provider.$suffix"))
+      .map(_.trim)
+      .filter(_.nonEmpty)
+
+  private def _usage_value(
+    selection: SpiSelection,
+    metadata: Map[String, String],
+    suffix: String
+  ): Option[String] =
+    _provider_value(selection, metadata, suffix)
+      .flatMap(_.toLongOption)
+      .filter(_ >= 0)
+      .map(_.toString)
 
   private def _values(
     values: Vector[(String, Option[String])]

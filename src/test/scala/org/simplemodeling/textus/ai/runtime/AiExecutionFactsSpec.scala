@@ -45,6 +45,57 @@ final class AiExecutionFactsSpec
       metadata(AiExecutionFacts.MODEL) shouldBe "gemini-2.5-pro"
       metadata(AiExecutionFacts.TOOLS) shouldBe "url_context,web_search"
       metadata("google.response_id") shouldBe "safe-response-id"
+      metadata(AiExecutionFacts.RESPONSE_ID) shouldBe "safe-response-id"
+    }
+
+    "normalize provider response identity finish reason and usage without accepting reserved values" in {
+      Given("a selected OpenAI runtime with provider-reported completion facts")
+      val selection = SpiSelection(provider = Some("openai"))
+      val providerMetadata = Map(
+        AiExecutionFacts.FINISH_REASON -> "spoofed",
+        "openai.response_id" -> "resp_123",
+        "openai.finish_reason" -> "stop",
+        "openai.usage.input_tokens" -> "41",
+        "openai.usage.output_tokens" -> "17",
+        "openai.usage.total_tokens" -> "58"
+      )
+
+      When("Textus AI normalizes the provider metadata")
+      val metadata = AiExecutionFacts.normalize(
+        selection,
+        AiRunnerRequirement(),
+        None,
+        providerMetadata
+      )
+
+      Then("only the selected provider supplies the normalized response facts")
+      metadata(AiExecutionFacts.RESPONSE_ID) shouldBe "resp_123"
+      metadata(AiExecutionFacts.FINISH_REASON) shouldBe "stop"
+      metadata(AiExecutionFacts.INPUT_TOKENS) shouldBe "41"
+      metadata(AiExecutionFacts.OUTPUT_TOKENS) shouldBe "17"
+      metadata(AiExecutionFacts.TOTAL_TOKENS) shouldBe "58"
+    }
+
+    "omit malformed or negative provider usage values" in {
+      Given("a selected provider response with invalid usage values")
+      val selection = SpiSelection(provider = Some("gemma"))
+
+      When("Textus AI normalizes the provider metadata")
+      val metadata = AiExecutionFacts.normalize(
+        selection,
+        AiRunnerRequirement(),
+        None,
+        Map(
+          "gemma.usage.input_tokens" -> "-1",
+          "gemma.usage.output_tokens" -> "unknown",
+          "gemma.usage.total_tokens" -> " 12 "
+        )
+      )
+
+      Then("only non-negative decimal usage facts are published")
+      metadata should not contain AiExecutionFacts.INPUT_TOKENS
+      metadata should not contain AiExecutionFacts.OUTPUT_TOKENS
+      metadata(AiExecutionFacts.TOTAL_TOKENS) shouldBe "12"
     }
 
     "omit execution facts that are unknown instead of synthesizing values" in {

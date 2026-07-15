@@ -33,9 +33,10 @@ Stage Status:
 - [x] Select a stable metadata namespace for normalized execution facts;
   typed CNCF response fields remain deferred until provider semantics are
   proven stable.
-- [ ] Define provider/model/mode/engine, purpose, response identity, timing,
-  attempt, retry, finish, and normalization facts.
-- [ ] Define unknown-value semantics for token, quota, and cost-related facts.
+- [x] Define provider/model/mode/engine, purpose, response identity, finish,
+  and normalization facts. Timing, attempt, and retry remain open.
+- [x] Define unknown-value semantics for token and cost-related facts. Quota
+  semantics remain open.
 - [ ] Define safe input/output digest ownership and reconciliation.
 - [ ] Define which fields are public response metadata, CallTree-only, or
   prohibited from recording.

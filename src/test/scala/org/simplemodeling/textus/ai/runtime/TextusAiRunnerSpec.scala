@@ -200,6 +200,11 @@ final class TextusAiRunnerSpec
         metadata(AiExecutionFacts.PURPOSE) shouldBe "car-review.semantic-consistency"
         metadata(AiExecutionFacts.LOCATION) shouldBe "remote"
         metadata(AiExecutionFacts.TOOLS) shouldBe "url_context,web_search"
+        metadata(AiExecutionFacts.RESPONSE_ID) shouldBe "response-google"
+        metadata(AiExecutionFacts.FINISH_REASON) shouldBe "stop"
+        metadata(AiExecutionFacts.INPUT_TOKENS) shouldBe "13"
+        metadata(AiExecutionFacts.OUTPUT_TOKENS) shouldBe "8"
+        metadata(AiExecutionFacts.TOTAL_TOKENS) shouldBe "21"
       }
       recorded.metadata(AiExecutionFacts.NORMALIZATION_MODE) shouldBe "strict-json"
     }
@@ -548,6 +553,57 @@ final class TextusAiRunnerSpec
       response.metadata("ai.provider_tools") shouldBe "web_search"
       response.metadata("openai.web_search_calls") shouldBe "1"
       response.metadata("openai.response_id") shouldBe "resp_test"
+    }
+
+    "preserve provider response facts for plain provider endpoints" in {
+      Given("plain Google OpenAI and Gemma provider responses")
+      val googleDriver = new _FakeHttpDriver(
+        """{"responseId":"google_plain","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"google answer"}]}}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":7,"totalTokenCount":18}}"""
+      )
+      val googleContext = _context(googleDriver)
+      val google = new GoogleGenerateService(
+        GoogleRuntimeConfig(
+          endpoint = URI.create("https://generativelanguage.googleapis.com"),
+          apiKey = "test-google-key",
+          model = "gemini-test"
+        ),
+        googleContext
+      ).generate(GenerateRequest("plain")).toOption.get
+
+      val openAiDriver = new _FakeHttpDriver(
+        """{"id":"chatcmpl_plain","choices":[{"finish_reason":"stop","message":{"content":"openai answer"}}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}"""
+      )
+      val openAiContext = _context(openAiDriver)
+      val openai = new OpenAiGenerateService(
+        OpenAiRuntimeConfig(
+          endpoint = URI.create("https://api.openai.com"),
+          apiKey = "test-openai-key",
+          model = "gpt-test"
+        ),
+        openAiContext
+      ).generate(GenerateRequest("plain")).toOption.get
+
+      val gemmaDriver = new _FakeHttpDriver(
+        """{"response":"gemma answer","done_reason":"stop","prompt_eval_count":9,"eval_count":5}"""
+      )
+      val gemmaContext = _context(gemmaDriver)
+      val gemma = new GemmaOllamaGenerateService(
+        GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")),
+        gemmaContext
+      ).generate(GenerateRequest("plain")).toOption.get
+
+      When("each provider returns a successful plain response")
+
+      Then("its safe response facts remain available for Textus normalization")
+      google.metadata("google.response_id") shouldBe "google_plain"
+      google.metadata("google.finish_reason") shouldBe "STOP"
+      google.metadata("google.usage.total_tokens") shouldBe "18"
+      openai.metadata("openai.response_id") shouldBe "chatcmpl_plain"
+      openai.metadata("openai.finish_reason") shouldBe "stop"
+      openai.metadata("openai.usage.input_tokens") shouldBe "12"
+      gemma.metadata("gemma.finish_reason") shouldBe "stop"
+      gemma.metadata("gemma.usage.output_tokens") shouldBe "5"
+      gemma.metadata("gemma.usage.total_tokens") shouldBe "14"
     }
 
     "reject unknown AI tool names before provider execution" in {
@@ -1006,7 +1062,9 @@ final class TextusAiRunnerSpec
           Some(name)
         ))
       else if (req.prompt == "strict-record")
-        Consequence.success(GenerateResponse(_record_json("Strict Record Exhibition"), Some(name)))
+        Consequence.success(GenerateResponse(_record_json("Strict Record Exhibition"), Some(name), _provider_metadata(name)))
+      else if (req.prompt == "execution-facts")
+        Consequence.success(GenerateResponse(s"generated:$name:${req.prompt}", Some(name), _provider_metadata(name)))
       else if (req.prompt == "fenced-record")
         Consequence.success(GenerateResponse(s"```json\n${_record_json("Fenced Record Exhibition")}\n```", Some(name)))
       else if (req.prompt == "embedded-record")
@@ -1031,6 +1089,15 @@ final class TextusAiRunnerSpec
       name: String
     ): Option[String] =
       req.properties.find(_.name == name).map(x => String.valueOf(x.value))
+
+    private def _provider_metadata(name: String): Map[String, String] =
+      Map(
+        s"$name.response_id" -> s"response-$name",
+        s"$name.finish_reason" -> "stop",
+        s"$name.usage.input_tokens" -> "13",
+        s"$name.usage.output_tokens" -> "8",
+        s"$name.usage.total_tokens" -> "21"
+      )
   }
 
   private final case class _ChatService(
@@ -1042,10 +1109,20 @@ final class TextusAiRunnerSpec
       Consequence.success(
         ChatResponse(
           Message(MessageRole.Assistant, s"chat:$name:$last"),
-          Some(name)
+          Some(name),
+          _provider_metadata(name)
         )
       )
     }
+
+    private def _provider_metadata(name: String): Map[String, String] =
+      Map(
+        s"$name.response_id" -> s"response-$name",
+        s"$name.finish_reason" -> "stop",
+        s"$name.usage.input_tokens" -> "13",
+        s"$name.usage.output_tokens" -> "8",
+        s"$name.usage.total_tokens" -> "21"
+      )
   }
 
   private final class _FakeHttpDriver(response: String) extends HttpDriver {

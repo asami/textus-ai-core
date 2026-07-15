@@ -46,6 +46,17 @@ private object GemmaSupport:
       case "remote" => Vector(config.endpoint)
       case _ => Vector(config.endpoint) ++ config.fallbackEndpoint.toVector
 
+  def responseMetadata(json: Json): Map[String, String] = {
+    val input = json.hcursor.get[Long]("prompt_eval_count").toOption
+    val output = json.hcursor.get[Long]("eval_count").toOption
+    Vector(
+      "gemma.finish_reason" -> json.hcursor.get[String]("done_reason").toOption,
+      "gemma.usage.input_tokens" -> input.map(_.toString),
+      "gemma.usage.output_tokens" -> output.map(_.toString),
+      "gemma.usage.total_tokens" -> (for x <- input; y <- output yield (x + y).toString)
+    ).collect { case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim }.toMap
+  }
+
 final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: ExecutionContext) extends GenerateService:
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
     given ExecutionContext = context
@@ -59,7 +70,7 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
       )
       response <- _request_with_fallback(GemmaSupport.endpoints(config), "/api/generate", body, req.properties) { json =>
         json.hcursor.get[String]("response") match
-          case Right(text) => Consequence.success(GenerateResponse(text, Some(model)))
+          case Right(text) => Consequence.success(GenerateResponse(text, Some(model), GemmaSupport.responseMetadata(json)))
           case Left(e) => Consequence.valueInvalid(e.getMessage)
       }
     yield response
@@ -103,7 +114,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
       )
       response <- _request_with_fallback(GemmaSupport.endpoints(config), "/api/chat", body, req.properties) { json =>
         json.hcursor.downField("message").get[String]("content") match
-          case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(model)))
+          case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(model), GemmaSupport.responseMetadata(json)))
           case Left(e) => Consequence.valueInvalid(e.getMessage)
       }
     yield response

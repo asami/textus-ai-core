@@ -122,18 +122,21 @@ application may depend on their provider-neutral meaning.
 ## Current Implementation
 
 Textus AI currently normalizes effective provider, mode, engine, reported
-model, purpose, local/remote location, logical tools, and record normalization
-mode for `generate`, `chat`, and `generateRecord` responses. Reserved
-normalized namespaces cannot be overwritten by provider metadata, while
-provider-specific metadata remains available under its own namespace.
+model, purpose, local/remote location, logical tools, response identity, finish
+reason, input/output/total tokens, and record normalization mode for
+`generate`, `chat`, and `generateRecord` responses. Google/Gemini, OpenAI, and
+Gemma/Ollama adapters extract only wire fields they actually received. Textus
+AI maps the selected provider's provider-specific facts into the normalized
+namespace; it does not infer absent values.
 
-This implementation does not yet normalize provider request/response identity,
-timing, usage, finish reason, digests, or limitation codes.
+Reserved normalized namespaces cannot be overwritten by provider metadata,
+while provider-specific metadata remains available under its own namespace.
+Gemma/Ollama total tokens are emitted only when both provider-reported input and
+output token counts exist, in which case the total is their exact sum.
 
 ## Deferred Work
 
-- Normalize provider request/response identity, timing, usage, finish reason,
-  digests, and limitation codes.
+- Normalize request identity, timing, digests, and limitation codes.
 - Add deterministic fixtures for normalized failure and limitation cases.
 - Restrict CallTree to the allowlisted facts and digest-only trace behavior.
 - Define cancellation and concurrency semantics through CNCF Job execution.

@@ -153,7 +153,7 @@ private object OpenAiJson:
       "ai.tools" -> tools.map(_.id).mkString(","),
       "ai.provider_tools" -> _provider_tools(tools, properties).map(_._1).mkString(","),
       "openai.web_search_calls" -> webcalls.toString
-    ) ++ json.hcursor.get[String]("id").toOption.map("openai.response_id" -> _).toMap
+    ) ++ _response_facts(json)
 
   private def _response_request(
     model: String,
@@ -219,6 +219,42 @@ private object OpenAiJson:
     val withTemperature = temperature.map(x => base.add("temperature", Json.fromDoubleOrNull(x))).getOrElse(base)
     maxTokens.map(x => withTemperature.add("max_completion_tokens", Json.fromInt(x))).getOrElse(withTemperature)
 
+  private def _response_facts(json: Json): Map[String, String] =
+    _optional_facts(Vector(
+      "openai.response_id" -> json.hcursor.get[String]("id").toOption,
+      "openai.finish_reason" -> _string_at_paths(json.hcursor, Vector(
+        List("choices", "0", "finish_reason"),
+        List("incomplete_details", "reason")
+      )),
+      "openai.usage.input_tokens" -> _long_at_paths(json.hcursor, Vector(
+        List("usage", "input_tokens"),
+        List("usage", "prompt_tokens")
+      )),
+      "openai.usage.output_tokens" -> _long_at_paths(json.hcursor, Vector(
+        List("usage", "output_tokens"),
+        List("usage", "completion_tokens")
+      )),
+      "openai.usage.total_tokens" -> _long_at_paths(json.hcursor, Vector(List("usage", "total_tokens")))
+    ))
+
+  private def _optional_facts(values: Vector[(String, Option[String])]): Map[String, String] =
+    values.collect { case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim }.toMap
+
+  private def _string_at_paths(cursor: HCursor, paths: Vector[List[String]]): Option[String] =
+    paths.iterator.flatMap(path => _cursor_at(cursor, path).flatMap(_.as[String].toOption)).map(_.trim).find(_.nonEmpty)
+
+  private def _long_at_paths(cursor: HCursor, paths: Vector[List[String]]): Option[String] =
+    paths.iterator.flatMap(path => _cursor_at(cursor, path).flatMap(_.as[Long].toOption)).map(_.toString).toSeq.headOption
+
+  private def _cursor_at(cursor: HCursor, path: List[String]): Option[ACursor] =
+    path.foldLeft(Option(cursor: ACursor)) { (z, key) =>
+      z.map { c =>
+        key.toIntOption match
+          case Some(i) => c.downN(i)
+          case None => c.downField(key)
+      }
+    }.filter(_.succeeded)
+
   private def _role(role: MessageRole): String = role match
     case MessageRole.System => "system"
     case MessageRole.User => "user"
@@ -254,7 +290,9 @@ final class OpenAiGenerateService(config: OpenAiRuntimeConfig, context: Executio
         AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
         headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
         properties = req.properties
-      ).flatMap(OpenAiJson.extractText).map(text => GenerateResponse(text, Some(model)))
+      ).flatMap { json =>
+        OpenAiJson.extractText(json).map(text => GenerateResponse(text, Some(model), OpenAiJson.responseMetadata(json, req.properties)))
+      }
     else
       HttpSupport.post(
         config.endpoint,
@@ -283,7 +321,11 @@ final class OpenAiChatService(config: OpenAiRuntimeConfig, context: ExecutionCon
         AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
         headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
         properties = req.properties
-      ).flatMap(OpenAiJson.extractText).map(x => ChatResponse(Message(MessageRole.Assistant, x), Some(model)))
+      ).flatMap { json =>
+        OpenAiJson.extractText(json).map { text =>
+          ChatResponse(Message(MessageRole.Assistant, text), Some(model), OpenAiJson.responseMetadata(json, req.properties))
+        }
+      }
     else
       HttpSupport.post(
         config.endpoint,
