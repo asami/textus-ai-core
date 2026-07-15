@@ -51,11 +51,11 @@ Stage Status:
 
 ### AR-02: Deterministic CAR Review Provider
 
-- [ ] Add a deterministic `AiRunner` fixture that produces schema-valid
+- [x] Add a deterministic `AiRunner` fixture that produces schema-valid
   candidate results and normalized execution facts.
-- [ ] Add fixtures for Unknown/limitation, malformed output, empty output,
+- [x] Add fixtures for Unknown/limitation, malformed output, empty output,
   unavailable provider, quota, timeout, cancellation, and retry-then-success.
-- [ ] Add a CAR Review-shaped record-schema fixture proving that provider
+- [x] Add a CAR Review-shaped record-schema fixture proving that provider
   substitution does not change the caller contract.
 
 ## Stage 3 - Restricted Trace and Metadata Publication
