@@ -13,6 +13,7 @@ This repository follows the document lifecycle defined by `ai/directive/core`.
 
 - `docs/strategy/` contains the Textus AI development direction and phase ordering
 - `docs/phase/` contains the current engineering dashboard and checklist ledger
+- `docs/design/` contains stable AI runtime decisions and boundaries
 - `docs/journal/` contains chronological entries
 - `docs/notes/` contains exploratory AI component notes
 - `docs/notes/ai-component-basic-design.md` records the current TextusAi runtime idea

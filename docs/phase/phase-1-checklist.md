@@ -23,7 +23,7 @@ Stage Status:
 ## Stage 1 - Normalized Execution Facts
 
 Stage Status:
-- Current status: OPEN
+- Current status: IN_PROGRESS
 - Owner: Textus AI maintainers
 - Update rule: Update the checklist when the contract and its executable
   evidence are both available.
