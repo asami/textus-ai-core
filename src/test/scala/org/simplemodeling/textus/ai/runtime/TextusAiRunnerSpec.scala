@@ -32,7 +32,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul.  9, 2026
+ * @version Jul. 16, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -164,6 +164,44 @@ final class TextusAiRunnerSpec
 
       Then("the configured default provider is used instead of falling back to Gemma")
       generated.toOption.get.text shouldBe "generated:google:hello"
+    }
+
+    "publish normalized execution facts for generate chat and record responses" in {
+      Given("an AI runner with a local default and a Google request requirement")
+      given ExecutionContext = ExecutionContext.create()
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+      val requirement = AiRunnerRequirement(
+        provider = Some("google"),
+        purpose = Some("car-review.semantic-consistency"),
+        tools = Vector(AiTool.WebSearch, AiTool.UrlContext)
+      )
+
+      When("all three AI runner operations execute through the selected provider")
+      val generated = runner.generate(AiGenerateRequest("execution-facts", requirement = requirement)).toOption.get
+      val chatted = runner.chat(
+        AiChatRequest(Vector(AiMessage("user", "execution facts")), requirement = requirement)
+      ).toOption.get
+      val recorded = runner.generateRecord(
+        AiRecordRequest("strict-record", _artscene_record_schema, requirement = requirement)
+      ).toOption.get
+
+      Then("each response reports the effective provider-neutral selection")
+      Vector(generated.metadata, chatted.metadata, recorded.metadata).foreach { metadata =>
+        metadata(AiExecutionFacts.PROVIDER) shouldBe "google"
+        metadata(AiExecutionFacts.MODE) shouldBe "remote"
+        metadata(AiExecutionFacts.ENGINE) shouldBe "gemini"
+        metadata(AiExecutionFacts.MODEL) shouldBe "google"
+        metadata(AiExecutionFacts.PURPOSE) shouldBe "car-review.semantic-consistency"
+        metadata(AiExecutionFacts.LOCATION) shouldBe "remote"
+        metadata(AiExecutionFacts.TOOLS) shouldBe "url_context,web_search"
+      }
+      recorded.metadata(AiExecutionFacts.NORMALIZATION_MODE) shouldBe "strict-json"
     }
 
     "propagate request properties to Textus AI runtime requests" in {

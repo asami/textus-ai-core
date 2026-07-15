@@ -30,8 +30,9 @@ Stage Status:
 
 ### AR-01: Provenance, Usage, Limitation, and Confidentiality Contract
 
-- [ ] Select a typed `AiRunner` response model or stable metadata namespace for
-  normalized execution facts.
+- [x] Select a stable metadata namespace for normalized execution facts;
+  typed CNCF response fields remain deferred until provider semantics are
+  proven stable.
 - [ ] Define provider/model/mode/engine, purpose, response identity, timing,
   attempt, retry, finish, and normalization facts.
 - [ ] Define unknown-value semantics for token, quota, and cost-related facts.

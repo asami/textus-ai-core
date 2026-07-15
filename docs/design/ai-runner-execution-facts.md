@@ -119,11 +119,22 @@ application may depend on their provider-neutral meaning.
 - Values are omitted when unknown rather than synthesized.
 - Comma-separated collections are lower-case, de-duplicated, and sorted.
 
+## Current Implementation
+
+Textus AI currently normalizes effective provider, mode, engine, reported
+model, purpose, local/remote location, logical tools, and record normalization
+mode for `generate`, `chat`, and `generateRecord` responses. Reserved
+normalized namespaces cannot be overwritten by provider metadata, while
+provider-specific metadata remains available under its own namespace.
+
+This implementation does not yet normalize provider request/response identity,
+timing, usage, finish reason, digests, or limitation codes.
+
 ## Deferred Work
 
-- Implement namespace constants and provider normalization.
-- Add deterministic fixtures for normalized success, failure, and limitation
-  cases.
+- Normalize provider request/response identity, timing, usage, finish reason,
+  digests, and limitation codes.
+- Add deterministic fixtures for normalized failure and limitation cases.
 - Restrict CallTree to the allowlisted facts and digest-only trace behavior.
 - Define cancellation and concurrency semantics through CNCF Job execution.
 - Evaluate promotion of proven fields into typed CNCF `AiRunner` response data.

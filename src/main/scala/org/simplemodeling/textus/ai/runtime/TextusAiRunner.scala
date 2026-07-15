@@ -21,7 +21,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul.  9, 2026
+ * @version Jul. 16, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -42,7 +42,7 @@ final class TextusAiRunner(
             properties = _request_properties(req.properties, requirement)
           )
         )
-      } yield _to_ai_generate_response(response)
+      } yield _to_ai_generate_response(response, requirement)
     }
   }
 
@@ -54,7 +54,7 @@ final class TextusAiRunner(
         response <- _generate_record_raw_with_retry(service, req, requirement, _record_retry_limit(req))
       } yield response
     } { response =>
-      _normalize_record_response(req, response)
+      _normalize_record_response(req, response, requirement)
     }
   }
 
@@ -71,7 +71,7 @@ final class TextusAiRunner(
             properties = _request_properties(req.properties, requirement)
           )
         )
-      } yield _to_ai_chat_response(response)
+      } yield _to_ai_chat_response(response, requirement)
     }
   }
 
@@ -441,18 +441,39 @@ final class TextusAiRunner(
   }
 
   private def _to_ai_generate_response(
-    response: GenerateResponse
+    response: GenerateResponse,
+    requirement: AiRunnerRequirement
   ): AiGenerateResponse =
-    AiGenerateResponse(response.text, _effective_model(response.model), response.metadata)
+    AiGenerateResponse(
+      response.text,
+      _effective_model(response.model),
+      AiExecutionFacts.normalize(
+        _effective_selection(requirement),
+        requirement,
+        response.model,
+        response.metadata
+      )
+    )
 
   private def _to_ai_chat_response(
-    response: ChatResponse
+    response: ChatResponse,
+    requirement: AiRunnerRequirement
   ): AiChatResponse =
-    AiChatResponse(_to_ai_message(response.message), _effective_model(response.model), response.metadata)
+    AiChatResponse(
+      _to_ai_message(response.message),
+      _effective_model(response.model),
+      AiExecutionFacts.normalize(
+        _effective_selection(requirement),
+        requirement,
+        response.model,
+        response.metadata
+      )
+    )
 
   private def _normalize_record_response(
     req: AiRecordRequest,
-    response: GenerateResponse
+    response: GenerateResponse,
+    requirement: AiRunnerRequirement
   ): Consequence[AiRecordResponse] =
     if (response.text.trim.isEmpty)
       Consequence.argumentInvalid("AI record response was empty.")
@@ -473,7 +494,13 @@ final class TextusAiRunner(
                   AiRecordResponse(
                     record,
                     _effective_model(response.model),
-                    response.metadata ++ Map(
+                    AiExecutionFacts.normalize(
+                      _effective_selection(requirement),
+                      requirement,
+                      response.model,
+                      response.metadata,
+                      Some(candidate.mode)
+                    ) ++ Map(
                       "normalization_mode" -> candidate.mode,
                       "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(response.text)).take(600)
                     )

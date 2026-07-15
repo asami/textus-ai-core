@@ -35,7 +35,7 @@ gates.
 
 - A (DONE): AR-00 - Align the development dependency line with the active Cozy
   generator contract.
-- B (OPEN): AR-01 - Normalize execution facts.
+- B (IN_PROGRESS): AR-01 - Normalize execution facts.
 - C (OPEN): AR-02 - Add deterministic CAR Review provider fixtures.
 - D (OPEN): AR-03 - Restrict trace and metadata publication.
 - E (OPEN): AR-04 - Verify provider failure and lifecycle behavior.
