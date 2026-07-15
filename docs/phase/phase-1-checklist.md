@@ -1,0 +1,108 @@
+# Phase 1 - CAR Review AI Execution Foundation Checklist
+
+This checklist is the authoritative progress ledger for Phase 1. A checklist
+item becomes DONE only after its implementation, executable specification,
+focused validation, and review evidence exist.
+
+## Stage 0 - Development Dependency Alignment
+
+Stage Status:
+- Current status: DONE
+- Owner: Textus AI maintainers
+- Update rule: Keep this stage DONE only while the current Cozy generator and
+  declared CNCF/model dependency coordinates compile together.
+
+### AR-00: Align the Development Dependency Line
+
+- [x] Move Textus AI development to `goldenport-cncf 0.5.1-SNAPSHOT` and
+  `simplemodeling-model 0.1.8-SNAPSHOT`, matching the active Cozy generator
+  contract.
+- [x] Recompile the generated `LlmSession` sources and run `sbt --batch test`:
+  32 tests succeeded on 2026-07-16.
+
+## Stage 1 - Normalized Execution Facts
+
+Stage Status:
+- Current status: OPEN
+- Owner: Textus AI maintainers
+- Update rule: Update the checklist when the contract and its executable
+  evidence are both available.
+
+### AR-01: Provenance, Usage, Limitation, and Confidentiality Contract
+
+- [ ] Select a typed `AiRunner` response model or stable metadata namespace for
+  normalized execution facts.
+- [ ] Define provider/model/mode/engine, purpose, response identity, timing,
+  attempt, retry, finish, and normalization facts.
+- [ ] Define unknown-value semantics for token, quota, and cost-related facts.
+- [ ] Define safe input/output digest ownership and reconciliation.
+- [ ] Define which fields are public response metadata, CallTree-only, or
+  prohibited from recording.
+
+## Stage 2 - Deterministic Provider and Structured Review Scenarios
+
+Stage Status:
+- Current status: OPEN
+- Owner: Textus AI maintainers
+- Update rule: Mark items DONE only with deterministic executable
+  specifications that do not call a live provider.
+
+### AR-02: Deterministic CAR Review Provider
+
+- [ ] Add a deterministic `AiRunner` fixture that produces schema-valid
+  candidate results and normalized execution facts.
+- [ ] Add fixtures for Unknown/limitation, malformed output, empty output,
+  unavailable provider, quota, timeout, cancellation, and retry-then-success.
+- [ ] Add a CAR Review-shaped record-schema fixture proving that provider
+  substitution does not change the caller contract.
+
+## Stage 3 - Restricted Trace and Metadata Publication
+
+Stage Status:
+- Current status: OPEN
+- Owner: Textus AI maintainers
+- Update rule: Mark items DONE only after redaction behavior is executable and
+  reviewed against the intended CallTree surface.
+
+### AR-03: Confidential Execution Observability
+
+- [ ] Implement the selected digest-only or equivalent restrictive trace mode.
+- [ ] Ensure raw evidence, prompts, provider response bodies, credentials, and
+  sensitive provider errors are absent from ordinary metadata and CallTree.
+- [ ] Add executable specifications for allowed facts, redaction, and missing
+  provenance limitations.
+
+## Stage 4 - Provider and CNCF Lifecycle Verification
+
+Stage Status:
+- Current status: OPEN
+- Owner: Textus AI maintainers
+- Update rule: Mark items DONE only after each provider result is normalized
+  and the CNCF lifecycle boundary is verified.
+
+### AR-04: Explicit Provider and Lifecycle Outcomes
+
+- [ ] Verify Gemma/Ollama structured success and explicit unavailable/model
+  failure behavior.
+- [ ] Normalize OpenAI and Gemini usage, refusal, quota, rate-limit, and safe
+  response-identity facts where providers supply them.
+- [ ] Define timeout, retry, cancellation, and concurrency behavior through the
+  CNCF execution boundary, explicitly recording unsupported propagation.
+- [ ] Prove that no provider or model fallback occurs unless the caller's
+  resolved configuration explicitly selected it.
+
+## Stage 5 - Contract Promotion and Closure
+
+Stage Status:
+- Current status: OPEN
+- Owner: Textus AI maintainers
+- Update rule: Close the stage only when every Phase 1 completion condition is
+  evidenced and no unsettled design claim remains in notes alone.
+
+### AR-05: Promote and Close
+
+- [ ] Promote stable execution-fact and confidentiality decisions to
+  `docs/design/`.
+- [ ] Promote testable behavior to `docs/spec/` and executable specifications.
+- [ ] Record validation and review evidence in the phase documents.
+- [ ] Update the strategy status and close Phase 1.
