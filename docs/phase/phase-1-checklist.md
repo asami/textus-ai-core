@@ -44,7 +44,7 @@ Stage Status:
 ## Stage 2 - Deterministic Provider and Structured Review Scenarios
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark items DONE only with deterministic executable
   specifications that do not call a live provider.
@@ -61,7 +61,7 @@ Stage Status:
 ## Stage 3 - Restricted Trace and Metadata Publication
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark items DONE only after redaction behavior is executable and
   reviewed against the intended CallTree surface.
@@ -77,14 +77,14 @@ Stage Status:
 ## Stage 4 - Provider and CNCF Lifecycle Verification
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark items DONE only after each provider result is normalized
   and the CNCF lifecycle boundary is verified.
 
 ### AR-04: Explicit Provider and Lifecycle Outcomes
 
-- [ ] Verify Gemma/Ollama structured success and explicit unavailable/model
+- [x] Verify Gemma/Ollama structured success and explicit unavailable/model
   failure behavior.
 - [x] Normalize OpenAI and Gemini usage, refusal, quota, rate-limit, and safe
   response-identity facts where providers supply them.

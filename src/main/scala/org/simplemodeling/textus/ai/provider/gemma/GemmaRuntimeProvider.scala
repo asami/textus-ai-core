@@ -91,7 +91,8 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
           AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, properties),
           properties = properties
         ).flatMap(extract) recoverWith {
-          case _ => _request_with_fallback(xs.toVector, path, body, properties)(extract)
+          case conclusion if xs.nonEmpty => _request_with_fallback(xs.toVector, path, body, properties)(extract)
+          case conclusion => Consequence.Failure(conclusion)
         }
 
 final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: ExecutionContext) extends ChatService:
@@ -135,7 +136,8 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
           AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, properties),
           properties = properties
         ).flatMap(extract) recoverWith {
-          case _ => _request_with_fallback(xs.toVector, path, body, properties)(extract)
+          case conclusion if xs.nonEmpty => _request_with_fallback(xs.toVector, path, body, properties)(extract)
+          case conclusion => Consequence.Failure(conclusion)
         }
 
 final class GemmaGenerateExtensionPoint(config: GemmaRuntimeConfig)

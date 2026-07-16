@@ -612,6 +612,44 @@ final class TextusAiRunnerSpec
       gemma.metadata("gemma.usage.total_tokens") shouldBe "14"
     }
 
+    "run Gemma structured records through the registered runtime binding" in {
+      Given("a Gemma runtime binding backed by a deterministic Ollama response")
+      val config = GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434"))
+      val successContext = _context(new _FakeHttpDriver(
+        """{"response":"{\"exhibitions\":[{\"title\":\"Gemma Exhibition\",\"period_start\":\"2026-07-01\",\"period_end\":\"2026-07-31\",\"confidence\":88}]}","done_reason":"stop","prompt_eval_count":10,"eval_count":8}"""
+      ))
+      val successRunner = _gemma_runner(config, successContext)
+
+      When("a structured record request selects the local Gemma provider")
+      val success = {
+        given ExecutionContext = successContext
+        successRunner.generateRecord(AiRecordRequest("structured review", _artscene_record_schema))
+      }
+
+      Then("the actual Gemma binding produces a normalized schema-valid record")
+      success.toOption.get.record.getAny("exhibitions") should not be empty
+      success.toOption.get.metadata(AiExecutionFacts.PROVIDER) shouldBe "gemma"
+      success.toOption.get.metadata("gemma.usage.total_tokens") shouldBe "18"
+
+      Given("the same registered binding with an explicit provider failure")
+      val failureContext = _context(new _FakeHttpDriver("private provider body", HttpStatus.BadRequest))
+      val failureRunner = _gemma_runner(config, failureContext)
+
+      When("structured record generation reaches the failing Gemma endpoint")
+      val failure = {
+        given ExecutionContext = failureContext
+        failureRunner.generateRecord(AiRecordRequest("structured review", _artscene_record_schema))
+      }
+
+      Then("the failure is explicit and does not expose the provider body")
+      failure shouldBe a[Consequence.Failure[_]]
+      failure match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("category=invalid_request")
+          conclusion.display should not include "private provider body"
+        case _ => fail("Gemma provider failure was expected")
+    }
+
     "reject unknown AI tool names before provider execution" in {
       Given("a local provider service and a request with an unknown tool")
       given ExecutionContext = ExecutionContext.create()
@@ -995,6 +1033,24 @@ final class TextusAiRunnerSpec
     new Component() {}
       .withBinding("generate", _generate_binding())
       .withBinding("chat", _chat_binding())
+
+  private def _gemma_runner(
+    config: GemmaRuntimeConfig,
+    context: ExecutionContext
+  ): AiRunner = {
+    val component = new Component() {}
+      .withBinding("generate", AiRuntimeGenerateBinding.create(Some(config), None, None))
+      .withBinding("chat", AiRuntimeChatBinding.create(Some(config), None, None))
+    val provider = new TextusAiRunnerProvider(
+      component,
+      SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))
+    )
+    given ExecutionContext = context
+    provider.provide(
+      SpiContract("ai-runner", classOf[AiRunner]),
+      SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))
+    ).toOption.get
+  }
 
   private def _artscene_record_schema: Record =
     Record.dataAuto(

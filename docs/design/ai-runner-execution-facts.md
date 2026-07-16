@@ -146,6 +146,9 @@ output token counts exist, in which case the total is their exact sum.
 HTTP failures are classified without publishing the provider body as
 `invalid_request`, `authentication_failed`, `model_unavailable`, `timeout`,
 `quota_exhausted`, `rate_limited`, `unavailable`, or `provider_rejected`.
+Gemma/Ollama preserves that terminal category. It retries an endpoint only when
+the resolved `GemmaRuntimeConfig` explicitly declares `fallbackEndpoint`; it
+does not select another provider or model implicitly.
 
 ## Deferred Work
 
