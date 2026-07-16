@@ -3,9 +3,12 @@ package org.simplemodeling.textus.ai.provider.gemma
 import java.net.URI
 
 import io.circe.Json
+import scala.util.Try
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{ExtensionPoint, ServiceContract, VariationSelection}
+import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.configuration.ResolvedConfiguration
 import org.goldenport.protocol.Property
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
@@ -23,22 +26,70 @@ final case class GemmaRuntimeConfig(
 )
 
 object GemmaConfig:
+  def fromConfiguration(
+    configuration: ResolvedConfiguration
+  ): Option[GemmaRuntimeConfig] = {
+    val endpoint = _config_string(configuration, "endpoint")
+    val fallbackendpoint = _config_string(configuration, "fallback-endpoint", "fallbackEndpoint")
+    val provider = _config_string(configuration, "provider")
+    val mode = _config_string(configuration, "mode")
+    val engine = _config_string(configuration, "engine")
+    val model = _config_string(configuration, "model")
+    val timeout = _config_string(configuration, "timeout-seconds", "timeoutSeconds")
+    val concurrency = _config_string(configuration, "max-concurrency", "maxConcurrency")
+    Option.when(
+      Vector(endpoint, fallbackendpoint, provider, mode, engine, model, timeout, concurrency).exists(_.nonEmpty)
+    )(
+      GemmaRuntimeConfig(
+        provider = provider.getOrElse("gemma"),
+        mode = mode.getOrElse("local"),
+        engine = engine.getOrElse("ollama"),
+        endpoint = URI.create(endpoint.getOrElse("http://ollama:11434")),
+        fallbackEndpoint = fallbackendpoint.map(URI.create),
+        model = model.getOrElse("gemma:2b"),
+        timeoutSeconds = timeout.flatMap(_.toLongOption).getOrElse(30L),
+        maxConcurrency = concurrency.flatMap(_.toIntOption).getOrElse(2)
+      )
+    )
+  }
+
   def fromEnvironment(): GemmaRuntimeConfig =
-    val endpoint = sys.env.getOrElse("AI_LLM_ENDPOINT", "http://ollama:11434")
-    val fallback = sys.env.get("AI_LLM_FALLBACK_ENDPOINT").orElse(sys.env.get("AI_LLM_REMOTE_ENDPOINT"))
-    val model = sys.env.getOrElse("AI_GEMMA_MODEL", sys.env.getOrElse("AI_LLM_MODEL", "gemma:2b"))
-    val timeout = sys.env.get("AI_LLM_TIMEOUT_SECONDS").flatMap(_.toLongOption).getOrElse(30L)
-    val concurrency = sys.env.get("AI_LLM_MAX_CONCURRENCY").flatMap(_.toIntOption).getOrElse(2)
+    val environment = _bootstrap_environment
+    val endpoint = environment.getOrElse("AI_LLM_ENDPOINT", "http://ollama:11434")
+    val fallback = environment.get("AI_LLM_FALLBACK_ENDPOINT").orElse(environment.get("AI_LLM_REMOTE_ENDPOINT"))
+    val model = environment.getOrElse("AI_GEMMA_MODEL", environment.getOrElse("AI_LLM_MODEL", "gemma:2b"))
+    val timeout = environment.get("AI_LLM_TIMEOUT_SECONDS").flatMap(_.toLongOption).getOrElse(30L)
+    val concurrency = environment.get("AI_LLM_MAX_CONCURRENCY").flatMap(_.toIntOption).getOrElse(2)
     GemmaRuntimeConfig(
-      provider = sys.env.getOrElse("AI_GEMMA_PROVIDER", sys.env.getOrElse("AI_LLM_PROVIDER", "gemma")),
-      mode = sys.env.getOrElse("AI_GEMMA_MODE", sys.env.getOrElse("AI_LLM_MODE", "local")),
-      engine = sys.env.getOrElse("AI_GEMMA_ENGINE", sys.env.getOrElse("AI_LLM_LOCAL_ENGINE", "ollama")),
+      provider = environment.getOrElse("AI_GEMMA_PROVIDER", environment.getOrElse("AI_LLM_PROVIDER", "gemma")),
+      mode = environment.getOrElse("AI_GEMMA_MODE", environment.getOrElse("AI_LLM_MODE", "local")),
+      engine = environment.getOrElse("AI_GEMMA_ENGINE", environment.getOrElse("AI_LLM_LOCAL_ENGINE", "ollama")),
       endpoint = URI.create(endpoint),
       fallbackEndpoint = fallback.map(URI.create),
       model = model,
       timeoutSeconds = timeout,
       maxConcurrency = concurrency
     )
+
+  private def _config_string(
+    configuration: ResolvedConfiguration,
+    leaves: String*
+  ): Option[String] =
+    leaves.iterator
+      .flatMap { leaf =>
+        Vector(
+          s"textus.ai.gemma.$leaf",
+          s"textus.runtime.ai.gemma.$leaf",
+          s"cncf.ai.gemma.$leaf",
+          s"cncf.runtime.ai.gemma.$leaf"
+        ).iterator
+      }
+      .flatMap(key => Try(RuntimeConfig.getString(configuration, key)).toOption.flatten)
+      .map(_.trim)
+      .find(_.nonEmpty)
+
+  // cncf-car-lint: ignore provider/bootstrap compatibility fallback
+  private def _bootstrap_environment: scala.collection.immutable.Map[String, String] = sys.env
 
 private object GemmaSupport:
   def endpoints(config: GemmaRuntimeConfig): Vector[URI] =

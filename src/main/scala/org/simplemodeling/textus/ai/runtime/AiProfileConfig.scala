@@ -9,7 +9,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * Purpose and model profile configuration for Textus AI runtime selection.
  *
  * Request-level AiRunnerRequirement fields still have highest priority. This
- * resolver fills only missing provider/model fields from operator-managed
+ * resolver fills only missing provider/mode/engine/model fields from operator-managed
  * configuration, so application code can pass a purpose without hard-coding a
  * concrete model.
  *
@@ -17,9 +17,13 @@ import org.goldenport.configuration.ResolvedConfiguration
  *
  * - textus.ai.purposes.<purpose>.model-profile
  * - textus.ai.purposes.<purpose>.provider
+ * - textus.ai.purposes.<purpose>.mode
+ * - textus.ai.purposes.<purpose>.engine
  * - textus.ai.purposes.<purpose>.model
  * - textus.ai.purposes.<purpose>.tools
  * - textus.ai.model-profiles.<profile>.provider
+ * - textus.ai.model-profiles.<profile>.mode
+ * - textus.ai.model-profiles.<profile>.engine
  * - textus.ai.model-profiles.<profile>.model
  * - textus.ai.model-profiles.<profile>.role
  * - textus.ai.model-profiles.<profile>.quality
@@ -27,12 +31,14 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.model-profiles.<profile>.latency
  *
  * @since   Jul.  4, 2026
- * @version Jul.  9, 2026
+ * @version Jul. 16, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] final case class AiModelProfile(
   name: String,
   provider: Option[String] = None,
+  mode: Option[String] = None,
+  engine: Option[String] = None,
   model: Option[String] = None,
   role: Option[String] = None,
   quality: Option[String] = None,
@@ -45,6 +51,8 @@ private[textus] final case class AiPurposeProfile(
   purpose: String,
   modelProfile: Option[String] = None,
   provider: Option[String] = None,
+  mode: Option[String] = None,
+  engine: Option[String] = None,
   model: Option[String] = None,
   role: Option[String] = None,
   quality: Option[String] = None,
@@ -58,6 +66,8 @@ private[textus] final case class AiPurposeProfile(
   ): AiRunnerRequirement =
     requirement.copy(
       provider = requirement.provider.orElse(provider).orElse(modelprofile.flatMap(_.provider)),
+      mode = requirement.mode.orElse(mode).orElse(modelprofile.flatMap(_.mode)),
+      engine = requirement.engine.orElse(engine).orElse(modelprofile.flatMap(_.engine)),
       model = requirement.model.orElse(model).orElse(modelprofile.flatMap(_.model)),
       tools = if (requirement.tools.nonEmpty) requirement.tools else tools
     )
@@ -85,6 +95,8 @@ private[textus] final class AiProfileConfig(
         purpose = normalized,
         modelProfile = _config_string(_purpose_keys(normalized, "model-profile") ++ _purpose_keys(normalized, "modelProfile")),
         provider = _config_string(_purpose_keys(normalized, "provider")),
+        mode = _config_string(_purpose_keys(normalized, "mode")),
+        engine = _config_string(_purpose_keys(normalized, "engine")),
         model = _config_string(_purpose_keys(normalized, "model")),
         role = _config_string(_purpose_keys(normalized, "role")),
         quality = _config_string(_purpose_keys(normalized, "quality")),
@@ -99,6 +111,8 @@ private[textus] final class AiProfileConfig(
     }.filter(profile =>
       profile.modelProfile.nonEmpty ||
         profile.provider.nonEmpty ||
+        profile.mode.nonEmpty ||
+        profile.engine.nonEmpty ||
         profile.model.nonEmpty ||
         profile.role.nonEmpty ||
         profile.quality.nonEmpty ||
@@ -115,6 +129,8 @@ private[textus] final class AiProfileConfig(
       AiModelProfile(
         name = normalized,
         provider = _config_string(_model_profile_keys(normalized, "provider")),
+        mode = _config_string(_model_profile_keys(normalized, "mode")),
+        engine = _config_string(_model_profile_keys(normalized, "engine")),
         model = _config_string(_model_profile_keys(normalized, "model")),
         role = _config_string(_model_profile_keys(normalized, "role")),
         quality = _config_string(_model_profile_keys(normalized, "quality")),
@@ -124,6 +140,8 @@ private[textus] final class AiProfileConfig(
       )
     }.filter(profile =>
       profile.provider.nonEmpty ||
+        profile.mode.nonEmpty ||
+        profile.engine.nonEmpty ||
         profile.model.nonEmpty ||
         profile.role.nonEmpty ||
         profile.quality.nonEmpty ||

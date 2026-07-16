@@ -25,7 +25,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ComponentFactory
 import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
-import org.simplemodeling.textus.ai.provider.gemma.{GemmaOllamaGenerateService, GemmaRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaOllamaGenerateService, GemmaRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.google.{GoogleGenerateService, GoogleRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.{OpenAiGenerateService, OpenAiRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
@@ -301,6 +301,91 @@ final class TextusAiRunnerSpec
       Then("the configured profile chooses the provider and model for that purpose")
       generated.toOption.get.text shouldBe "purpose:linear-feature.worker.anchor-plan;model:gemini-worker"
       generated.toOption.get.model shouldBe Some("google")
+    }
+
+    "resolve purpose-specific mode and engine without overriding a request" in {
+      Given("an AI runner with a locally selected default and a remote purpose profile")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.sanpomap-scenario-generation.provider" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.purposes.sanpomap-scenario-generation.mode" -> ConfigurationValue.StringValue("remote"),
+          "textus.ai.purposes.sanpomap-scenario-generation.engine" -> ConfigurationValue.StringValue("http"),
+          "textus.ai.purposes.sanpomap-scenario-generation.model" -> ConfigurationValue.StringValue("operator-profile-model")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("a request selects the purpose without provider selection fields")
+      val profiled = runner.generate(
+        AiGenerateRequest(
+          prompt = "inspect-ai-selection",
+          requirement = AiRunnerRequirement(purpose = Some("sanpomap-scenario-generation"))
+        )
+      )
+
+      And("another request explicitly selects local Gemma")
+      val overridden = runner.generate(
+        AiGenerateRequest(
+          prompt = "inspect-ai-selection",
+          requirement = AiRunnerRequirement(
+            purpose = Some("sanpomap-scenario-generation"),
+            mode = Some("local"),
+            engine = Some("ollama"),
+            model = Some("operator-request-model")
+          )
+        )
+      )
+
+      Then("the profile controls the first request and explicit request fields retain precedence")
+      profiled.toOption.get.model shouldBe Some("remote")
+      profiled.toOption.get.text shouldBe "purpose:sanpomap-scenario-generation;model:operator-profile-model"
+      overridden.toOption.get.model shouldBe Some("local")
+      overridden.toOption.get.text shouldBe "purpose:sanpomap-scenario-generation;model:operator-request-model"
+    }
+
+    "report an unavailable purpose provider without silently using the default provider" in {
+      Given("an AI runner whose purpose profile selects no installed provider")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.sanpomap-location-investigation.provider" -> ConfigurationValue.StringValue("unavailable-provider"),
+          "textus.ai.purposes.sanpomap-location-investigation.mode" -> ConfigurationValue.StringValue("remote"),
+          "textus.ai.purposes.sanpomap-location-investigation.engine" -> ConfigurationValue.StringValue("http")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("a request selects the unavailable profile")
+      val result = runner.generate(
+        AiGenerateRequest(
+          prompt = "inspect-ai-selection",
+          requirement = AiRunnerRequirement(purpose = Some("sanpomap-location-investigation"))
+        )
+      )
+
+      Then("the request fails instead of falling back to the local default provider")
+      result shouldBe a[Consequence.Failure[_]]
+      result match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("unavailable-provider")
+        case _ => fail("an unavailable purpose provider must fail explicitly")
     }
 
     "prefer direct request model over a configured purpose profile" in {
@@ -1015,6 +1100,33 @@ final class TextusAiRunnerSpec
       config.map(_.apiKey) shouldBe Some("test-openai-key")
       config.map(_.model) shouldBe Some("gpt-test")
       config.map(_.timeoutSeconds) shouldBe Some(180L)
+    }
+
+    "read Gemma/Ollama endpoint and local runtime selection from CNCF configuration" in {
+      Given("a merged configuration with a project-local Gemma runtime profile")
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.gemma.endpoint" -> ConfigurationValue.StringValue("http://127.0.0.1:11434"),
+          "textus.ai.gemma.fallback-endpoint" -> ConfigurationValue.StringValue("http://localhost:11435"),
+          "textus.ai.gemma.provider" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.gemma.mode" -> ConfigurationValue.StringValue("local"),
+          "textus.ai.gemma.engine" -> ConfigurationValue.StringValue("ollama"),
+          "textus.ai.gemma.model" -> ConfigurationValue.StringValue("gemma3:4b"),
+          "textus.ai.gemma.timeout-seconds" -> ConfigurationValue.StringValue("45"),
+          "textus.ai.gemma.max-concurrency" -> ConfigurationValue.StringValue("3")
+        )),
+        ConfigurationTrace.empty
+      )
+
+      When("the Gemma runtime config is created")
+      val config = GemmaConfig.fromConfiguration(configuration)
+
+      Then("only Gemma runtime settings are selected without environment access")
+      config.map(_.endpoint.toString) shouldBe Some("http://127.0.0.1:11434")
+      config.flatMap(_.fallbackEndpoint.map(_.toString)) shouldBe Some("http://localhost:11435")
+      config.map(_.model) shouldBe Some("gemma3:4b")
+      config.map(_.timeoutSeconds) shouldBe Some(45L)
+      config.map(_.maxConcurrency) shouldBe Some(3)
     }
 
     "redact provider secrets from HTTP error diagnostics" in {

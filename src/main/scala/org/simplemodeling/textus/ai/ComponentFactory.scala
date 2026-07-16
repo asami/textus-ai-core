@@ -57,13 +57,13 @@ object ComponentFactory:
     component: Component,
     configuration: Option[ResolvedConfiguration]
   ): Component =
-    val gemma = Some(GemmaConfig.fromEnvironment())
+    val gemma = configuration.flatMap(GemmaConfig.fromConfiguration).getOrElse(GemmaConfig.fromEnvironment())
     val openai = configuration.flatMap(OpenAiConfig.fromConfiguration).orElse(OpenAiConfig.fromEnvironment())
     val google = configuration.flatMap(GoogleConfig.fromConfiguration).orElse(GoogleConfig.fromEnvironment())
     val defaultselection = _default_selection(configuration, openai.nonEmpty, google.nonEmpty)
     val profiles = AiProfileConfig.fromConfiguration(configuration)
-    val withgenerate = AiRuntimeGenerateBinding.register(component, gemma, openai, google)
-    val withchat = AiRuntimeChatBinding.register(withgenerate, gemma, openai, google)
+    val withgenerate = AiRuntimeGenerateBinding.register(component, Some(gemma), openai, google)
+    val withchat = AiRuntimeChatBinding.register(withgenerate, Some(gemma), openai, google)
     val runnerprovider = new TextusAiRunnerProvider(withchat, defaultselection, profiles)
     withchat.withPort(
       Component.Port
@@ -85,7 +85,7 @@ object ComponentFactory:
       "cncf.runtime.ai.provider",
       "textus.ai.llm.provider",
       "cncf.ai.llm.provider"
-    )).orElse(sys.env.get("AI_LLM_PROVIDER"))
+    )).orElse(_bootstrap_environment.get("AI_LLM_PROVIDER"))
     val provider =
       configuredprovider.
         orElse(Option.when(googleconfigured)("google")).
@@ -119,6 +119,9 @@ object ComponentFactory:
     configuration.flatMap { resolved =>
       keys.iterator.flatMap(key => Try(RuntimeConfig.getString(resolved, key)).toOption.flatten).find(_.trim.nonEmpty).map(_.trim)
     }
+
+  // cncf-car-lint: ignore provider/bootstrap compatibility fallback
+  private def _bootstrap_environment: scala.collection.immutable.Map[String, String] = sys.env
 
   private def _default_mode(provider: String): String =
     provider match {

@@ -46,7 +46,8 @@ Provider-specific endpoints:
 - OpenAI: `AI_OPENAI_ENDPOINT`, `OPENAI_API_KEY`, `AI_OPENAI_MODEL`
 - Google Gemini: `AI_GOOGLE_ENDPOINT`, `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `AI_GOOGLE_MODEL`
 
-OpenAI can also be configured through CNCF runtime configuration. The same
+Gemma/Ollama, OpenAI, and Google can be configured through CNCF runtime
+configuration. The same
 configuration keys can be supplied from user-local configuration and from
 project-local `conf/cncf/config.yaml`; the split below is an operational rule,
 not a different schema. Keep sensitive values in the user-local/private
@@ -76,6 +77,8 @@ textus:
     model-profiles:
       linear-worker:
         provider: openai
+        mode: remote
+        engine: gpt
         model: gpt-4.1-mini
         role: worker
         quality: standard
@@ -103,8 +106,21 @@ textus:
             model-profile: linear-judge
 ```
 
+For a local Gemma/Ollama runtime, ordinary connection settings can remain in
+the project configuration when they are not sensitive:
+
+```yaml
+textus:
+  ai:
+    gemma:
+      endpoint: http://127.0.0.1:11434
+      model: gemma3:4b
+      timeout-seconds: 45
+```
+
 `purposes` lets application components pass `AiRunnerRequirement.purpose`
-without hard-coding a concrete model. Direct request-level provider/model
+without hard-coding a concrete provider, mode, engine, or model. Direct
+request-level provider/mode/engine/model
 requirements still win over configured profiles. The performance fields
 (`role`, `quality`, `cost`, and `latency`) are operator metadata in this slice;
 they document selection intent and prepare later automatic escalation policies.
