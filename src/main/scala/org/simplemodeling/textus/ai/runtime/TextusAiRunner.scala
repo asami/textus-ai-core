@@ -358,7 +358,7 @@ final class TextusAiRunner(
     Map(
       "outcome" -> "success",
       "model" -> response.model.getOrElse(""),
-      "normalization_mode" -> response.metadata.getOrElse("normalization_mode", ""),
+      "normalization_mode" -> response.metadata.getOrElse(AiExecutionFacts.NORMALIZATION_MODE, ""),
       "output_chars" -> rawresponse.text.length.toString,
       "output_digest" -> AiExecutionFacts.digest(rawresponse.text)
     ) ++ AiExecutionFacts.calltreeMetadata(response.metadata)
@@ -481,9 +481,7 @@ final class TextusAiRunner(
                       response.model,
                       response.metadata,
                       Some(candidate.mode)
-                    ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text) ++ Map(
-                      "normalization_mode" -> candidate.mode
-                    ))
+                    ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text))
                   )
                 )
               case Left(message) =>

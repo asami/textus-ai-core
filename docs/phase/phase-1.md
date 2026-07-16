@@ -1,6 +1,6 @@
 # Phase 1 - CAR Review AI Execution Foundation
 
-status=open
+status=closed
 
 ## Purpose
 
@@ -39,7 +39,7 @@ gates.
 - C (DONE): AR-02 - Add deterministic CAR Review provider fixtures.
 - D (DONE): AR-03 - Restrict trace and metadata publication.
 - E (DONE): AR-04 - Verify provider failure and lifecycle behavior.
-- F (IN_PROGRESS): AR-05 - Promote settled contracts and close the phase.
+- F (DONE): AR-05 - Promote settled contracts and close the phase.
 
 Detailed status and acceptance evidence are recorded in
 `phase-1-checklist.md`.
@@ -58,6 +58,35 @@ Phase 1 closes only when:
 - lifecycle limits are bounded and their unsupported cases remain explicit; and
 - settled behavior is promoted from notes into design and specification
   documents with corresponding executable evidence.
+
+## Validation Evidence
+
+- `sbt --batch test` passed on 2026-07-16: 45 tests in four suites succeeded,
+  with no failures, cancellations, ignored tests, or pending tests.
+- `TextusAiRunnerSpec` passed after the final structured-response metadata
+  correction: 33 tests succeeded without live provider access.
+- Normal CAR lint found no `FAIL` result. Its residual warnings are outside
+  Phase 1 closure scope: a CAR artifact was not generated, the existing
+  environment-based bootstrap configuration remains to be migrated, and no
+  released ABI baseline was supplied.
+- `git diff --check` passed for the final metadata correction.
+- The post-implementation review found no actionable Phase 1 findings. It
+  confirmed the final response metadata exposes
+  `ai.execution.normalization_mode` rather than a bare compatibility key.
+
+## Closure
+
+Phase 1 closed on 2026-07-16. The implementation, deterministic executable
+specifications, normalized confidentiality boundary, provider failure
+normalization, and lifecycle limitations satisfy every completion condition.
+
+Deferred follow-ups are intentionally outside this phase:
+
+- normalize safe provider request identity and measured timing;
+- add CNCF Job lifecycle support for cancellation propagation and concurrency
+  enforcement; and
+- evaluate typed CNCF response fields after provider metadata semantics remain
+  stable across further use.
 
 ## Working References
 

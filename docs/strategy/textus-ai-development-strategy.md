@@ -77,17 +77,19 @@ Artifact: [Phase 1 dashboard](../phase/phase-1.md).
 
 ## Phase Ordering
 
-Phase 1 starts from the published runtime baseline. The next phase is selected
-only after Phase 1 completion conditions are met and its settled contracts are
-promoted to the appropriate design and specification documents.
+Phase 1 closed on 2026-07-16 after its completion conditions were met and its
+settled contracts were promoted to design and executable-specification
+documents. No successor phase is selected yet. The next planning task is to
+prioritize the deferred CNCF lifecycle and execution-measurement work without
+reopening Phase 1.
 
 ## Process Status
 
-- Current phase dashboard: `docs/phase/phase-1.md`
-- Current phase checklist: `docs/phase/phase-1-checklist.md`
-- Current development item: AR-05, Phase 1 contract promotion and closure
-- Current next slice: record final validation and review evidence, then close
-  Phase 1 without promoting deferred lifecycle controls into the runtime.
+- Current phase: none; Phase 1 is closed.
+- Completed phase dashboard: `docs/phase/phase-1.md`
+- Completed phase checklist: `docs/phase/phase-1-checklist.md`
+- Current next task: select the next phase from the explicit deferred work;
+  do not reopen the closed Phase 1 ledger for that planning.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

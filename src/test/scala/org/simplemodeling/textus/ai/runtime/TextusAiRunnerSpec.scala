@@ -855,7 +855,8 @@ final class TextusAiRunnerSpec
       val response = result.toOption.get
       response.record.getAny("exhibitions") should not be empty
       response.model shouldBe Some("remote")
-      response.metadata.get("normalization_mode") shouldBe Some("strict-json")
+      response.metadata(AiExecutionFacts.NORMALIZATION_MODE) shouldBe "strict-json"
+      response.metadata should not contain "normalization_mode"
     }
 
     "accept fenced and embedded JSON for structured record generation" in {
@@ -874,8 +875,10 @@ final class TextusAiRunnerSpec
       val embedded = runner.generateRecord(AiRecordRequest("embedded-record", _artscene_record_schema))
 
       Then("textus-ai normalizes both before consumers see the record")
-      fenced.toOption.get.metadata.get("normalization_mode") shouldBe Some("fenced-json")
-      embedded.toOption.get.metadata.get("normalization_mode") shouldBe Some("embedded-json")
+      fenced.toOption.get.metadata(AiExecutionFacts.NORMALIZATION_MODE) shouldBe "fenced-json"
+      embedded.toOption.get.metadata(AiExecutionFacts.NORMALIZATION_MODE) shouldBe "embedded-json"
+      fenced.toOption.get.metadata should not contain "normalization_mode"
+      embedded.toOption.get.metadata should not contain "normalization_mode"
     }
 
     "reject structured record responses that do not satisfy the schema" in {

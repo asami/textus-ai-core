@@ -96,7 +96,7 @@ Stage Status:
 ## Stage 5 - Contract Promotion and Closure
 
 Stage Status:
-- Current status: IN_PROGRESS
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Close the stage only when every Phase 1 completion condition is
   evidenced and no unsettled design claim remains in notes alone.
@@ -106,5 +106,13 @@ Stage Status:
 - [x] Promote stable execution-fact and confidentiality decisions to
   `docs/design/`.
 - [x] Promote testable behavior to `docs/spec/` and executable specifications.
-- [ ] Record validation and review evidence in the phase documents.
-- [ ] Update the strategy status and close Phase 1.
+- [x] Record validation and review evidence in the phase documents.
+- [x] Update the strategy status and close Phase 1.
+
+Closure evidence:
+
+- `sbt --batch test` passed with 45 successful tests on 2026-07-16.
+- Normal CAR lint reported no `FAIL`; its residual warnings are recorded in
+  `phase-1.md` as out-of-scope publication and bootstrap follow-up.
+- Final metadata-policy review confirmed `normalization_mode` is retained only
+  in the `ai.execution.*` namespace on runner responses.
