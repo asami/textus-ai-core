@@ -100,6 +100,18 @@ final class AiExecutionFactsSpec
       metadata(AiExecutionFacts.TOTAL_TOKENS) shouldBe "12"
     }
 
+    "record unsupported lifecycle boundaries as stable limitation codes" in {
+      Given("normalized metadata with a provider-specific limitation")
+      val metadata = Map(AiExecutionFacts.LIMITATION_CODES -> "usage_unavailable")
+
+      When("Textus AI adds its lifecycle limitations")
+      val normalized = AiExecutionFacts.lifecycleLimitations(metadata)
+
+      Then("the limitations are de-duplicated and sorted")
+      normalized(AiExecutionFacts.LIMITATION_CODES) shouldBe
+        "cancellation_not_propagated,concurrency_not_enforced,usage_unavailable"
+    }
+
     "omit execution facts that are unknown instead of synthesizing values" in {
       Given("an unresolved selection with no provider response model or optional requirement")
       val selection = SpiSelection()

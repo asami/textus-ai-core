@@ -427,12 +427,12 @@ final class TextusAiRunner(
     AiGenerateResponse(
       response.text,
       _effective_model(response.model),
-      AiExecutionFacts.normalize(
+      AiExecutionFacts.lifecycleLimitations(AiExecutionFacts.normalize(
         _effective_selection(requirement),
         requirement,
         response.model,
         response.metadata
-      ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text)
+      ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text))
     )
 
   private def _to_ai_chat_response(
@@ -443,12 +443,12 @@ final class TextusAiRunner(
     AiChatResponse(
       _to_ai_message(response.message),
       _effective_model(response.model),
-      AiExecutionFacts.normalize(
+      AiExecutionFacts.lifecycleLimitations(AiExecutionFacts.normalize(
         _effective_selection(requirement),
         requirement,
         response.model,
         response.metadata
-      ) ++ AiExecutionFacts.digestMetadata(_chat_input(req), response.message.content)
+      ) ++ AiExecutionFacts.digestMetadata(_chat_input(req), response.message.content))
     )
 
   private def _normalize_record_response(
@@ -475,7 +475,7 @@ final class TextusAiRunner(
                   AiRecordResponse(
                     record,
                     _effective_model(response.model),
-                    AiExecutionFacts.normalize(
+                    AiExecutionFacts.lifecycleLimitations(AiExecutionFacts.normalize(
                       _effective_selection(requirement),
                       requirement,
                       response.model,
@@ -483,7 +483,7 @@ final class TextusAiRunner(
                       Some(candidate.mode)
                     ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text) ++ Map(
                       "normalization_mode" -> candidate.mode
-                    )
+                    ))
                   )
                 )
               case Left(message) =>

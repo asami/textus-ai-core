@@ -93,6 +93,13 @@ The value identifies a missing measurement or execution boundary. It must not
 contain provider error bodies, credentials, account data, URLs, prompt text, or
 response text.
 
+Current Textus AI runner responses always record
+`cancellation_not_propagated` and `concurrency_not_enforced`: the synchronous
+provider binding does not propagate a caller cancellation signal and does not
+enforce a component-wide concurrency budget. Record generation retries only
+empty responses and explicit timeout-like failures, at most three times, using
+`ai.record.retry-limit` (default `1`).
+
 ## Confidentiality Boundary
 
 Response metadata may contain only normalized execution facts and explicitly
@@ -136,10 +143,14 @@ under its own namespace. CallTree capture is digest-only for input and output:
 it records SHA-256 digests and character counts, never payload or previews.
 Gemma/Ollama total tokens are emitted only when both provider-reported input and
 output token counts exist, in which case the total is their exact sum.
+HTTP failures are classified without publishing the provider body as
+`invalid_request`, `authentication_failed`, `model_unavailable`, `timeout`,
+`quota_exhausted`, `rate_limited`, `unavailable`, or `provider_rejected`.
 
 ## Deferred Work
 
 - Normalize request identity and timing.
 - Add deterministic fixtures for normalized failure and limitation cases.
-- Define cancellation and concurrency semantics through CNCF Job execution.
+- Move cancellation propagation and concurrency enforcement to CNCF Job
+  execution when the SPI gains those lifecycle controls.
 - Evaluate promotion of proven fields into typed CNCF `AiRunner` response data.

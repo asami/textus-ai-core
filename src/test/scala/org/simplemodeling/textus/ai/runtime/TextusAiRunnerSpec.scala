@@ -206,6 +206,8 @@ final class TextusAiRunnerSpec
         metadata(AiExecutionFacts.OUTPUT_TOKENS) shouldBe "8"
         metadata(AiExecutionFacts.TOTAL_TOKENS) shouldBe "21"
         metadata(AiExecutionFacts.OUTPUT_DIGEST) should startWith ("sha256:")
+        metadata(AiExecutionFacts.LIMITATION_CODES) shouldBe
+          "cancellation_not_propagated,concurrency_not_enforced"
       }
       generated.metadata(AiExecutionFacts.INPUT_DIGEST) shouldBe AiExecutionFacts.digest("execution-facts")
       chatted.metadata(AiExecutionFacts.INPUT_DIGEST) shouldBe AiExecutionFacts.digest("user: execution facts")
@@ -633,6 +635,41 @@ final class TextusAiRunnerSpec
           conclusion.display should include ("Unknown AI tools: vendor_special")
         case _ =>
           fail("unknown AI tool request should fail")
+    }
+
+    "classify provider HTTP failures without exposing provider error bodies" in {
+      Given("provider HTTP failures containing sensitive error details")
+      val cases = Vector(
+        429 -> ("quota exhausted for account secret-account", "quota_exhausted"),
+        429 -> ("too many requests for secret-account", "rate_limited"),
+        504 -> ("upstream body must not be published", "timeout"),
+        404 -> ("model gemini-private is unavailable", "model_unavailable"),
+        503 -> ("provider internal detail", "unavailable")
+      )
+
+      When("failure categories are resolved and an HTTP boundary returns a bad request")
+      val categoryResults = cases.map { case (status, (body, _)) =>
+        HttpSupport.failureCategory(status, body)
+      }
+      given ExecutionContext = _context(new _FakeHttpDriver("provider body with secret-account", HttpStatus.BadRequest))
+      val httpResult = HttpSupport.post(
+        URI.create("https://provider.example"),
+        "/v1/generate?key=secret-key",
+        io.circe.Json.obj(),
+        30L
+      )
+
+      Then("categories are stable and the HTTP failure excludes the body and credential")
+      categoryResults.zip(cases).foreach { case (actual, (_, (_, expected))) =>
+        actual shouldBe expected
+      }
+      httpResult match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("category=invalid_request")
+          conclusion.display should include ("status=400")
+          conclusion.display should not include "secret-account"
+          conclusion.display should not include "secret-key"
+        case _ => fail("bad request should fail")
     }
 
     "record direct SPI generate calls in the CNCF CallTree" in {
@@ -1134,7 +1171,10 @@ final class TextusAiRunnerSpec
       )
   }
 
-  private final class _FakeHttpDriver(response: String) extends HttpDriver {
+  private final class _FakeHttpDriver(
+    response: String,
+    status: HttpStatus = HttpStatus.Ok
+  ) extends HttpDriver {
     var calls: Vector[String] = Vector.empty
     var body: Option[String] = None
     var headers: Map[String, String] = Map.empty
@@ -1144,7 +1184,7 @@ final class TextusAiRunnerSpec
       headers: Map[String, String],
       properties: Vector[Property] = Vector.empty
     ): HttpResponse =
-      _http_response(response)
+      _http_response(response, status)
 
     override def post(
       path: String,
@@ -1155,7 +1195,7 @@ final class TextusAiRunnerSpec
       calls = calls :+ s"POST $path"
       this.body = body
       this.headers = headers
-      _http_response(response)
+      _http_response(response, status)
     }
 
     override def put(
@@ -1164,15 +1204,16 @@ final class TextusAiRunnerSpec
       headers: Map[String, String],
       properties: Vector[Property] = Vector.empty
     ): HttpResponse =
-      _http_response(response)
+      _http_response(response, status)
   }
 
-  private def _http_response(body: String): HttpResponse =
+  private def _http_response(body: String, status: HttpStatus = HttpStatus.Ok): HttpResponse =
     HttpResponse.Text(
-      HttpStatus.Ok,
+      status,
       ContentType(MimeType("application/json"), Some(StandardCharsets.UTF_8)),
       Bag.text(body, StandardCharsets.UTF_8)
     )
+
 
   private def _context(driver: HttpDriver): ExecutionContext = {
     val base = ExecutionContext.create()

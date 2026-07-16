@@ -145,11 +145,28 @@ private[textus] object HttpSupport:
     ctx.runtime.unitOfWorkInterpreter(UnitOfWorkOp.HttpPost(url, Some(body.noSpaces), effectiveheaders, effectiveproperties)).flatMap { response =>
       if response.code / 100 != 2 then
         Consequence.serviceUnavailable(
-          redactSensitive(s"HTTP ${response.code} for $url: ${response.getString.getOrElse(response.show)}")
+          _failure_message(response.code, response.getString.getOrElse(""))
         )
       else
         parse(response.getString.getOrElse("")) match
           case Left(e) => Consequence.valueInvalid(s"Invalid JSON response: ${e.getMessage}")
           case Right(json) => Consequence.success(json)
+    }
+  }
+
+  private def _failure_message(status: Int, body: String): String =
+    s"AI provider request failed: category=${failureCategory(status, body)} status=$status"
+
+  def failureCategory(status: Int, body: String): String = {
+    val normalized = Option(body).getOrElse("").toLowerCase(java.util.Locale.ROOT)
+    status match {
+      case 400 => "invalid_request"
+      case 401 | 403 => "authentication_failed"
+      case 404 => "model_unavailable"
+      case 408 | 504 => "timeout"
+      case 429 if normalized.contains("quota") || normalized.contains("resource_exhausted") => "quota_exhausted"
+      case 429 => "rate_limited"
+      case code if code >= 500 => "unavailable"
+      case _ => "provider_rejected"
     }
   }

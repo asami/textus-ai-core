@@ -86,11 +86,11 @@ Stage Status:
 
 - [ ] Verify Gemma/Ollama structured success and explicit unavailable/model
   failure behavior.
-- [ ] Normalize OpenAI and Gemini usage, refusal, quota, rate-limit, and safe
+- [x] Normalize OpenAI and Gemini usage, refusal, quota, rate-limit, and safe
   response-identity facts where providers supply them.
-- [ ] Define timeout, retry, cancellation, and concurrency behavior through the
+- [x] Define timeout, retry, cancellation, and concurrency behavior through the
   CNCF execution boundary, explicitly recording unsupported propagation.
-- [ ] Prove that no provider or model fallback occurs unless the caller's
+- [x] Prove that no provider or model fallback occurs unless the caller's
   resolved configuration explicitly selected it.
 
 ## Stage 5 - Contract Promotion and Closure

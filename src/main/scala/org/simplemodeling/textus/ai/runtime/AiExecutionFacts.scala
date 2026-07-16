@@ -30,6 +30,7 @@ private[textus] object AiExecutionFacts {
   val TOTAL_TOKENS = "ai.usage.total_tokens"
   val INPUT_DIGEST = "ai.execution.input_digest"
   val OUTPUT_DIGEST = "ai.execution.output_digest"
+  val LIMITATION_CODES = "ai.limitation.codes"
 
   def normalize(
     selection: SpiSelection,
@@ -70,6 +71,16 @@ private[textus] object AiExecutionFacts {
       case (key, value) if _is_normalized_key(key) && value.trim.nonEmpty =>
         s"response_metadata.$key" -> value.trim
     }
+
+  def lifecycleLimitations(metadata: Map[String, String]): Map[String, String] = {
+    val existing = metadata.get(LIMITATION_CODES).toVector.flatMap(_.split(","))
+    val codes = (existing ++ Vector("cancellation_not_propagated", "concurrency_not_enforced"))
+      .map(_.trim.toLowerCase(Locale.ROOT))
+      .filter(_.nonEmpty)
+      .distinct
+      .sorted
+    metadata.updated(LIMITATION_CODES, codes.mkString(","))
+  }
 
   private def _provider_metadata(
     metadata: Map[String, String]
