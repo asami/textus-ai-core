@@ -19,31 +19,31 @@ private[runtime] final class CarReviewAiRunnerFixture extends AiRunner {
 
   def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] =
     _scenario(req.properties) match {
-      case Success | RetryThenSuccess => Consequence.success(AiGenerateResponse("fixture:review-ready", Some(Model), _metadata))
-      case Unknown => Consequence.success(AiGenerateResponse("fixture:review-unknown", Some(Model), _limitedMetadata))
+      case Success | RetryThenSuccess => Consequence.success(AiGenerateResponse("fixture:review-ready", Some(model), _metadata))
+      case Unknown => Consequence.success(AiGenerateResponse("fixture:review-unknown", Some(model), _limited_metadata))
       case scenario => _failure(scenario)
     }
 
   def generateRecord(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] =
     _scenario(req.properties) match {
-      case Success => Consequence.success(AiRecordResponse(Candidate, Some(Model), _metadata))
-      case Unknown => Consequence.success(AiRecordResponse(Candidate, Some(Model), _limitedMetadata))
+      case Success => Consequence.success(AiRecordResponse(candidate, Some(model), _record_metadata(req)))
+      case Unknown => Consequence.success(AiRecordResponse(candidate, Some(model), _limited_record_metadata(req)))
       case RetryThenSuccess if _retry_then_success_remaining > 0 =>
         _retry_then_success_remaining -= 1
         Consequence.serviceUnavailable("fixture timeout before retry")
-      case RetryThenSuccess => Consequence.success(AiRecordResponse(Candidate, Some(Model), _metadata ++ Map("ai.execution.retry_count" -> "1")))
+      case RetryThenSuccess => Consequence.success(AiRecordResponse(candidate, Some(model), _record_metadata(req) ++ Map("ai.execution.retry_count" -> "1")))
       case scenario => _failure(scenario)
     }
 
   def chat(req: AiChatRequest)(using ExecutionContext): Consequence[AiChatResponse] =
     _scenario(req.properties) match {
-      case Success | RetryThenSuccess => Consequence.success(AiChatResponse(AiMessage("assistant", "fixture:review-ready"), Some(Model), _metadata))
-      case Unknown => Consequence.success(AiChatResponse(AiMessage("assistant", "fixture:review-unknown"), Some(Model), _limitedMetadata))
+      case Success | RetryThenSuccess => Consequence.success(AiChatResponse(AiMessage("assistant", "fixture:review-ready"), Some(model), _metadata))
+      case Unknown => Consequence.success(AiChatResponse(AiMessage("assistant", "fixture:review-unknown"), Some(model), _limited_metadata))
       case scenario => _failure(scenario)
     }
 
   private def _scenario(properties: Vector[org.goldenport.protocol.Property]): Scenario =
-    properties.find(_.name == ScenarioProperty).map(x => String.valueOf(x.value).trim).collect {
+    properties.find(_.name == scenarioProperty).map(x => String.valueOf(x.value).trim).collect {
       case "unknown" => Unknown
       case "malformed" => Malformed
       case "empty" => Empty
@@ -66,18 +66,18 @@ private[runtime] final class CarReviewAiRunnerFixture extends AiRunner {
 }
 
 private[runtime] object CarReviewAiRunnerFixture {
-  val Model = "car-review-fixture-v1"
-  val ScenarioProperty = "ai.fixture.scenario"
+  val model = "car-review-fixture-v1"
+  val scenarioProperty = "ai.fixture.scenario"
 
-  val Candidate: Record = Record.dataAuto(
+  val candidate: Record = Record.dataAuto(
     "findings" -> Vector(Record.dataAuto(
       "rule_id" -> "documentation.clarity",
-      "severity" -> "warning",
+      "severity" -> "medium",
       "message" -> "Describe the operation input and output."
     ))
   )
 
-  val Limitations: Map[String, String] = Map(
+  val limitations: Map[String, String] = Map(
     "ai.limitation.codes" -> "provider_identity_unavailable,usage_unavailable"
   )
 
@@ -85,14 +85,27 @@ private[runtime] object CarReviewAiRunnerFixture {
     "ai.execution.provider" -> "fixture",
     "ai.execution.mode" -> "deterministic",
     "ai.execution.engine" -> "car-review",
-    "ai.execution.model" -> Model,
+    "ai.execution.model" -> model,
     "ai.usage.request_count" -> "1"
   )
 
-  private val _limitedMetadata = Map(
+  private val _limited_metadata = Map(
     "ai.execution.mode" -> "deterministic",
     "ai.execution.engine" -> "car-review"
-  ) ++ Limitations
+  ) ++ limitations
+
+  private def _record_metadata(req: AiRecordRequest): Map[String, String] =
+    _metadata ++ _record_provenance(req)
+
+  private def _limited_record_metadata(req: AiRecordRequest): Map[String, String] =
+    _limited_metadata ++ _record_provenance(req)
+
+  private def _record_provenance(req: AiRecordRequest): Map[String, String] =
+    req.requirement.purpose.map(value => "ai.execution.purpose" -> value).toMap ++
+      Map(
+        "ai.execution.input_digest" -> AiExecutionFacts.digest(req.prompt),
+        "ai.execution.output_digest" -> AiExecutionFacts.digest(candidate.toJsonString)
+      )
 
   private sealed trait Scenario
   private case object Success extends Scenario

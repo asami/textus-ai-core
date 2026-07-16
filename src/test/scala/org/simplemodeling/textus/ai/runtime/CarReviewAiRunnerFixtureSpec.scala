@@ -28,10 +28,12 @@ final class CarReviewAiRunnerFixtureSpec extends AnyWordSpec with Matchers with 
       val response = fixture.generateRecord(AiRecordRequest("review the component", schema)).toOption.get
 
       Then("the candidate and normalized execution facts are stable")
-      response.record shouldBe Candidate
-      response.model shouldBe Some(Model)
+      response.record shouldBe candidate
+      response.model shouldBe Some(model)
       response.metadata("ai.execution.provider") shouldBe "fixture"
       response.metadata("ai.execution.mode") shouldBe "deterministic"
+      response.metadata("ai.execution.input_digest") should startWith("sha256:")
+      response.metadata("ai.execution.output_digest") should startWith("sha256:")
       response.metadata("ai.usage.request_count") shouldBe "1"
     }
 
@@ -99,11 +101,11 @@ final class CarReviewAiRunnerFixtureSpec extends AnyWordSpec with Matchers with 
 
       Then("the first attempt exposes the timeout and the second attempt succeeds")
       first shouldBe a[Consequence.Failure[_]]
-      second.toOption.get.record shouldBe Candidate
+      second.toOption.get.record shouldBe candidate
       second.toOption.get.metadata("ai.execution.retry_count") shouldBe "1"
     }
   }
 
   private def _scenario(value: String): Vector[Property] =
-    Vector(Property(ScenarioProperty, value, None))
+    Vector(Property(scenarioProperty, value, None))
 }
