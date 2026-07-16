@@ -205,7 +205,11 @@ final class TextusAiRunnerSpec
         metadata(AiExecutionFacts.INPUT_TOKENS) shouldBe "13"
         metadata(AiExecutionFacts.OUTPUT_TOKENS) shouldBe "8"
         metadata(AiExecutionFacts.TOTAL_TOKENS) shouldBe "21"
+        metadata(AiExecutionFacts.OUTPUT_DIGEST) should startWith ("sha256:")
       }
+      generated.metadata(AiExecutionFacts.INPUT_DIGEST) shouldBe AiExecutionFacts.digest("execution-facts")
+      chatted.metadata(AiExecutionFacts.INPUT_DIGEST) shouldBe AiExecutionFacts.digest("user: execution facts")
+      recorded.metadata(AiExecutionFacts.INPUT_DIGEST) shouldBe AiExecutionFacts.digest("strict-record")
       recorded.metadata(AiExecutionFacts.NORMALIZATION_MODE) shouldBe "strict-json"
     }
 
@@ -655,20 +659,22 @@ final class TextusAiRunnerSpec
         )
       )
 
-      Then("the prompt response and model are visible through CallTree metadata")
+      Then("only bounded execution facts and payload digests are visible through CallTree metadata")
       generated.toOption.get.model shouldBe Some("remote")
       val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
       val record = ObservabilityEngine.callTreeRecord(calltree)
       val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
       val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate")).value
-      node.getString("operation") shouldBe Some("direct-generate")
-      node.getString("task") shouldBe Some("calltree-spec")
-      node.getString("prompt").value should include ("trace this prompt")
-      node.getString("response").value should include ("generated:remote:trace this prompt")
+      node.getString("operation") shouldBe Some("generate")
+      node.getString("input_digest") shouldBe Some(AiExecutionFacts.digest("trace this prompt"))
+      node.getString("output_digest") shouldBe Some(AiExecutionFacts.digest("generated:remote:trace this prompt"))
+      node.getString("prompt") shouldBe empty
+      node.getString("response") shouldBe empty
+      node.getString("task") shouldBe empty
       node.getString("model") shouldBe Some("remote")
     }
 
-    "record structured generation prompts and raw responses in the CNCF CallTree" in {
+    "record structured generation digests instead of raw payloads in the CNCF CallTree" in {
       Given("an AI runner invoked for structured record generation")
       given ExecutionContext =
         ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
@@ -693,22 +699,23 @@ final class TextusAiRunnerSpec
         )
       )
 
-      Then("the prompt raw response and normalization mode are visible through CallTree metadata")
+      Then("the normalized facts and digests are visible without raw payloads")
       generated.toOption.get.record.getAny("exhibitions") should not be empty
       val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
       val record = ObservabilityEngine.callTreeRecord(calltree)
       val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
       val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate-record")).value
-      node.getString("operation") shouldBe Some("record-fetch")
-      node.getString("task") shouldBe Some("calltree-record-spec")
-      node.getString("prompt") shouldBe Some("strict-record")
-      node.getString("response").value should include ("Strict Record Exhibition")
-      node.getString("response_chars").value.toInt should be > 0
+      node.getString("operation") shouldBe Some("generate-record")
+      node.getString("input_digest") shouldBe Some(AiExecutionFacts.digest("strict-record"))
+      node.getString("output_digest") should not be empty
+      node.getString("prompt") shouldBe empty
+      node.getString("response") shouldBe empty
+      node.getString("output_chars").value.toInt should be > 0
       node.getString("normalization_mode") shouldBe Some("strict-json")
       node.getString("model") shouldBe Some("remote")
     }
 
-    "record structured generation raw responses when normalization fails" in {
+    "record structured generation failure facts without raw payloads" in {
       Given("an AI runner whose structured response does not satisfy the schema")
       given ExecutionContext =
         ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
@@ -733,17 +740,19 @@ final class TextusAiRunnerSpec
         )
       )
 
-      Then("the failure still includes the raw AI response in CallTree metadata")
+      Then("the failure retains only bounded facts and no error body or raw response")
       generated shouldBe a[Consequence.Failure[_]]
       val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
       val record = ObservabilityEngine.callTreeRecord(calltree)
       val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
       val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate-record")).value
       node.getString("outcome") shouldBe Some("failure")
-      node.getString("error").value should include ("AI record schema mismatch")
-      node.getString("prompt") shouldBe Some("missing-record-field")
-      node.getString("response").value should include ("Missing Date")
-      node.getString("response_chars").value.toInt should be > 0
+      node.getString("error") shouldBe empty
+      node.getString("prompt") shouldBe empty
+      node.getString("response") shouldBe empty
+      node.getString("input_digest") shouldBe Some(AiExecutionFacts.digest("missing-record-field"))
+      node.getString("output_digest") should not be empty
+      node.getString("output_chars").value.toInt should be > 0
       node.getString("model") shouldBe Some("remote")
     }
 

@@ -95,11 +95,12 @@ response text.
 
 ## Confidentiality Boundary
 
-Response metadata may contain only safe execution facts. Ordinary CallTree
-records may contain the same allowlisted facts and bounded counts or sizes.
-They must not contain raw evidence, prompt text, response text, authorization
-headers, credentials, account identity, provider error bodies, or arbitrary
-request metadata.
+Response metadata may contain only normalized execution facts and explicitly
+allowlisted provider-specific facts. Ordinary CallTree records may contain only
+normalized facts and bounded counts or sizes. They must not contain raw
+evidence, prompt text, response text, authorization headers, credentials,
+account identity, provider error bodies, provider-specific metadata, or
+arbitrary request metadata.
 
 `input_digest` and `output_digest` are permitted only when the digest is
 calculated over the bounded payload and uses the declared `sha256:<hex>` form.
@@ -130,14 +131,15 @@ AI maps the selected provider's provider-specific facts into the normalized
 namespace; it does not infer absent values.
 
 Reserved normalized namespaces cannot be overwritten by provider metadata,
-while provider-specific metadata remains available under its own namespace.
+while only explicitly allowlisted provider-specific metadata remains available
+under its own namespace. CallTree capture is digest-only for input and output:
+it records SHA-256 digests and character counts, never payload or previews.
 Gemma/Ollama total tokens are emitted only when both provider-reported input and
 output token counts exist, in which case the total is their exact sum.
 
 ## Deferred Work
 
-- Normalize request identity, timing, digests, and limitation codes.
+- Normalize request identity and timing.
 - Add deterministic fixtures for normalized failure and limitation cases.
-- Restrict CallTree to the allowlisted facts and digest-only trace behavior.
 - Define cancellation and concurrency semantics through CNCF Job execution.
 - Evaluate promotion of proven fields into typed CNCF `AiRunner` response data.

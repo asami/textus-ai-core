@@ -37,8 +37,8 @@ Stage Status:
   and normalization facts. Timing, attempt, and retry remain open.
 - [x] Define unknown-value semantics for token and cost-related facts. Quota
   semantics remain open.
-- [ ] Define safe input/output digest ownership and reconciliation.
-- [ ] Define which fields are public response metadata, CallTree-only, or
+- [x] Define safe input/output digest ownership and reconciliation.
+- [x] Define which fields are public response metadata, CallTree-only, or
   prohibited from recording.
 
 ## Stage 2 - Deterministic Provider and Structured Review Scenarios
@@ -68,10 +68,10 @@ Stage Status:
 
 ### AR-03: Confidential Execution Observability
 
-- [ ] Implement the selected digest-only or equivalent restrictive trace mode.
-- [ ] Ensure raw evidence, prompts, provider response bodies, credentials, and
+- [x] Implement the selected digest-only restrictive trace mode.
+- [x] Ensure raw evidence, prompts, provider response bodies, credentials, and
   sensitive provider errors are absent from ordinary metadata and CallTree.
-- [ ] Add executable specifications for allowed facts, redaction, and missing
+- [x] Add executable specifications for allowed facts, redaction, and missing
   provenance limitations.
 
 ## Stage 4 - Provider and CNCF Lifecycle Verification

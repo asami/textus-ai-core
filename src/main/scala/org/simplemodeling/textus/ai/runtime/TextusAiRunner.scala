@@ -42,7 +42,7 @@ final class TextusAiRunner(
             properties = _request_properties(req.properties, requirement)
           )
         )
-      } yield _to_ai_generate_response(response, requirement)
+      } yield _to_ai_generate_response(req, response, requirement)
     }
   }
 
@@ -71,7 +71,7 @@ final class TextusAiRunner(
             properties = _request_properties(req.properties, requirement)
           )
         )
-      } yield _to_ai_chat_response(response, requirement)
+      } yield _to_ai_chat_response(req, response, requirement)
     }
   }
 
@@ -152,8 +152,7 @@ final class TextusAiRunner(
               case Consequence.Failure(conclusion) =>
                 calltree.leave(
                   _record_failure_calltree_attributes(req, rawresponse) ++ Map(
-                    "status" -> conclusion.status.webCode.code.toString,
-                    "error" -> conclusion.display
+                    "status" -> conclusion.status.webCode.code.toString
                   )
                 )
             }
@@ -161,8 +160,7 @@ final class TextusAiRunner(
           case Consequence.Failure(conclusion) =>
             calltree.leave(Map(
               "outcome" -> "failure",
-              "status" -> conclusion.status.webCode.code.toString,
-              "error" -> conclusion.display
+              "status" -> conclusion.status.webCode.code.toString
             ))
             Consequence.Failure(conclusion)
         }
@@ -170,7 +168,7 @@ final class TextusAiRunner(
         case e: Throwable =>
           calltree.leave(Map(
             "outcome" -> "failure",
-            "error" -> Option(e.getMessage).getOrElse(e.getClass.getName)
+            "status" -> "500"
           ))
           throw e
       }
@@ -198,9 +196,8 @@ final class TextusAiRunner(
             calltree.leave(_generate_response_calltree_attributes(req, response))
           case Consequence.Failure(conclusion) =>
             calltree.leave(Map(
-              "outcome" -> "failure",
-              "status" -> conclusion.status.webCode.code.toString,
-              "error" -> conclusion.display
+            "outcome" -> "failure",
+            "status" -> conclusion.status.webCode.code.toString
             ))
         }
         result
@@ -208,7 +205,7 @@ final class TextusAiRunner(
         case e: Throwable =>
           calltree.leave(Map(
             "outcome" -> "failure",
-            "error" -> Option(e.getMessage).getOrElse(e.getClass.getName)
+            "status" -> "500"
           ))
           throw e
       }
@@ -236,9 +233,8 @@ final class TextusAiRunner(
             calltree.leave(_chat_response_calltree_attributes(req, response))
           case Consequence.Failure(conclusion) =>
             calltree.leave(Map(
-              "outcome" -> "failure",
-              "status" -> conclusion.status.webCode.code.toString,
-              "error" -> conclusion.display
+            "outcome" -> "failure",
+            "status" -> conclusion.status.webCode.code.toString
             ))
         }
         result
@@ -246,7 +242,7 @@ final class TextusAiRunner(
         case e: Throwable =>
           calltree.leave(Map(
             "outcome" -> "failure",
-            "error" -> Option(e.getMessage).getOrElse(e.getClass.getName)
+            "status" -> "500"
           ))
           throw e
       }
@@ -264,31 +260,29 @@ final class TextusAiRunner(
       req.temperature,
       req.maxTokens,
       req.trace.promptConfidentiality.label,
-      req.trace.responseConfidentiality.label,
-      req.metadata
+      req.trace.responseConfidentiality.label
     ) ++ Map(
-      "prompt_chars" -> req.prompt.length.toString,
-      "prompt" -> req.trace.calltreePrompt(req.prompt),
-      "prompt_preview" -> _calltree_text_preview(req.trace.calltreePrompt(req.prompt))
+      "operation" -> "generate",
+      "input_chars" -> req.prompt.length.toString,
+      "input_digest" -> AiExecutionFacts.digest(req.prompt)
     )
 
   private def _chat_request_calltree_attributes(
     req: AiChatRequest,
     requirement: AiRunnerRequirement
   ): Map[String, String] = {
-    val prompttext = req.messages.map(message => s"${message.role}: ${message.content}").mkString("\n")
+    val prompttext = _chat_input(req)
     _common_request_calltree_attributes(
       requirement,
       req.temperature,
       req.maxTokens,
       req.trace.promptConfidentiality.label,
-      req.trace.responseConfidentiality.label,
-      req.metadata
+      req.trace.responseConfidentiality.label
     ) ++ Map(
+      "operation" -> "chat",
       "message_count" -> req.messages.length.toString,
-      "prompt_chars" -> prompttext.length.toString,
-      "prompt" -> req.trace.calltreePrompt(prompttext),
-      "prompt_preview" -> _calltree_text_preview(req.trace.calltreePrompt(prompttext))
+      "input_chars" -> prompttext.length.toString,
+      "input_digest" -> AiExecutionFacts.digest(prompttext)
     )
   }
 
@@ -301,14 +295,12 @@ final class TextusAiRunner(
       req.temperature,
       req.maxTokens,
       req.trace.promptConfidentiality.label,
-      req.trace.responseConfidentiality.label,
-      req.metadata
+      req.trace.responseConfidentiality.label
     ) ++ Map(
-      "operation" -> req.metadata.getOrElse("operation", "generate-record"),
+      "operation" -> "generate-record",
       "record_schema_required" -> _schema_required(req.schema).mkString(","),
-      "prompt_chars" -> req.prompt.length.toString,
-      "prompt" -> req.trace.calltreePrompt(req.prompt),
-      "prompt_preview" -> _calltree_text_preview(req.trace.calltreePrompt(req.prompt))
+      "input_chars" -> req.prompt.length.toString,
+      "input_digest" -> AiExecutionFacts.digest(req.prompt)
     )
 
   private def _common_request_calltree_attributes(
@@ -316,14 +308,11 @@ final class TextusAiRunner(
     temperature: Option[Double],
     maxtokens: Option[Int],
     promptconfidentiality: String,
-    responseconfidentiality: String,
-    metadata: Map[String, String]
+    responseconfidentiality: String
   ): Map[String, String] = {
     val effective = _effective_selection(requirement)
     Map(
       "calltree_kind" -> "provider-step",
-      "operation" -> metadata.getOrElse("operation", ""),
-      "task" -> metadata.getOrElse("task", metadata.getOrElse("dsl", "")),
       "provider" -> effective.provider.getOrElse(""),
       "mode" -> effective.mode.getOrElse(""),
       "engine" -> effective.engine.getOrElse(""),
@@ -334,7 +323,7 @@ final class TextusAiRunner(
       "max_tokens" -> maxtokens.map(_.toString).getOrElse(""),
       "prompt_confidentiality" -> promptconfidentiality,
       "response_confidentiality" -> responseconfidentiality
-    ) ++ metadata.toVector.map { case (key, value) => s"metadata.$key" -> value }.toMap
+    )
   }
 
   private def _generate_response_calltree_attributes(
@@ -344,10 +333,9 @@ final class TextusAiRunner(
     Map(
       "outcome" -> "success",
       "model" -> response.model.getOrElse(""),
-      "response_chars" -> response.text.length.toString,
-      "response" -> req.trace.calltreeResponse(response.text),
-      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(response.text))
-    ) ++ response.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
+      "output_chars" -> response.text.length.toString,
+      "output_digest" -> AiExecutionFacts.digest(response.text)
+    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata)
 
   private def _chat_response_calltree_attributes(
     req: AiChatRequest,
@@ -357,10 +345,9 @@ final class TextusAiRunner(
     Map(
       "outcome" -> "success",
       "model" -> response.model.getOrElse(""),
-      "response_chars" -> responsetext.length.toString,
-      "response" -> req.trace.calltreeResponse(responsetext),
-      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(responsetext))
-    ) ++ response.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
+      "output_chars" -> responsetext.length.toString,
+      "output_digest" -> AiExecutionFacts.digest(responsetext)
+    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata)
   }
 
   private def _record_response_calltree_attributes(
@@ -372,10 +359,9 @@ final class TextusAiRunner(
       "outcome" -> "success",
       "model" -> response.model.getOrElse(""),
       "normalization_mode" -> response.metadata.getOrElse("normalization_mode", ""),
-      "response_chars" -> rawresponse.text.length.toString,
-      "response" -> req.trace.calltreeResponse(rawresponse.text),
-      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(rawresponse.text))
-    ) ++ response.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
+      "output_chars" -> rawresponse.text.length.toString,
+      "output_digest" -> AiExecutionFacts.digest(rawresponse.text)
+    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata)
 
   private def _record_failure_calltree_attributes(
     req: AiRecordRequest,
@@ -384,19 +370,9 @@ final class TextusAiRunner(
     Map(
       "outcome" -> "failure",
       "model" -> _effective_model(rawresponse.model).getOrElse(""),
-      "response_chars" -> rawresponse.text.length.toString,
-      "response" -> req.trace.calltreeResponse(rawresponse.text),
-      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(rawresponse.text))
-    ) ++ rawresponse.metadata.toVector.map { case (key, value) => s"response_metadata.$key" -> value }.toMap
-
-  private def _calltree_text_preview(text: String): String = {
-    val normalized = text.replace("\r\n", "\n")
-    val limit = 6000
-    if (normalized.length <= limit)
-      normalized
-    else
-      normalized.take(limit) + s"\n... truncated (${normalized.length - limit} chars omitted)"
-  }
+      "output_chars" -> rawresponse.text.length.toString,
+      "output_digest" -> AiExecutionFacts.digest(rawresponse.text)
+    ) ++ AiExecutionFacts.calltreeMetadata(rawresponse.metadata)
 
   private def _effective_selection(
     requirement: AiRunnerRequirement
@@ -440,7 +416,11 @@ final class TextusAiRunner(
     properties ++ modelproperty ++ purposeproperty ++ toolsproperty
   }
 
+  private def _chat_input(req: AiChatRequest): String =
+    req.messages.map(message => s"${message.role}: ${message.content}").mkString("\n")
+
   private def _to_ai_generate_response(
+    req: AiGenerateRequest,
     response: GenerateResponse,
     requirement: AiRunnerRequirement
   ): AiGenerateResponse =
@@ -452,10 +432,11 @@ final class TextusAiRunner(
         requirement,
         response.model,
         response.metadata
-      )
+      ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text)
     )
 
   private def _to_ai_chat_response(
+    req: AiChatRequest,
     response: ChatResponse,
     requirement: AiRunnerRequirement
   ): AiChatResponse =
@@ -467,7 +448,7 @@ final class TextusAiRunner(
         requirement,
         response.model,
         response.metadata
-      )
+      ) ++ AiExecutionFacts.digestMetadata(_chat_input(req), response.message.content)
     )
 
   private def _normalize_record_response(
@@ -500,9 +481,8 @@ final class TextusAiRunner(
                       response.model,
                       response.metadata,
                       Some(candidate.mode)
-                    ) ++ Map(
-                      "normalization_mode" -> candidate.mode,
-                      "response_preview" -> _calltree_text_preview(req.trace.calltreeResponse(response.text)).take(600)
+                    ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text) ++ Map(
+                      "normalization_mode" -> candidate.mode
                     )
                   )
                 )
@@ -513,9 +493,7 @@ final class TextusAiRunner(
             Consequence.argumentInvalid("AI record normalization failed unexpectedly.")
         }
       case None =>
-        Consequence.argumentInvalid(
-          s"AI record response did not contain usable JSON; response_preview=${_calltree_text_preview(req.trace.calltreeResponse(response.text)).take(600)}"
-        )
+        Consequence.argumentInvalid("AI record response did not contain usable JSON.")
       }
 
   private final case class _RecordCandidate(

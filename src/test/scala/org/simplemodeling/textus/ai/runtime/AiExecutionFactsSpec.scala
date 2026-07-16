@@ -17,8 +17,8 @@ final class AiExecutionFactsSpec
   with GivenWhenThen {
 
   "AiExecutionFacts" should {
-    "reserve normalized namespaces for Textus AI while preserving provider metadata" in {
-      Given("a selected Google runtime and provider metadata with a spoofed normalized value")
+    "reserve normalized namespaces while retaining only allowlisted provider facts" in {
+      Given("a selected Google runtime with spoofed normalized and raw provider metadata")
       val selection = SpiSelection(
         provider = Some("google"),
         mode = Some("remote"),
@@ -36,16 +36,18 @@ final class AiExecutionFactsSpec
         Some("gemini-2.5-pro"),
         Map(
           AiExecutionFacts.PROVIDER -> "spoofed-provider",
-          "google.response_id" -> "safe-response-id"
+          "google.response_id" -> "safe-response-id",
+          "google.raw_response" -> "prompt and response payload"
         )
       )
 
-      Then("the effective selection wins and foreign provider facts remain available")
+      Then("the effective selection wins and only the safe provider fact remains available")
       metadata(AiExecutionFacts.PROVIDER) shouldBe "google"
       metadata(AiExecutionFacts.MODEL) shouldBe "gemini-2.5-pro"
       metadata(AiExecutionFacts.TOOLS) shouldBe "url_context,web_search"
       metadata("google.response_id") shouldBe "safe-response-id"
       metadata(AiExecutionFacts.RESPONSE_ID) shouldBe "safe-response-id"
+      metadata should not contain "google.raw_response"
     }
 
     "normalize provider response identity finish reason and usage without accepting reserved values" in {
