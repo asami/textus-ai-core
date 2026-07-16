@@ -2,7 +2,8 @@
 
 This checklist is the authoritative progress ledger for Phase 1. A checklist
 item becomes DONE only after its implementation, executable specification,
-focused validation, and review evidence exist.
+focused validation, and review evidence exist. The 2026-07-16 closure
+checkpoint was reopened when Codex CLI was confirmed as required scope.
 
 ## Stage 0 - Development Dependency Alignment
 
@@ -116,3 +117,28 @@ Closure evidence:
   `phase-1.md` as out-of-scope publication and bootstrap follow-up.
 - Final metadata-policy review confirmed `normalization_mode` is retained only
   in the `ai.execution.*` namespace on runner responses.
+
+## Stage 6 - Codex CLI Provider
+
+Stage Status:
+- Current status: IN_PROGRESS
+- Owner: Textus AI and CNCF maintainers
+- Update rule: Mark this stage DONE only when a controlled Codex CLI adapter
+  executes through the `AiRunner` provider path and its process boundary is
+  covered by deterministic executable specifications.
+
+### AR-06: Controlled Codex CLI Execution
+
+- [ ] Extend CNCF's managed-process capability to support bounded stdin,
+  bounded output capture, explicit working root, and cancellation without
+  direct `ProcessBuilder` use in a CAR.
+- [ ] Add a `codex` / `codex-cli` Textus AI provider that invokes `codex exec`
+  with read-only sandbox and ephemeral-session defaults.
+- [ ] Support schema-constrained `generateRecord` and bounded `generate` /
+  `chat` results without recording prompts, output, credentials, or account
+  identity in response metadata or CallTree.
+- [ ] Add fake-process executable specifications for command construction,
+  response parsing, unavailable CLI, non-zero exit, timeout, cancellation,
+  and output-limit behavior.
+- [ ] Document provider configuration, explicit enablement, authentication
+  boundary, and the no-live-Codex-test policy.

@@ -34,10 +34,14 @@ Textus AI does not own:
 - CAR Review rules, canonical review reports, or release policy;
 - construction, redaction, or admission of Review Evidence;
 - commercial-provider enablement, cost policy, or implicit provider fallback;
-- Codex CLI invocation or its sandbox and authorization lifecycle.
+- raw process management, Codex credentials, or account identity.
 
-CBD Support may use a Codex review adapter at its own authorized process
-boundary. That adapter is not a Textus AI provider in the first design.
+The first-design exclusion of Codex CLI was superseded on 2026-07-16. Textus
+AI now owns a controlled `codex` provider adapter, while CNCF owns managed
+process execution and Codex remains responsible for its own authentication
+state. The adapter must use explicit read-only sandbox, working-root, bounded
+input/output, and schema-output controls; it must not construct a raw JVM
+process.
 
 ## Existing Execution Model
 

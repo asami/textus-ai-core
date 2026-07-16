@@ -17,6 +17,14 @@ It is a non-normative handoff. The corresponding CBD product decision is
 recorded in
 `textus-cbd-support/docs/journal/2026/07/car-review-ai-integration-modes-2026-07-16.md`.
 
+## Supersession Note
+
+On 2026-07-16, the user clarified that controlled Codex CLI use is a primary
+purpose of the Textus AI runtime extension. The original first-design boundary
+below is superseded: Codex CLI is now required as a Textus AI `AiRunner`
+provider, executed only through a CNCF managed-process capability. The
+historical text remains to show the earlier boundary decision.
+
 ## Responsibility Boundary
 
 Textus AI does not own CAR Review, Review Runs, Review rules, canonical Review
@@ -42,12 +50,14 @@ Textus AI owns:
 - safe AI execution observability and provenance; and
 - explicit structured failure when a requested capability is unavailable.
 
-The Codex Skill and local Codex CLI Review Provider are not Textus AI runtime
-providers in the first design. Codex is a coding agent with repository tools
-and its own sandbox/authentication lifecycle. Its Review adapter belongs to
-CBD Support and the authorized CNCF process-provider boundary. Textus AI may
-later share common provenance vocabulary with that adapter without embedding
-or launching Codex itself.
+### Superseded First-Design Boundary
+
+The original first design excluded the Codex Skill and local Codex CLI Review
+Provider from Textus AI runtime providers. It treated Codex as a coding agent
+with repository tools and its own sandbox/authentication lifecycle, and placed
+the Review adapter in CBD Support and the authorized CNCF process-provider
+boundary. That boundary is superseded by the preceding note and is retained
+only as the historical basis for the Phase 1 correction.
 
 ## Existing Capabilities
 

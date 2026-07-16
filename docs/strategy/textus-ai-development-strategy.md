@@ -70,26 +70,26 @@ Non-goals:
 - no CAR Review rules, canonical Review Reports, or release-gate policy;
 - no implicit local-to-commercial provider fallback;
 - no automatic web retrieval for CAR Review purposes;
-- no Codex CLI embedding or process-provider ownership; and
+- no arbitrary process execution outside CNCF's managed-process capability; and
 - no fabricated provider billing or unsupported cross-provider token equality.
 
 Artifact: [Phase 1 dashboard](../phase/phase-1.md).
 
 ## Phase Ordering
 
-Phase 1 closed on 2026-07-16 after its completion conditions were met and its
-settled contracts were promoted to design and executable-specification
-documents. No successor phase is selected yet. The next planning task is to
-prioritize the deferred CNCF lifecycle and execution-measurement work without
-reopening Phase 1.
+Phase 1 was reopened on 2026-07-16 after the user clarified that Codex CLI is
+a primary purpose of the runtime extension. The initial closure checkpoint
+remains valid for the completed Gemma/OpenAI/Gemini contract work, but does not
+claim Codex CLI support. Phase 1 now continues through the controlled Codex
+CLI provider and the required CNCF managed-process capability.
 
 ## Process Status
 
-- Current phase: none; Phase 1 is closed.
-- Completed phase dashboard: `docs/phase/phase-1.md`
-- Completed phase checklist: `docs/phase/phase-1-checklist.md`
-- Current next task: select the next phase from the explicit deferred work;
-  do not reopen the closed Phase 1 ledger for that planning.
+- Current phase: Phase 1, reopened for AR-06 Codex CLI provider execution.
+- Current phase dashboard: `docs/phase/phase-1.md`
+- Current phase checklist: `docs/phase/phase-1-checklist.md`
+- Current next task: define the CNCF managed-process contract and implement
+  the Textus AI `codex` provider through it.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

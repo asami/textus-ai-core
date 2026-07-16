@@ -1,6 +1,6 @@
 # Phase 1 - CAR Review AI Execution Foundation
 
-status=closed
+status=open
 
 ## Purpose
 
@@ -20,6 +20,8 @@ gates.
 - Normalize local and commercial provider failure outcomes needed by CAR Review.
 - Define and verify timeout, retry, cancellation, and concurrency boundaries
   at the CNCF execution boundary.
+- Add the local Codex CLI as a controlled `AiRunner` provider for bounded,
+  schema-constrained CAR Review execution.
 
 ## Boundaries
 
@@ -28,6 +30,8 @@ gates.
 - Textus AI owns provider resolution, adapter execution, response
   normalization, and safe execution facts.
 - CNCF owns the `AiRunner` SPI and Job execution lifecycle mechanisms.
+- CNCF owns the managed-process capability used to invoke `codex exec`; Textus
+  AI must not instantiate `ProcessBuilder` directly.
 - Web tools remain disabled for CAR Review purposes unless a separately
   authorized source and citation contract is introduced.
 
@@ -39,7 +43,9 @@ gates.
 - C (DONE): AR-02 - Add deterministic CAR Review provider fixtures.
 - D (DONE): AR-03 - Restrict trace and metadata publication.
 - E (DONE): AR-04 - Verify provider failure and lifecycle behavior.
-- F (DONE): AR-05 - Promote settled contracts and close the phase.
+- F (DONE): AR-05 - Promote the initial contracts and record the first closure
+  checkpoint.
+- G (IN_PROGRESS): AR-06 - Add the Codex CLI provider.
 
 Detailed status and acceptance evidence are recorded in
 `phase-1-checklist.md`.
@@ -58,6 +64,9 @@ Phase 1 closes only when:
 - lifecycle limits are bounded and their unsupported cases remain explicit; and
 - settled behavior is promoted from notes into design and specification
   documents with corresponding executable evidence.
+- Codex CLI execution is available through an explicit `codex` provider
+  selection, with a read-only sandbox, explicit workspace, bounded input and
+  output, schema-constrained structured generation, and no credential capture.
 
 ## Validation Evidence
 
@@ -74,13 +83,14 @@ Phase 1 closes only when:
   confirmed the final response metadata exposes
   `ai.execution.normalization_mode` rather than a bare compatibility key.
 
-## Closure
+## Reopen Correction
 
-Phase 1 closed on 2026-07-16. The implementation, deterministic executable
-specifications, normalized confidentiality boundary, provider failure
-normalization, and lifecycle limitations satisfy every completion condition.
+The 2026-07-16 closure checkpoint is superseded. The user clarified that
+Codex CLI execution is a primary purpose of this runtime extension. The prior
+boundary that excluded Codex CLI was therefore incorrect for Phase 1, and the
+phase is reopened until AR-06 is implemented and validated.
 
-Deferred follow-ups are intentionally outside this phase:
+The following remain deferred after AR-06 unless explicitly promoted:
 
 - normalize safe provider request identity and measured timing;
 - add CNCF Job lifecycle support for cancellation propagation and concurrency
