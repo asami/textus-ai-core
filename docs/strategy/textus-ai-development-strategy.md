@@ -85,9 +85,9 @@ promoted to the appropriate design and specification documents.
 
 - Current phase dashboard: `docs/phase/phase-1.md`
 - Current phase checklist: `docs/phase/phase-1-checklist.md`
-- Current development item: AR-01, normalized execution facts contract
-- Current next slice: define the typed or stable metadata representation for
-  provenance, usage, limitations, and confidentiality.
+- Current development item: AR-05, Phase 1 contract promotion and closure
+- Current next slice: record final validation and review evidence, then close
+  Phase 1 without promoting deferred lifecycle controls into the runtime.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

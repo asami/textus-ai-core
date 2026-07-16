@@ -15,7 +15,7 @@ import org.goldenport.record.Record
 private[runtime] final class CarReviewAiRunnerFixture extends AiRunner {
   import CarReviewAiRunnerFixture.*
 
-  private var _retryThenSuccessRemaining = 1
+  private var _retry_then_success_remaining = 1
 
   def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] =
     _scenario(req.properties) match {
@@ -28,8 +28,8 @@ private[runtime] final class CarReviewAiRunnerFixture extends AiRunner {
     _scenario(req.properties) match {
       case Success => Consequence.success(AiRecordResponse(Candidate, Some(Model), _metadata))
       case Unknown => Consequence.success(AiRecordResponse(Candidate, Some(Model), _limitedMetadata))
-      case RetryThenSuccess if _retryThenSuccessRemaining > 0 =>
-        _retryThenSuccessRemaining -= 1
+      case RetryThenSuccess if _retry_then_success_remaining > 0 =>
+        _retry_then_success_remaining -= 1
         Consequence.serviceUnavailable("fixture timeout before retry")
       case RetryThenSuccess => Consequence.success(AiRecordResponse(Candidate, Some(Model), _metadata ++ Map("ai.execution.retry_count" -> "1")))
       case scenario => _failure(scenario)

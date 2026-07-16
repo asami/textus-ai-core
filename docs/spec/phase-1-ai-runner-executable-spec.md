@@ -1,0 +1,69 @@
+# Phase 1 AI Runner Executable Specification
+
+status=accepted
+scope=textus-ai CAR Review execution foundation
+updated_at=2026-07-16
+
+## Purpose
+
+This specification defines the executable evidence for Textus AI Phase 1. It
+verifies provider-neutral AI execution required by bounded CAR Review without
+making Textus AI responsible for Review policy, evidence admission, or release
+decisions.
+
+All scenarios run without provider credentials or network access. The fixture
+and HTTP-driver seams are test-only evidence; they are not production provider
+adapters.
+
+## Contract Matrix
+
+| Contract | Executable evidence | Expected behavior |
+| --- | --- | --- |
+| Effective execution facts | `AiExecutionFactsSpec` | Selected provider values win over spoofed metadata; unknown values are omitted. |
+| Usage and response normalization | `AiExecutionFactsSpec`, `TextusAiRunnerSpec` | Response identity, finish reason, and non-negative provider usage are normalized only when supplied. |
+| Confidentiality | `TextusAiRunnerSpec` CallTree scenarios | CallTree records retain bounded counts and SHA-256 digests, never prompts, responses, request metadata, or provider error bodies. |
+| Deterministic substitution | `CarReviewAiRunnerFixtureSpec` | A test-only `AiRunner` produces a stable CAR Review-shaped record through the CNCF SPI. |
+| Limitation and failure outcomes | `CarReviewAiRunnerFixtureSpec`, `TextusAiRunnerSpec` | Unknown facts, malformed output, empty output, unavailable provider, quota, timeout, and unsupported cancellation are explicit and deterministic. |
+| Retry boundary | `CarReviewAiRunnerFixtureSpec`, `TextusAiRunnerSpec` | Retry-then-success is observable; production structured generation retries only empty or timeout-like outcomes within its bounded retry limit. |
+| Provider behavior | `TextusAiRunnerSpec` | Google/Gemini, OpenAI, and Gemma/Ollama expose only safe response facts; HTTP failures use stable categories without body disclosure. |
+| Gemma registration | `TextusAiRunnerSpec` Gemma runtime-binding scenario | The registered Gemma binding performs schema-valid structured generation and preserves a categorized terminal failure. |
+| Fallback policy | `AiExecutionFactsSpec`, `TextusAiRunnerSpec` | Provider and model selection are not changed implicitly; Gemma endpoint fallback requires explicit `GemmaRuntimeConfig.fallbackEndpoint`. |
+
+## Fixture Scenarios
+
+`CarReviewAiRunnerFixture` selects its deterministic scenario with the
+test-only `ai.fixture.scenario` request property.
+
+| Scenario | Expected result |
+| --- | --- |
+| absent | Schema-shaped record candidate with normalized fixture facts |
+| `unknown` | Successful deterministic response with `provider_identity_unavailable` and `usage_unavailable` limitations |
+| `malformed` | Explicit malformed structured-output failure |
+| `empty` | Explicit empty structured-output failure |
+| `unavailable` | Explicit provider-unavailable failure |
+| `quota` | Explicit quota-exhausted failure |
+| `timeout` | Explicit provider-timeout failure |
+| `cancelled` | Explicit `cancellation_not_propagated` boundary failure |
+| `retry-then-success` | First record request fails with timeout; the next request succeeds with retry count `1` |
+
+## Lifecycle Boundary
+
+The synchronous adapter boundary does not propagate caller cancellation or
+enforce a component-wide concurrency budget. Textus AI therefore exposes the
+stable limitation codes `cancellation_not_propagated` and
+`concurrency_not_enforced` on normal runner responses. CNCF Job lifecycle
+controls remain the required owner for future propagation and enforcement.
+
+No test scenario permits implicit local-to-commercial provider fallback or an
+implicit model change. Provider-specific endpoint fallback is allowed only
+when resolved runtime configuration explicitly declares it.
+
+## Validation Command
+
+Run the complete Phase 1 executable specification with:
+
+```bash
+sbt --batch test
+```
+
+The suite must pass without live Gemini, OpenAI, Gemma, or Ollama access.

@@ -35,11 +35,11 @@ gates.
 
 - A (DONE): AR-00 - Align the development dependency line with the active Cozy
   generator contract.
-- B (IN_PROGRESS): AR-01 - Normalize execution facts.
-- C (OPEN): AR-02 - Add deterministic CAR Review provider fixtures.
-- D (OPEN): AR-03 - Restrict trace and metadata publication.
-- E (OPEN): AR-04 - Verify provider failure and lifecycle behavior.
-- F (OPEN): AR-05 - Promote settled contracts and close the phase.
+- B (DONE): AR-01 - Normalize execution facts.
+- C (DONE): AR-02 - Add deterministic CAR Review provider fixtures.
+- D (DONE): AR-03 - Restrict trace and metadata publication.
+- E (DONE): AR-04 - Verify provider failure and lifecycle behavior.
+- F (IN_PROGRESS): AR-05 - Promote settled contracts and close the phase.
 
 Detailed status and acceptance evidence are recorded in
 `phase-1-checklist.md`.
@@ -65,3 +65,4 @@ Phase 1 closes only when:
 - `docs/notes/car-review-ai-runtime-design.md`
 - `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 - `docs/spec/mock-ai-executable-spec.md`
+- `docs/spec/phase-1-ai-runner-executable-spec.md`

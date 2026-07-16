@@ -196,8 +196,10 @@ src/
 
 ## Design Notes
 
-- [TextusAi Basic Design](docs/ai-component/basic-design.md)
-- [TextusAi Development Environment](docs/ai-component/dev-environment.md)
+- [AI Runner Execution Facts](docs/design/ai-runner-execution-facts.md)
+- [Mock AI Executable Specification](docs/spec/mock-ai-executable-spec.md)
+- [Phase 1 AI Runner Executable Specification](docs/spec/phase-1-ai-runner-executable-spec.md)
+- [Phase 1 Dashboard](docs/phase/phase-1.md)
 
 ## AI Directive
 

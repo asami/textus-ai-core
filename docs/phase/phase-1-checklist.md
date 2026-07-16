@@ -23,7 +23,7 @@ Stage Status:
 ## Stage 1 - Normalized Execution Facts
 
 Stage Status:
-- Current status: IN_PROGRESS
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Update the checklist when the contract and its executable
   evidence are both available.
@@ -96,15 +96,15 @@ Stage Status:
 ## Stage 5 - Contract Promotion and Closure
 
 Stage Status:
-- Current status: OPEN
+- Current status: IN_PROGRESS
 - Owner: Textus AI maintainers
 - Update rule: Close the stage only when every Phase 1 completion condition is
   evidenced and no unsettled design claim remains in notes alone.
 
 ### AR-05: Promote and Close
 
-- [ ] Promote stable execution-fact and confidentiality decisions to
+- [x] Promote stable execution-fact and confidentiality decisions to
   `docs/design/`.
-- [ ] Promote testable behavior to `docs/spec/` and executable specifications.
+- [x] Promote testable behavior to `docs/spec/` and executable specifications.
 - [ ] Record validation and review evidence in the phase documents.
 - [ ] Update the strategy status and close Phase 1.

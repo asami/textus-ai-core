@@ -153,7 +153,6 @@ does not select another provider or model implicitly.
 ## Deferred Work
 
 - Normalize request identity and timing.
-- Add deterministic fixtures for normalized failure and limitation cases.
 - Move cancellation propagation and concurrency enforcement to CNCF Job
   execution when the SPI gains those lifecycle controls.
 - Evaluate promotion of proven fields into typed CNCF `AiRunner` response data.
