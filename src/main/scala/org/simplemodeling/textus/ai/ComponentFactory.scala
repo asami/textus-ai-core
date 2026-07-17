@@ -3,18 +3,20 @@ package org.simplemodeling.textus.ai
 import scala.util.Try
 import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentId, ComponentOrigin}
 import org.goldenport.cncf.config.RuntimeConfig
+import org.goldenport.cncf.context.{ScopeContext, ScopeKind}
+import org.goldenport.cncf.processexecution.{LocalProcessExecutionDriver, ProcessExecutionAdmission, ProcessExecutionDriver}
 import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.subsystem.Subsystem
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ResolvedConfiguration}
 import org.simplemodeling.textus.ai.provider.gemma.GemmaConfig
-import org.simplemodeling.textus.ai.provider.codex.CodexConfig
+import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexExecutionBinding, CodexRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul. 17, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -22,7 +24,13 @@ class ComponentFactory extends TextusAiComponent.Factory:
     params: ComponentCreate
   ): Component =
     val bootstrapcontext = params.subsystem
-    ComponentFactory.configureRuntimeSpi(TextusAiComponent(), Some(bootstrapcontext.configuration))
+    val configuration = Some(bootstrapcontext.configuration)
+    val codex = configuration.flatMap(CodexConfig.fromConfiguration)
+    ComponentFactory.configureRuntimeSpi(
+      new TextusAiRuntimeComponent(codex),
+      configuration,
+      codex
+    )
 
   override protected def create_Core(
     params: ComponentCreate,
@@ -56,12 +64,13 @@ object ComponentFactory:
 
   private[ai] def configureRuntimeSpi(
     component: Component,
-    configuration: Option[ResolvedConfiguration]
+    configuration: Option[ResolvedConfiguration],
+    codexconfig: Option[CodexRuntimeConfig] = None
   ): Component =
     val gemma = configuration.flatMap(GemmaConfig.fromConfiguration).getOrElse(GemmaConfig.fromEnvironment())
     val openai = configuration.flatMap(OpenAiConfig.fromConfiguration).orElse(OpenAiConfig.fromEnvironment())
     val google = configuration.flatMap(GoogleConfig.fromConfiguration).orElse(GoogleConfig.fromEnvironment())
-    val codex = configuration.flatMap(CodexConfig.fromConfiguration)
+    val codex = codexconfig.orElse(configuration.flatMap(CodexConfig.fromConfiguration))
     val defaultselection = _default_selection(configuration, openai.nonEmpty, google.nonEmpty, codex.nonEmpty)
     val profiles = AiProfileConfig.fromConfiguration(configuration)
     val withgenerate = AiRuntimeGenerateBinding.register(component, Some(gemma), openai, google, codex)
@@ -72,7 +81,7 @@ object ComponentFactory:
         .of(
           runnerprovider
         )
-        .orElse(withchat.port)
+      .orElse(withchat.port)
     )
 
   private def _default_selection(
@@ -146,3 +155,32 @@ object ComponentFactory:
       case "codex-cli" => "codex"
       case value => value
     }
+
+private final class TextusAiRuntimeComponent(
+  codex: Option[CodexRuntimeConfig]
+) extends TextusAiComponent {
+  private lazy val _codex_runtime: Option[(ProcessExecutionAdmission, ProcessExecutionDriver)] =
+    codex.flatMap { config =>
+      CodexExecutionBinding.admissionC(config).toOption.map { admission =>
+        admission -> new LocalProcessExecutionDriver()
+      }
+    }
+
+  override def withScopeContext(parent: ScopeContext): Component = {
+    val scope = _codex_runtime.fold(parent) { case (admission, driver) =>
+      ScopeContext(
+        kind = ScopeKind.Component,
+        name = "textus-ai-codex-runtime",
+        parent = Some(parent),
+        observabilityContext = parent.observabilityContext.createChild(
+          parent,
+          ScopeKind.Component,
+          "textus-ai-codex-runtime"
+        ),
+        processExecutionDriverOption = Some(driver),
+        processExecutionAdmissionOption = Some(admission)
+      )
+    }
+    super.withScopeContext(scope)
+  }
+}

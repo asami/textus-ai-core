@@ -68,9 +68,15 @@ registered dynamic arguments, and, for record generation, a bounded logical
 `schema.json` input file. It does not select an executable, invoke a driver,
 write a host file, construct a shell command, or read Codex authentication.
 
-The hosting CNCF runtime owns the fixed `codex exec` command, read-only
-sandbox, ephemeral-session policy, executable location, environment allowlist,
-and finite Process Execution limits. Tests use `ProcessExecutionTestProfile`;
+When explicitly enabled, Textus AI runtime assembly installs the fixed
+`codex exec --sandbox read-only --ephemeral --skip-git-repo-check` capability
+definition and grant, plus CNCF's generic local Process Execution driver, in
+its component scope. The absolute executable location, empty environment
+allowlist, finite Process Execution limits, exact permitted provider suffixes,
+and `schema.json` input path are runtime-owned. The CNCF UnitOfWork owns the
+per-invocation WorkArea and process-handle lifecycle. The local driver's launch
+workers are shared daemon runtime infrastructure. Tests use
+`ProcessExecutionTestProfile`;
 they never start a live Codex CLI or call a network service.
 
 ## Validation Command

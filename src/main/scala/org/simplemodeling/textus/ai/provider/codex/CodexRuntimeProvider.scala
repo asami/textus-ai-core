@@ -1,6 +1,7 @@
 package org.simplemodeling.textus.ai.provider.codex
 
 import java.nio.charset.StandardCharsets
+import java.nio.file.Paths
 import scala.util.Try
 import io.circe.{Json, JsonObject}
 import org.goldenport.Consequence
@@ -17,21 +18,45 @@ import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, G
 final case class CodexRuntimeConfig(
   mode: String = "local",
   engine: String = "codex-cli",
-  schemaMaximumBytes: Long = 65536L
+  schemaMaximumBytes: Long = 65536L,
+  executable: String = "/runtime/codex-cli",
+  executionLimits: ProcessExecutionLimits = CodexRuntimeConfig.defaultExecutionLimits
 )
+
+object CodexRuntimeConfig {
+  val defaultExecutionLimits: ProcessExecutionLimits = ProcessExecutionLimits(
+    launchTimeoutMillis = Some(5000L),
+    executionTimeoutMillis = Some(120000L),
+    terminationGraceMillis = Some(5000L),
+    stdinBytes = Some(131072L),
+    stdoutBytes = Some(1048576L),
+    stderrBytes = Some(65536L),
+    argumentCount = Some(3L),
+    argumentBytes = Some(128L),
+    artifactCount = Some(1L),
+    artifactBytes = Some(1048576L),
+    workAreaBytes = Some(1048576L)
+  )
+}
 
 object CodexConfig {
   def fromConfiguration(configuration: ResolvedConfiguration): Option[CodexRuntimeConfig] =
-    Option.when(_enabled(configuration)) {
-      CodexRuntimeConfig(
-        mode = _config_string(configuration, "mode").getOrElse("local"),
-        engine = _config_string(configuration, "engine").getOrElse("codex-cli"),
-        schemaMaximumBytes = _config_string(configuration, "schema-maximum-bytes", "schemaMaximumBytes")
-          .flatMap(_.toLongOption)
-          .filter(_ > 0L)
-          .getOrElse(65536L)
-      )
-    }
+    if (!_enabled(configuration))
+      None
+    else
+      _config_string(configuration, "executable", "executable-path")
+        .flatMap(_absolute_executable)
+        .map { executable =>
+          CodexRuntimeConfig(
+            mode = _config_string(configuration, "mode").getOrElse("local"),
+            engine = _config_string(configuration, "engine").getOrElse("codex-cli"),
+            executable = executable,
+            schemaMaximumBytes = _config_string(configuration, "schema-maximum-bytes", "schemaMaximumBytes")
+              .flatMap(_.toLongOption)
+              .filter(_ > 0L)
+              .getOrElse(65536L)
+          )
+        }
 
   private def _enabled(configuration: ResolvedConfiguration): Boolean =
     _config_string(configuration, "enabled").exists { value =>
@@ -56,6 +81,12 @@ object CodexConfig {
       .flatMap(key => Try(RuntimeConfig.getString(configuration, key)).toOption.flatten)
       .map(_.trim)
       .find(_.nonEmpty)
+
+  private def _absolute_executable(value: String): Option[String] =
+    Try(Paths.get(value)).toOption
+      .filter(_.isAbsolute)
+      .map(_.normalize.toString)
+      .filter(_.nonEmpty)
 }
 
 final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionContext) extends GenerateService {

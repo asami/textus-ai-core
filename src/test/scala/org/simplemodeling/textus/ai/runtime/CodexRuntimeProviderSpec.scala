@@ -24,7 +24,7 @@ import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexRuntimeCon
  * profile proves adapter intent without a Codex binary, account, or network.
  *
  * @since   Jul. 17, 2026
- * @version Jul. 17, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -36,16 +36,26 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       ))
       val enabled = _configuration(Map(
         "textus.ai.codex.enabled" -> "true",
+        "textus.ai.codex.executable" -> "/runtime/codex-cli",
         "textus.ai.codex.schema-maximum-bytes" -> "4096"
+      ))
+      val unsafe = _configuration(Map(
+        "textus.ai.codex.enabled" -> "true",
+        "textus.ai.codex.executable" -> "codex"
       ))
 
       When("the Codex adapter configuration is resolved")
       val disabledconfig = CodexConfig.fromConfiguration(disabled)
       val enabledconfig = CodexConfig.fromConfiguration(enabled)
+      val unsafeconfig = CodexConfig.fromConfiguration(unsafe)
+      val legacy = CodexRuntimeConfig("local", "codex-cli", 4096L)
 
       Then("only the explicitly enabled runtime installs the provider adapter")
       disabledconfig shouldBe None
       enabledconfig.map(_.schemaMaximumBytes) shouldBe Some(4096L)
+      enabledconfig.map(_.executable) shouldBe Some("/runtime/codex-cli")
+      unsafeconfig shouldBe None
+      legacy.schemaMaximumBytes shouldBe 4096L
     }
 
     "run generate and record requests through the admitted CNCF process capability" in {

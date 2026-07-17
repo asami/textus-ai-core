@@ -121,8 +121,9 @@ textus:
 ### Codex CLI
 
 The Codex CLI provider is explicitly opt-in. It has no environment-variable
-bootstrap and never reads a Codex credential, account identity, executable
-path, or shell setting from Textus AI configuration.
+bootstrap and never reads a Codex credential, account identity, or shell
+setting. Its executable is an explicit Textus AI runtime configuration value,
+not an application request property.
 
 ```yaml
 textus:
@@ -132,6 +133,7 @@ textus:
     engine: codex-cli
     codex:
       enabled: true
+      executable: /Applications/ChatGPT.app/Contents/Resources/codex
       schema-maximum-bytes: 65536
 ```
 
@@ -140,13 +142,16 @@ facts are normalized to the `codex` provider name. The optional request
 property `ai.codex.timeout-millis` requests a tighter process execution time
 limit. It cannot widen the runtime capability limit.
 
-The hosting CNCF runtime must separately install and grant the logical
-`codex-cli` Process Execution capability. That runtime-owned definition owns
-the executable, fixed `codex exec` invocation, sandbox/session policy, output
-limits, and any environment allowlist. For Codex use, configure it with a
-read-only sandbox and ephemeral session policy. Textus AI submits only bounded
-stdin, declared logical arguments, and, for record generation, a bounded
-`schema.json` WorkArea input file.
+When enabled with an absolute executable path, Textus AI runtime assembly
+installs and grants the logical `codex-cli` Process Execution capability in its
+component scope. The runtime-owned definition fixes `codex exec --sandbox
+read-only --ephemeral --skip-git-repo-check`, finite process limits, and an
+empty environment allowlist. It admits only `-` or `--output-schema schema.json
+-`; record generation may materialize only the bounded `schema.json` WorkArea
+input file. Textus AI installs CNCF's generic local Process Execution driver;
+the driver runs every invocation in a managed WorkArea. The CNCF UnitOfWork
+owns each WorkArea and process-handle lifecycle; the local driver's launch
+workers are shared daemon runtime infrastructure.
 
 The capability definition also owns Codex model selection. Textus AI does not
 accept a model request property for this provider until CNCF exposes a bounded
