@@ -142,9 +142,17 @@ Stage Status:
   output-limit behavior, and unsupported tools.
 - [x] Document provider configuration, explicit enablement, authentication
   boundary, and the no-live-Codex-test policy.
+- [x] Bind Codex `generate`, `generateRecord`, and `chat` execution to the
+  Textus AI component scope when a sibling CAR invokes the `AiRunner` SPI, so
+  the caller does not need to install the provider's process driver or
+  admission.
 
 Validation evidence on 2026-07-17:
 
 - `sbt --batch test` in `textus-ai-runtime`: 55 tests succeeded.
 - CNCF `sbt --batch test`: 1,921 tests succeeded, including 10
   `ProcessExecutionModelSpec` and 5 `ProcessExecutionWorkAreaSpec` cases.
+- Final cross-component validation on 2026-07-18: Textus AI `sbt --batch test`
+  passed with 58 tests. `ComponentFactorySpec` covers sibling-caller generate,
+  structured record, and chat requests without a caller-owned driver or
+  admission.

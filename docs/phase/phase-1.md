@@ -1,6 +1,6 @@
 # Phase 1 - CAR Review AI Execution Foundation
 
-status=open
+status=complete
 
 ## Purpose
 
@@ -46,7 +46,8 @@ gates.
 - F (DONE): AR-05 - Promote the initial contracts and record the first closure
   checkpoint.
 - G (DONE): AR-06 - Add the Codex CLI provider through the CNCF Process
-  Execution capability.
+  Execution capability, including sibling-CAR caller execution through the
+  provider component scope.
 
 Detailed status and acceptance evidence are recorded in
 `phase-1-checklist.md`.
@@ -89,13 +90,20 @@ Phase 1 closes only when:
   `ProcessExecutionWorkAreaSpec` cases. The Codex provider uses only the
   logical `codex-cli` capability; executable location, fixed `codex exec`
   arguments, sandbox, and session policy remain runtime-owned.
+- AR-06 final integration validation on 2026-07-18: `sbt --batch test`
+  completed with 58 successful Textus AI tests. `ComponentFactorySpec` proves
+  `generate`, `generateRecord`, and `chat` execute through Textus AI's
+  component-owned driver and admission when the caller is a sibling component
+  scope. A Sanpomap command configured with the local `codex` purpose profile
+  generated Scenario DSL through the assembled Textus AI Runtime path.
 
-## Reopen Correction
+## Closure Correction
 
 The 2026-07-16 closure checkpoint is superseded. The user clarified that
 Codex CLI execution is a primary purpose of this runtime extension. The prior
-boundary that excluded Codex CLI was therefore incorrect for Phase 1, and the
-phase is reopened until AR-06 is implemented and validated.
+boundary that excluded Codex CLI was therefore incorrect for Phase 1. AR-06
+and its cross-component caller-scope validation completed on 2026-07-18, so
+the phase is closed with Codex CLI included in its delivered scope.
 
 The following remain deferred after AR-06 unless explicitly promoted:
 

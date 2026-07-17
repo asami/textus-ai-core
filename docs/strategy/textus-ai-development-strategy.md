@@ -2,7 +2,7 @@
 
 status=draft
 scope=internal development strategy
-updated_at=2026-07-16
+updated_at=2026-07-18
 
 ## Purpose
 
@@ -80,16 +80,17 @@ Artifact: [Phase 1 dashboard](../phase/phase-1.md).
 Phase 1 was reopened on 2026-07-16 after the user clarified that Codex CLI is
 a primary purpose of the runtime extension. The initial closure checkpoint
 remains valid for the completed Gemma/OpenAI/Gemini contract work, but does not
-claim Codex CLI support. Phase 1 now continues through the controlled Codex
-CLI provider and the required CNCF managed-process capability.
+claim Codex CLI support. The controlled Codex CLI provider, its CNCF
+managed-process capability, and the sibling-CAR caller-scope integration were
+completed on 2026-07-18.
 
 ## Process Status
 
-- Current phase: Phase 1, reopened for AR-06 Codex CLI provider execution.
+- Current phase: Phase 1, complete through AR-06 Codex CLI provider execution.
 - Current phase dashboard: `docs/phase/phase-1.md`
 - Current phase checklist: `docs/phase/phase-1-checklist.md`
-- Current next task: define the CNCF managed-process contract and implement
-  the Textus AI `codex` provider through it.
+- Current next task: select the next phase scope; no new runtime behavior is
+  active work.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

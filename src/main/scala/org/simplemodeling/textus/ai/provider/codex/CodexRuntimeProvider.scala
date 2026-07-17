@@ -1,11 +1,11 @@
 package org.simplemodeling.textus.ai.provider.codex
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.Paths
+import java.nio.file.Path
 import scala.util.Try
 import io.circe.{Json, JsonObject}
 import org.goldenport.Consequence
-import org.goldenport.cncf.component.{ExtensionPoint, ServiceContract, VariationSelection}
+import org.goldenport.cncf.component.{Component, ExtensionPoint, ServiceContract, VariationSelection}
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.processexecution.*
@@ -83,7 +83,7 @@ object CodexConfig {
       .find(_.nonEmpty)
 
   private def _absolute_executable(value: String): Option[String] =
-    Try(Paths.get(value)).toOption
+    Try(Path.of(value)).toOption
       .filter(_.isAbsolute)
       .map(_.normalize.toString)
       .filter(_.nonEmpty)
@@ -201,6 +201,13 @@ final class CodexChatService(config: CodexRuntimeConfig, context: ExecutionConte
 }
 
 final class CodexGenerateExtensionPoint(config: CodexRuntimeConfig) extends ExtensionPoint[GenerateService] {
+  private var _runtimecomponent: Option[Component] = None
+
+  private[ai] def _with_runtime_component(component: Component): CodexGenerateExtensionPoint = {
+    _runtimecomponent = Some(component)
+    this
+  }
+
   override def supports(contract: ServiceContract[GenerateService], variation: VariationSelection)(using ExecutionContext): Boolean =
     contract.name == "generate-service" &&
       variation.provider.exists(_is_codex_provider) &&
@@ -208,10 +215,17 @@ final class CodexGenerateExtensionPoint(config: CodexRuntimeConfig) extends Exte
       variation.engine.contains(config.engine)
 
   override def provide(contract: ServiceContract[GenerateService], variation: VariationSelection)(using ExecutionContext): Consequence[GenerateService] =
-    Consequence.success(new CodexGenerateService(config, summon[ExecutionContext]))
+    Consequence.success(new CodexGenerateService(config, _provider_execution_context(_runtimecomponent)))
 }
 
 final class CodexChatExtensionPoint(config: CodexRuntimeConfig) extends ExtensionPoint[ChatService] {
+  private var _runtimecomponent: Option[Component] = None
+
+  private[ai] def _with_runtime_component(component: Component): CodexChatExtensionPoint = {
+    _runtimecomponent = Some(component)
+    this
+  }
+
   override def supports(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Boolean =
     contract.name == "chat-service" &&
       variation.provider.exists(_is_codex_provider) &&
@@ -219,8 +233,13 @@ final class CodexChatExtensionPoint(config: CodexRuntimeConfig) extends Extensio
       variation.engine.contains(config.engine)
 
   override def provide(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Consequence[ChatService] =
-    Consequence.success(new CodexChatService(config, summon[ExecutionContext]))
+    Consequence.success(new CodexChatService(config, _provider_execution_context(_runtimecomponent)))
 }
+
+private def _provider_execution_context(
+  runtimecomponent: Option[Component]
+)(using caller: ExecutionContext): ExecutionContext =
+  runtimecomponent.map(_.logic.executionContext()).getOrElse(caller)
 
 private def _is_codex_provider(value: String): Boolean =
   value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")

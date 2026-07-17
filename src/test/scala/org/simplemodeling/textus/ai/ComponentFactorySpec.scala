@@ -12,7 +12,7 @@ import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOf
 import org.goldenport.cncf.workarea.WorkAreaSpace
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ResolvedConfiguration}
 import org.goldenport.configuration.ConfigurationValue
-import org.goldenport.cncf.spi.ai.runner.{AiGenerateRequest, AiRecordRequest, AiRunner}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner}
 import org.goldenport.record.Record
 import org.simplemodeling.textus.ai.provider.codex.CodexRuntimeConfig
 import org.simplemodeling.textus.ai.runtime.TextusAiRunnerProvider
@@ -155,8 +155,8 @@ final class ComponentFactorySpec
       component.scopeContext.processExecutionDriverOption shouldBe None
     }
 
-    "execute Codex requests through the component-local driver and managed WorkArea" in {
-      Given("an enabled component-local Codex driver and a controlled executable")
+    "execute Codex requests through the provider component scope from a sibling caller scope" in {
+      Given("an enabled component-local Codex driver, a sibling caller scope, and a controlled executable")
       val executable = java.nio.file.Files.createTempFile("textus-ai-codex-spec", ".sh")
       java.nio.file.Files.writeString(executable,
         "#!/bin/sh\n" +
@@ -172,34 +172,51 @@ final class ComponentFactorySpec
         )),
         ConfigurationTrace.empty
       )
-      val subsystem = new Subsystem("textus-ai-codex-live-spec", configuration)
+      val subsystem = new Subsystem(
+        name = "textus-ai-codex-live-spec",
+        configuration = configuration
+      )
       val component = new ComponentFactory().create(ComponentCreate(subsystem, ComponentOrigin.Main)).primary
       val parentcontext = ExecutionContext.create()
-      component.withScopeContext(ScopeContext(
+      val runtimescope = ScopeContext(
         ScopeKind.Runtime,
         "textus-ai-codex-live-spec",
         None,
         parentcontext.observability
-      ))
-      given ExecutionContext = _runtime_context(component.scopeContext)
+      )
+      component.withScopeContext(runtimescope)
+      val callerscope = ScopeContext(
+        ScopeKind.Component,
+        "textus-ai-codex-caller-spec",
+        Some(runtimescope),
+        parentcontext.observability
+      )
+      given ExecutionContext = _runtime_context(callerscope)
       val runner = component.port.get[TextusAiRunnerProvider].value.provide(
         SpiContract("ai-runner", classOf[AiRunner]),
         SpiSelection()
       ).toOption.get
 
-      When("plain and structured requests reach the component-owned local driver")
-      val (generated, recorded) = try {
-        runner.generate(AiGenerateRequest("plain prompt")) -> runner.generateRecord(AiRecordRequest(
-          "record prompt",
-          Record.dataAuto("required" -> Vector("title"))
-        ))
+      When("plain, structured, and chat requests reach the component-owned local driver")
+      val (generated, recorded, chatted) = try {
+        (
+          runner.generate(AiGenerateRequest("plain prompt")),
+          runner.generateRecord(AiRecordRequest(
+            "record prompt",
+            Record.dataAuto("required" -> Vector("title"))
+          )),
+          runner.chat(AiChatRequest(Vector(AiMessage("user", "chat prompt"))))
+        )
       } finally {
         java.nio.file.Files.deleteIfExists(executable)
       }
 
-      Then("the fixed command, empty environment, and bounded schema file are executed in managed WorkAreas")
+      Then("the fixed command, empty environment, and bounded schema file are executed in provider-owned managed WorkAreas")
       generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
       recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
+      chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+      callerscope.processExecutionDriverOption shouldBe None
+      callerscope.processExecutionAdmissionOption shouldBe None
     }
   }
 

@@ -2,7 +2,7 @@
 
 status=accepted
 scope=textus-ai CAR Review execution foundation
-updated_at=2026-07-17
+updated_at=2026-07-18
 
 ## Purpose
 
@@ -29,6 +29,7 @@ adapters.
 | Gemma registration | `TextusAiRunnerSpec` Gemma runtime-binding scenario | The registered Gemma binding performs schema-valid structured generation and preserves a categorized terminal failure. |
 | Fallback policy | `AiExecutionFactsSpec`, `TextusAiRunnerSpec` | Provider and model selection are not changed implicitly; Gemma endpoint fallback requires explicit `GemmaRuntimeConfig.fallbackEndpoint`. |
 | Controlled Codex execution | `CodexRuntimeProviderSpec`, CNCF `ProcessExecutionModelSpec`, CNCF `ProcessExecutionWorkAreaSpec` | `generate`, `chat`, and schema-constrained `generateRecord` use an admitted logical `codex-cli` capability, bounded stdin/output, and a bounded `schema.json` WorkArea input without direct host-process access. |
+| Codex component-scope ownership | `ComponentFactorySpec` sibling-caller scenario | A caller in a sibling component scope needs no Codex driver or admission; the provider resolves managed process execution through the Textus AI component scope that owns the capability. |
 | Codex terminal boundaries | `CodexRuntimeProviderSpec` | Unavailable CLI, non-zero exit, timeout, cancellation, output limit, and unsupported tools produce explicit failures without exposing prompt, stdout, stderr, credentials, or account identity. |
 
 ## Fixture Scenarios
@@ -78,6 +79,12 @@ per-invocation WorkArea and process-handle lifecycle. The local driver's launch
 workers are shared daemon runtime infrastructure. Tests use
 `ProcessExecutionTestProfile`;
 they never start a live Codex CLI or call a network service.
+
+The provider binding retains the caller-facing public `create` and Codex
+extension-point construction contracts. During Textus AI component assembly it
+records the owning component internally. The provider therefore uses that
+component's execution context for managed-process admission even when the
+`AiRunner` request originates from a sibling CAR scope.
 
 ## Validation Command
 
