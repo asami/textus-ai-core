@@ -118,6 +118,46 @@ textus:
       timeout-seconds: 45
 ```
 
+### Codex CLI
+
+The Codex CLI provider is explicitly opt-in. It has no environment-variable
+bootstrap and never reads a Codex credential, account identity, executable
+path, or shell setting from Textus AI configuration.
+
+```yaml
+textus:
+  ai:
+    provider: codex
+    mode: local
+    engine: codex-cli
+    codex:
+      enabled: true
+      schema-maximum-bytes: 65536
+```
+
+`codex-cli` is accepted as a provider-selection alias; response execution
+facts are normalized to the `codex` provider name. The optional request
+property `ai.codex.timeout-millis` requests a tighter process execution time
+limit. It cannot widen the runtime capability limit.
+
+The hosting CNCF runtime must separately install and grant the logical
+`codex-cli` Process Execution capability. That runtime-owned definition owns
+the executable, fixed `codex exec` invocation, sandbox/session policy, output
+limits, and any environment allowlist. For Codex use, configure it with a
+read-only sandbox and ephemeral session policy. Textus AI submits only bounded
+stdin, declared logical arguments, and, for record generation, a bounded
+`schema.json` WorkArea input file.
+
+The capability definition also owns Codex model selection. Textus AI does not
+accept a model request property for this provider until CNCF exposes a bounded
+argument policy for provider-controlled model values.
+
+Codex authentication remains the responsibility of the locally installed
+Codex CLI. Textus AI never exposes authentication material in request,
+response, metadata, or CallTree data. The executable specification uses the
+CNCF deterministic Process Execution test profile and does not invoke a live
+Codex CLI, network service, or account.
+
 `purposes` lets application components pass `AiRunnerRequirement.purpose`
 without hard-coding a concrete provider, mode, engine, or model. Direct
 request-level provider/mode/engine/model
@@ -163,6 +203,7 @@ than as global system properties. Supported property keys include:
 - `ai.openai.web_search.search_context_size`: OpenAI web search context size.
 - `ai.openai.web_search.return_token_budget`: OpenAI web search token budget.
 - `ai.openai.reasoning.effort`: OpenAI Responses API reasoning effort.
+- `ai.codex.timeout-millis`: tighter bounded timeout for a Codex CLI request.
 
 `textus-ai-runtime` is intended to behave as a CNCF AI runtime first, so the
 same component can be used as an implementation artifact and as a CLI command.

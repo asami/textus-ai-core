@@ -11,7 +11,7 @@ import org.goldenport.cncf.spi.ai.runner.AiRunnerRequirement
  * Provider-neutral execution metadata normalization for Textus AI responses.
  *
  * @since   Jul. 16, 2026
- * @version Jul. 16, 2026
+ * @version Jul. 17, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] object AiExecutionFacts {
@@ -105,6 +105,7 @@ private[textus] object AiExecutionFacts {
           "openai.web_search_calls" => true
       case "gemma.finish_reason" |
           "gemma.usage.input_tokens" | "gemma.usage.output_tokens" | "gemma.usage.total_tokens" => true
+      case "codex.finish_reason" => true
       case _ => false
     }
 

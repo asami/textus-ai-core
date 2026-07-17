@@ -16,10 +16,15 @@ private[textus] object AiRequestProperties:
     provider: String
   ): Option[String] = {
     val normalized = provider.trim.toLowerCase(java.util.Locale.ROOT)
-    _property_string(properties, Vector(
-      s"ai.$normalized.model",
-      s"textus.ai.$normalized.model",
-      s"cncf.ai.$normalized.model",
+    val providernames = normalized match {
+      case "codex" | "codex-cli" => Vector("codex", "codex-cli")
+      case value => Vector(value)
+    }
+    _property_string(properties, providernames.flatMap { name => Vector(
+      s"ai.$name.model",
+      s"textus.ai.$name.model",
+      s"cncf.ai.$name.model"
+    ) } ++ Vector(
       "ai.model",
       "textus.ai.model",
       "cncf.ai.model",
@@ -33,6 +38,15 @@ private[textus] object AiRequestProperties:
     provider: String
   ): String =
     model(properties, provider).getOrElse(configured)
+
+  def requireNoModelOverride(
+    provider: String,
+    properties: Vector[Property]
+  ): Consequence[Unit] =
+    if (model(properties, provider).nonEmpty)
+      Consequence.configurationInvalid(s"AI model override is not supported by provider '$provider'")
+    else
+      Consequence.unit
 
   def timeoutSeconds(
     properties: Vector[Property]

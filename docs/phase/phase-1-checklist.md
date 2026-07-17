@@ -121,24 +121,30 @@ Closure evidence:
 ## Stage 6 - Codex CLI Provider
 
 Stage Status:
-- Current status: IN_PROGRESS
+- Current status: DONE
 - Owner: Textus AI and CNCF maintainers
-- Update rule: Mark this stage DONE only when a controlled Codex CLI adapter
-  executes through the `AiRunner` provider path and its process boundary is
-  covered by deterministic executable specifications.
+- Evidence: complete Textus and CNCF suites validate the Codex provider and
+  review-fix regression specifications.
 
 ### AR-06: Controlled Codex CLI Execution
 
-- [ ] Extend CNCF's managed-process capability to support bounded stdin,
-  bounded output capture, explicit working root, and cancellation without
-  direct `ProcessBuilder` use in a CAR.
-- [ ] Add a `codex` / `codex-cli` Textus AI provider that invokes `codex exec`
-  with read-only sandbox and ephemeral-session defaults.
-- [ ] Support schema-constrained `generateRecord` and bounded `generate` /
+- [x] Extend CNCF's managed-process capability to support bounded stdin,
+  bounded output capture, WorkArea-scoped bounded input files, and cancellation
+  without direct `ProcessBuilder` use in a CAR.
+- [x] Add a `codex` / `codex-cli` Textus AI provider that requests the logical
+  `codex-cli` capability. The runtime-owned definition supplies the fixed
+  `codex exec`, read-only sandbox, and ephemeral-session policy.
+- [x] Support schema-constrained `generateRecord` and bounded `generate` /
   `chat` results without recording prompts, output, credentials, or account
   identity in response metadata or CallTree.
-- [ ] Add fake-process executable specifications for command construction,
+- [x] Add fake-process executable specifications for command construction,
   response parsing, unavailable CLI, non-zero exit, timeout, cancellation,
-  and output-limit behavior.
-- [ ] Document provider configuration, explicit enablement, authentication
+  output-limit behavior, and unsupported tools.
+- [x] Document provider configuration, explicit enablement, authentication
   boundary, and the no-live-Codex-test policy.
+
+Validation evidence on 2026-07-17:
+
+- `sbt --batch test` in `textus-ai-runtime`: 55 tests succeeded.
+- CNCF `sbt --batch test`: 1,921 tests succeeded, including 10
+  `ProcessExecutionModelSpec` and 5 `ProcessExecutionWorkAreaSpec` cases.

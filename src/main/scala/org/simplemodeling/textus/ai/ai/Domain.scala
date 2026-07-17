@@ -1,6 +1,7 @@
 package org.simplemodeling.textus.ai.ai
 
 import org.goldenport.protocol.Property
+import org.goldenport.record.Record
 import org.simplemodeling.model.value.MessageRole
 
 final case class Message(
@@ -12,7 +13,8 @@ final case class GenerateRequest(
   prompt: String,
   temperature: Option[Double] = None,
   maxTokens: Option[Int] = None,
-  properties: Vector[Property] = Vector.empty
+  properties: Vector[Property] = Vector.empty,
+  recordSchema: Option[Record] = None
 )
 
 final case class GenerateResponse(

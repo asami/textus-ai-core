@@ -7,13 +7,14 @@ import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.subsystem.Subsystem
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ResolvedConfiguration}
 import org.simplemodeling.textus.ai.provider.gemma.GemmaConfig
+import org.simplemodeling.textus.ai.provider.codex.CodexConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul. 16, 2026
+ * @version Jul. 17, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -60,10 +61,11 @@ object ComponentFactory:
     val gemma = configuration.flatMap(GemmaConfig.fromConfiguration).getOrElse(GemmaConfig.fromEnvironment())
     val openai = configuration.flatMap(OpenAiConfig.fromConfiguration).orElse(OpenAiConfig.fromEnvironment())
     val google = configuration.flatMap(GoogleConfig.fromConfiguration).orElse(GoogleConfig.fromEnvironment())
-    val defaultselection = _default_selection(configuration, openai.nonEmpty, google.nonEmpty)
+    val codex = configuration.flatMap(CodexConfig.fromConfiguration)
+    val defaultselection = _default_selection(configuration, openai.nonEmpty, google.nonEmpty, codex.nonEmpty)
     val profiles = AiProfileConfig.fromConfiguration(configuration)
-    val withgenerate = AiRuntimeGenerateBinding.register(component, Some(gemma), openai, google)
-    val withchat = AiRuntimeChatBinding.register(withgenerate, Some(gemma), openai, google)
+    val withgenerate = AiRuntimeGenerateBinding.register(component, Some(gemma), openai, google, codex)
+    val withchat = AiRuntimeChatBinding.register(withgenerate, Some(gemma), openai, google, codex)
     val runnerprovider = new TextusAiRunnerProvider(withchat, defaultselection, profiles)
     withchat.withPort(
       Component.Port
@@ -76,7 +78,8 @@ object ComponentFactory:
   private def _default_selection(
     configuration: Option[ResolvedConfiguration],
     openaiconfigured: Boolean,
-    googleconfigured: Boolean
+    googleconfigured: Boolean,
+    codexconfigured: Boolean
   ): SpiSelection = {
     val configuredprovider = _config_string(configuration, Vector(
       "textus.ai.provider",
@@ -85,11 +88,12 @@ object ComponentFactory:
       "cncf.runtime.ai.provider",
       "textus.ai.llm.provider",
       "cncf.ai.llm.provider"
-    )).orElse(_bootstrap_environment.get("AI_LLM_PROVIDER"))
+    )).orElse(_bootstrap_environment.get("AI_LLM_PROVIDER")).map(_canonical_provider)
     val provider =
       configuredprovider.
         orElse(Option.when(googleconfigured)("google")).
         orElse(Option.when(openaiconfigured)("openai")).
+        orElse(Option.when(codexconfigured)("codex")).
         getOrElse("gemma")
     SpiSelection(
       provider = Some(provider),
@@ -133,5 +137,12 @@ object ComponentFactory:
     provider match {
       case "google" => "gemini"
       case "openai" => "gpt"
+      case "codex" => "codex-cli"
       case _ => "ollama"
+    }
+
+  private def _canonical_provider(provider: String): String =
+    provider.trim.toLowerCase(java.util.Locale.ROOT) match {
+      case "codex-cli" => "codex"
+      case value => value
     }

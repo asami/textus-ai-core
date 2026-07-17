@@ -2,7 +2,7 @@
 
 status=accepted
 scope=textus-ai CAR Review execution foundation
-updated_at=2026-07-16
+updated_at=2026-07-17
 
 ## Purpose
 
@@ -28,6 +28,8 @@ adapters.
 | Provider behavior | `TextusAiRunnerSpec` | Google/Gemini, OpenAI, and Gemma/Ollama expose only safe response facts; HTTP failures use stable categories without body disclosure. |
 | Gemma registration | `TextusAiRunnerSpec` Gemma runtime-binding scenario | The registered Gemma binding performs schema-valid structured generation and preserves a categorized terminal failure. |
 | Fallback policy | `AiExecutionFactsSpec`, `TextusAiRunnerSpec` | Provider and model selection are not changed implicitly; Gemma endpoint fallback requires explicit `GemmaRuntimeConfig.fallbackEndpoint`. |
+| Controlled Codex execution | `CodexRuntimeProviderSpec`, CNCF `ProcessExecutionModelSpec`, CNCF `ProcessExecutionWorkAreaSpec` | `generate`, `chat`, and schema-constrained `generateRecord` use an admitted logical `codex-cli` capability, bounded stdin/output, and a bounded `schema.json` WorkArea input without direct host-process access. |
+| Codex terminal boundaries | `CodexRuntimeProviderSpec` | Unavailable CLI, non-zero exit, timeout, cancellation, output limit, and unsupported tools produce explicit failures without exposing prompt, stdout, stderr, credentials, or account identity. |
 
 ## Fixture Scenarios
 
@@ -57,6 +59,19 @@ controls remain the required owner for future propagation and enforcement.
 No test scenario permits implicit local-to-commercial provider fallback or an
 implicit model change. Provider-specific endpoint fallback is allowed only
 when resolved runtime configuration explicitly declares it.
+
+## Codex Process Boundary
+
+The Codex adapter is an ordinary `AiRunner` provider. It requests the
+runtime-granted `codex-cli` capability and submits only a bounded prompt,
+registered dynamic arguments, and, for record generation, a bounded logical
+`schema.json` input file. It does not select an executable, invoke a driver,
+write a host file, construct a shell command, or read Codex authentication.
+
+The hosting CNCF runtime owns the fixed `codex exec` command, read-only
+sandbox, ephemeral-session policy, executable location, environment allowlist,
+and finite Process Execution limits. Tests use `ProcessExecutionTestProfile`;
+they never start a live Codex CLI or call a network service.
 
 ## Validation Command
 

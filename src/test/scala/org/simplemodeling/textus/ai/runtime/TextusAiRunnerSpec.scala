@@ -32,7 +32,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul. 16, 2026
+ * @version Jul. 17, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -1154,8 +1154,8 @@ final class TextusAiRunnerSpec
     context: ExecutionContext
   ): AiRunner = {
     val component = new Component() {}
-      .withBinding("generate", AiRuntimeGenerateBinding.create(Some(config), None, None))
-      .withBinding("chat", AiRuntimeChatBinding.create(Some(config), None, None))
+      .withBinding("generate", AiRuntimeGenerateBinding.create(Some(config), None, None, None))
+      .withBinding("chat", AiRuntimeChatBinding.create(Some(config), None, None, None))
     val provider = new TextusAiRunnerProvider(
       component,
       SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))

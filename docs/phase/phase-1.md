@@ -45,7 +45,8 @@ gates.
 - E (DONE): AR-04 - Verify provider failure and lifecycle behavior.
 - F (DONE): AR-05 - Promote the initial contracts and record the first closure
   checkpoint.
-- G (IN_PROGRESS): AR-06 - Add the Codex CLI provider.
+- G (DONE): AR-06 - Add the Codex CLI provider through the CNCF Process
+  Execution capability.
 
 Detailed status and acceptance evidence are recorded in
 `phase-1-checklist.md`.
@@ -82,6 +83,12 @@ Phase 1 closes only when:
 - The post-implementation review found no actionable Phase 1 findings. It
   confirmed the final response metadata exposes
   `ai.execution.normalization_mode` rather than a bare compatibility key.
+- AR-06 validation on 2026-07-17: `sbt --batch test` completed with 55
+  successful Textus AI tests. CNCF `sbt --batch test` completed with 1,921
+  successful tests, including 10 `ProcessExecutionModelSpec` and 5
+  `ProcessExecutionWorkAreaSpec` cases. The Codex provider uses only the
+  logical `codex-cli` capability; executable location, fixed `codex exec`
+  arguments, sandbox, and session policy remain runtime-owned.
 
 ## Reopen Correction
 

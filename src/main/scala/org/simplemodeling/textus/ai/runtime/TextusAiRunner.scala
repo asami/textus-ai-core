@@ -21,7 +21,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul. 16, 2026
+ * @version Jul. 17, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -86,7 +86,8 @@ final class TextusAiRunner(
         prompt = req.prompt,
         temperature = req.temperature,
         maxTokens = req.maxTokens,
-        properties = _request_properties(req.properties, requirement)
+        properties = _request_properties(req.properties, requirement),
+        recordSchema = Some(req.schema)
       )
     )
     generated match {
@@ -377,15 +378,17 @@ final class TextusAiRunner(
   private def _effective_selection(
     requirement: AiRunnerRequirement
   ): SpiSelection = {
-    val provider = requirement.provider.orElse(selection.provider)
-    val shouldinherit = requirement.provider.isEmpty || requirement.provider == selection.provider
+    val requestedprovider = requirement.provider.map(_canonical_provider)
+    val selectedprovider = selection.provider.map(_canonical_provider)
+    val provider = requestedprovider.orElse(selectedprovider)
+    val shouldinherit = requestedprovider.isEmpty || requestedprovider == selectedprovider
     val providername = provider.getOrElse("gemma")
     if (
       requirement.provider.isEmpty &&
       requirement.mode.isEmpty &&
       requirement.engine.isEmpty
     )
-      selection
+      selection.copy(provider = provider)
     else
       SpiSelection(
         provider = provider,
@@ -676,7 +679,14 @@ final class TextusAiRunner(
     provider match {
       case "google" => "gemini"
       case "openai" => "gpt"
+      case "codex" => "codex-cli"
       case _ => "ollama"
+    }
+
+  private def _canonical_provider(provider: String): String =
+    provider.trim.toLowerCase(Locale.ROOT) match {
+      case "codex-cli" => "codex"
+      case value => value
     }
 
   private def _to_textus_message(

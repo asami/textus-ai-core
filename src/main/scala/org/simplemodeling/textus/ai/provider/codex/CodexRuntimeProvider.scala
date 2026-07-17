@@ -1,0 +1,245 @@
+package org.simplemodeling.textus.ai.provider.codex
+
+import java.nio.charset.StandardCharsets
+import scala.util.Try
+import io.circe.{Json, JsonObject}
+import org.goldenport.Consequence
+import org.goldenport.cncf.component.{ExtensionPoint, ServiceContract, VariationSelection}
+import org.goldenport.cncf.config.RuntimeConfig
+import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.cncf.processexecution.*
+import org.goldenport.cncf.unitofwork.UnitOfWorkOp
+import org.goldenport.configuration.ResolvedConfiguration
+import org.simplemodeling.model.value.MessageRole
+import org.simplemodeling.textus.ai.ai.*
+import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService}
+
+final case class CodexRuntimeConfig(
+  mode: String = "local",
+  engine: String = "codex-cli",
+  schemaMaximumBytes: Long = 65536L
+)
+
+object CodexConfig {
+  def fromConfiguration(configuration: ResolvedConfiguration): Option[CodexRuntimeConfig] =
+    Option.when(_enabled(configuration)) {
+      CodexRuntimeConfig(
+        mode = _config_string(configuration, "mode").getOrElse("local"),
+        engine = _config_string(configuration, "engine").getOrElse("codex-cli"),
+        schemaMaximumBytes = _config_string(configuration, "schema-maximum-bytes", "schemaMaximumBytes")
+          .flatMap(_.toLongOption)
+          .filter(_ > 0L)
+          .getOrElse(65536L)
+      )
+    }
+
+  private def _enabled(configuration: ResolvedConfiguration): Boolean =
+    _config_string(configuration, "enabled").exists { value =>
+      value.toLowerCase(java.util.Locale.ROOT) match
+        case "true" | "yes" | "on" | "1" => true
+        case _ => false
+    }
+
+  private def _config_string(
+    configuration: ResolvedConfiguration,
+    leaves: String*
+  ): Option[String] =
+    leaves.iterator
+      .flatMap { leaf =>
+        Vector(
+          s"textus.ai.codex.$leaf",
+          s"textus.runtime.ai.codex.$leaf",
+          s"cncf.ai.codex.$leaf",
+          s"cncf.runtime.ai.codex.$leaf"
+        ).iterator
+      }
+      .flatMap(key => Try(RuntimeConfig.getString(configuration, key)).toOption.flatten)
+      .map(_.trim)
+      .find(_.nonEmpty)
+}
+
+final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionContext) extends GenerateService {
+  override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
+    for {
+      _ <- AiRequestProperties.requireNoUnsupportedTools("codex", req.properties)
+      _ <- AiRequestProperties.requireNoModelOverride("codex", req.properties)
+      request <- _request_c(req.prompt, req.recordSchema, req.properties)
+      result <- _execute_c(request)
+      response <- _response_c(result)
+    } yield response
+
+  private def _request_c(
+    prompt: String,
+    schema: Option[org.goldenport.record.Record],
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Consequence[ProcessExecutionRequest] =
+    for {
+      capability <- ProcessCapabilityId.parseC("codex-cli")
+      request <- schema match {
+        case Some(value) => _record_request_c(capability, prompt, value, properties)
+        case None => Consequence.success(_plain_request(capability, prompt, properties))
+      }
+    } yield request
+
+  private def _plain_request(
+    capability: ProcessCapabilityId,
+    prompt: String,
+    properties: Vector[org.goldenport.protocol.Property]
+  ): ProcessExecutionRequest =
+    ProcessExecutionRequest(
+      capability = capability,
+      arguments = Vector("-"),
+      input = ProcessExecutionInput.Bytes(prompt.getBytes(StandardCharsets.UTF_8).toVector),
+      requestedLimits = _requested_limits(properties)
+    )
+
+  private def _record_request_c(
+    capability: ProcessCapabilityId,
+    prompt: String,
+    schema: org.goldenport.record.Record,
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Consequence[ProcessExecutionRequest] =
+    for {
+      name <- ProcessArtifactName.parseC("schema")
+      path <- WorkAreaRelativePath.parseC("schema.json")
+      bytes = CodexJsonSchema.render(schema).getBytes(StandardCharsets.UTF_8).toVector
+      input <- ProcessExecutionInputFile.createC(name, path, bytes, config.schemaMaximumBytes)
+    } yield ProcessExecutionRequest(
+      capability = capability,
+      arguments = Vector("--output-schema", "schema.json", "-"),
+      input = ProcessExecutionInput.Bytes(prompt.getBytes(StandardCharsets.UTF_8).toVector),
+      inputFiles = Vector(input),
+      requestedLimits = _requested_limits(properties)
+    )
+
+  private def _requested_limits(
+    properties: Vector[org.goldenport.protocol.Property]
+  ): ProcessExecutionLimits =
+    val timeout = AiRequestProperties.string(properties, Vector(
+      "ai.codex.timeout-millis",
+      "textus.ai.codex.timeout-millis",
+      "cncf.ai.codex.timeout-millis"
+    )).flatMap(_.toLongOption).filter(_ > 0L)
+    ProcessExecutionLimits(executionTimeoutMillis = timeout)
+
+  private def _execute_c(request: ProcessExecutionRequest): Consequence[ProcessExecutionResult] =
+    given ExecutionContext = context
+    ProcessExecutionAdmission.resolveC(context.cncfCore.scope, request).flatMap { execution =>
+      context.runtime.unitOfWorkInterpreter(UnitOfWorkOp.ProcessExec(execution))
+    }
+
+  private def _response_c(result: ProcessExecutionResult): Consequence[GenerateResponse] =
+    result.termination match {
+      case ProcessExecutionTermination.Exited(0) =>
+        val text = new String(result.stdout.content.toArray, StandardCharsets.UTF_8).trim
+        if (text.nonEmpty)
+          Consequence.success(GenerateResponse(
+            text,
+            None,
+            Map("codex.finish_reason" -> "exited")
+          ))
+        else
+          Consequence.valueInvalid("Codex CLI returned empty output")
+      case ProcessExecutionTermination.Exited(_) =>
+        Consequence.serviceUnavailable("Codex CLI exited unsuccessfully")
+      case ProcessExecutionTermination.LaunchFailed =>
+        Consequence.serviceUnavailable("Codex CLI is unavailable")
+      case ProcessExecutionTermination.TimedOut =>
+        Consequence.serviceUnavailable("Codex CLI timed out")
+      case ProcessExecutionTermination.Cancelled =>
+        Consequence.operationIllegal("codex", "Codex CLI execution was cancelled")
+      case ProcessExecutionTermination.OutputLimitExceeded(_) =>
+        Consequence.operationIllegal("codex", "Codex CLI output exceeded the configured limit")
+      case ProcessExecutionTermination.ArtifactLimitExceeded =>
+        Consequence.operationIllegal("codex", "Codex CLI artifacts exceeded the configured limit")
+    }
+}
+
+final class CodexChatService(config: CodexRuntimeConfig, context: ExecutionContext) extends ChatService {
+  private val _generate = new CodexGenerateService(config, context)
+
+  override def chat(req: ChatRequest): Consequence[ChatResponse] =
+    _generate.generate(GenerateRequest(
+      prompt = req.messages.map(message => s"${message.role.toString.toLowerCase}: ${message.content}").mkString("\n"),
+      temperature = req.temperature,
+      maxTokens = req.maxTokens,
+      properties = req.properties
+    )).map { response =>
+      ChatResponse(Message(MessageRole.Assistant, response.text), response.model, response.metadata)
+    }
+}
+
+final class CodexGenerateExtensionPoint(config: CodexRuntimeConfig) extends ExtensionPoint[GenerateService] {
+  override def supports(contract: ServiceContract[GenerateService], variation: VariationSelection)(using ExecutionContext): Boolean =
+    contract.name == "generate-service" &&
+      variation.provider.exists(_is_codex_provider) &&
+      variation.mode.contains(config.mode) &&
+      variation.engine.contains(config.engine)
+
+  override def provide(contract: ServiceContract[GenerateService], variation: VariationSelection)(using ExecutionContext): Consequence[GenerateService] =
+    Consequence.success(new CodexGenerateService(config, summon[ExecutionContext]))
+}
+
+final class CodexChatExtensionPoint(config: CodexRuntimeConfig) extends ExtensionPoint[ChatService] {
+  override def supports(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Boolean =
+    contract.name == "chat-service" &&
+      variation.provider.exists(_is_codex_provider) &&
+      variation.mode.contains(config.mode) &&
+      variation.engine.contains(config.engine)
+
+  override def provide(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Consequence[ChatService] =
+    Consequence.success(new CodexChatService(config, summon[ExecutionContext]))
+}
+
+private def _is_codex_provider(value: String): Boolean =
+  value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")
+
+private object CodexJsonSchema {
+  def render(schema: org.goldenport.record.Record): String =
+    Json.fromJsonObject(_object_schema(schema)).noSpaces
+
+  private def _object_schema(schema: org.goldenport.record.Record): JsonObject = {
+    val required = _strings(schema.getAny("required"))
+    val arrays = _records(schema.getAny("arrays")).flatMap { value =>
+      _string(value.getAny("name")).orElse(_string(value.getAny("field"))).map { name =>
+        name -> Json.fromJsonObject(JsonObject(
+          "type" -> Json.fromString("array"),
+          "items" -> Json.fromJsonObject(JsonObject(
+            "type" -> Json.fromString("object"),
+            "required" -> Json.fromValues(_strings(value.getAny("required")).map(Json.fromString))
+          ))
+        ))
+      }
+    }
+    JsonObject(
+      "type" -> Json.fromString("object"),
+      "required" -> Json.fromValues(required.map(Json.fromString)),
+      "properties" -> Json.fromJsonObject(JsonObject.fromIterable(
+        required.map(_ -> Json.obj()) ++ arrays
+      ))
+    )
+  }
+
+  private def _records(value: Any): Vector[org.goldenport.record.Record] =
+    value match {
+      case null => Vector.empty
+      case record: org.goldenport.record.Record => Vector(record)
+      case Some(x) => _records(x)
+      case values: Seq[?] => values.toVector.flatMap(_records)
+      case values: Array[?] => values.toVector.flatMap(_records)
+      case _ => Vector.empty
+    }
+
+  private def _strings(value: Any): Vector[String] =
+    value match {
+      case null => Vector.empty
+      case Some(x) => _strings(x)
+      case values: Seq[?] => values.toVector.flatMap(_strings)
+      case values: Array[?] => values.toVector.flatMap(_strings)
+      case text: String => text.split("[,\\s]+").toVector.map(_.trim).filter(_.nonEmpty)
+      case other => Vector(other.toString)
+    }
+
+  private def _string(value: Any): Option[String] =
+    _strings(value).headOption
+}
