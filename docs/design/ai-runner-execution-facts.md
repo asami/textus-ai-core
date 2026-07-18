@@ -2,7 +2,7 @@
 
 status=accepted
 scope=textus-ai provider-neutral metadata profile
-updated_at=2026-07-16
+updated_at=2026-07-18
 
 ## Decision
 
@@ -30,7 +30,7 @@ facts into typed SPI fields without changing the meaning of the namespace keys.
 
 ## Namespace
 
-All normalized facts use the `ai.execution.*`, `ai.usage.*`, or
+All normalized facts use the `ai.execution.*`, `ai.policy.*`, `ai.usage.*`, or
 `ai.limitation.*` namespaces.
 
 ### Execution Facts
@@ -56,10 +56,22 @@ All normalized facts use the `ai.execution.*`, `ai.usage.*`, or
 | `ai.execution.input_digest` | Safe digest of bounded input, formatted `sha256:<hex>` | Digest was not supplied or measured |
 | `ai.execution.output_digest` | Safe digest of bounded output, formatted `sha256:<hex>` | Digest was not supplied or measured |
 | `ai.execution.tools` | Effective logical tools as sorted comma-separated IDs | No tools were enabled |
+| `ai.execution.enabled_tools` | Logical tools admitted by the selected runtime capability | No capability-specific tool policy applied |
 
 `ai.execution.provider`, `mode`, `engine`, `model`, and `purpose` describe
 effective values. A requested value must not overwrite the value that actually
 executed.
+
+### Policy Facts
+
+| Key | Meaning | Absence |
+| --- | --- | --- |
+| `ai.policy.model_profile` | Approved Codex model-profile selected by the effective purpose | No Codex purpose profile was selected |
+| `ai.policy.reasoning_level` | Fixed Codex reasoning level compiled into the admitted capability | The profile did not configure reasoning |
+
+For Codex, these facts identify the profile policy rather than a caller-supplied
+CLI argument. `ai.execution.enabled_tools` records only the logical capability
+set, not URLs, search results, or provider transcripts.
 
 ### Usage Facts
 
@@ -124,7 +136,7 @@ application may depend on their provider-neutral meaning.
 
 - Textus AI writes normalized effective values after adapter execution.
 - Caller metadata cannot overwrite an `ai.execution.*`, `ai.usage.*`, or
-  `ai.limitation.*` value.
+`ai.limitation.*`, or `ai.policy.*` value.
 - A provider adapter may supply a raw provider-specific fact, but only Textus
   AI maps it to a normalized key.
 - Values are omitted when unknown rather than synthesized.
@@ -139,6 +151,11 @@ reason, input/output/total tokens, and record normalization mode for
 Gemma/Ollama adapters extract only wire fields they actually received. Textus
 AI maps the selected provider's provider-specific facts into the normalized
 namespace; it does not infer absent values.
+
+An approved Codex purpose model-profile is compiled into a finite managed
+process capability. The normalized policy facts expose its profile and fixed
+reasoning level, while `ai.execution.enabled_tools` exposes its admitted
+logical tools. Caller fields never select model, reasoning, or CLI arguments.
 
 Reserved normalized namespaces cannot be overwritten by provider metadata,
 while only explicitly allowlisted provider-specific metadata remains available

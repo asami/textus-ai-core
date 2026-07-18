@@ -17,7 +17,7 @@ import org.goldenport.record.Record
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexExecutionProfile, CodexReasoningLevel, CodexRuntimeConfig}
 
 /*
  * Executable specification for the managed Codex CLI provider. The test
@@ -37,7 +37,11 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       val enabled = _configuration(Map(
         "textus.ai.codex.enabled" -> "true",
         "textus.ai.codex.executable" -> "/runtime/codex-cli",
-        "textus.ai.codex.schema-maximum-bytes" -> "4096"
+        "textus.ai.codex.schema-maximum-bytes" -> "4096",
+        "textus.ai.model-profiles.codex-artscene-research.provider" -> "codex",
+        "textus.ai.model-profiles.codex-artscene-research.model" -> "gpt-5-codex",
+        "textus.ai.model-profiles.codex-artscene-research.reasoning-level" -> "high",
+        "textus.ai.model-profiles.codex-artscene-research.tools" -> "url_context,web_search"
       ))
       val unsafe = _configuration(Map(
         "textus.ai.codex.enabled" -> "true",
@@ -54,6 +58,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       disabledconfig shouldBe None
       enabledconfig.map(_.schemaMaximumBytes) shouldBe Some(4096L)
       enabledconfig.map(_.executable) shouldBe Some("/runtime/codex-cli")
+      enabledconfig.flatMap(_.executionProfiles.get("codex-artscene-research")).map(_.reasoningLevel) shouldBe Some(Some(CodexReasoningLevel.High))
       unsafeconfig shouldBe None
       legacy.schemaMaximumBytes shouldBe 4096L
     }
@@ -210,24 +215,129 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
           fail("an over-broad process timeout must be rejected by admission")
       fixture.profile.driver.executions shouldBe Vector.empty
     }
+
+    "run a Web-research purpose through its fixed admitted Codex profile" in {
+      Given("a configured Codex purpose profile with model, reasoning, and both logical Web tools")
+      val profile = CodexExecutionProfile(
+        "codex-artscene-research",
+        "gpt-5-codex",
+        Some(CodexReasoningLevel.High),
+        Set(AiTool.UrlContext, AiTool.WebSearch)
+      )
+      val fixture = _fixture(_result("{\"title\":\"Web result\"}"), profile.webCapability)
+      given ExecutionContext = _context(fixture)
+      val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
+        "textus.ai.purposes.artscene-exhibition-web-research.model-profile" -> "codex-artscene-research",
+        "textus.ai.model-profiles.codex-artscene-research.provider" -> "codex",
+        "textus.ai.model-profiles.codex-artscene-research.mode" -> "local",
+        "textus.ai.model-profiles.codex-artscene-research.engine" -> "codex-cli",
+        "textus.ai.model-profiles.codex-artscene-research.model" -> "gpt-5-codex",
+        "textus.ai.model-profiles.codex-artscene-research.reasoning-level" -> "high",
+        "textus.ai.model-profiles.codex-artscene-research.tools" -> "url_context,web_search"
+      ))))
+
+      When("a caller names only the required purpose")
+      val result = _runner(
+        CodexRuntimeConfig(executionProfiles = Map(profile.name -> profile)),
+        profiles
+      ).generateRecord(AiRecordRequest(
+        "research the supplied official URL",
+        _schema,
+        requirement = AiRunnerRequirement(
+          purpose = Some("artscene-exhibition-web-research"),
+          purposeRequired = true
+        )
+      ))
+
+      Then("the selected profile controls the model and Web capability without caller CLI input")
+      result.toOption.flatMap(_.record.getAny("title")) shouldBe Some("Web result")
+      result.toOption.flatMap(_.metadata.get(AiExecutionFacts.POLICY_MODEL_PROFILE)) shouldBe Some("codex-artscene-research")
+      result.toOption.flatMap(_.metadata.get(AiExecutionFacts.POLICY_REASONING_LEVEL)) shouldBe Some("high")
+      result.toOption.flatMap(_.metadata.get(AiExecutionFacts.ENABLED_TOOLS)) shouldBe Some("url_context,web_search")
+      fixture.profile.driver.executions.map(_.request.capability.print) shouldBe Vector(profile.webCapability)
+      fixture.profile.driver.executions.map(_.request.arguments) shouldBe Vector(Vector("--output-schema", "schema.json", "-"))
+    }
+
+    "reject a Codex URL-context purpose without the admitted Web-search capability" in {
+      Given("a Codex purpose profile that requests URL context but cannot grant the CLI Web capability")
+      val fixture = _fixture(_result("{}"))
+      given ExecutionContext = _context(fixture)
+      val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
+        "textus.ai.purposes.artscene-exhibition-web-research.model-profile" -> "codex-url-only",
+        "textus.ai.model-profiles.codex-url-only.provider" -> "codex",
+        "textus.ai.model-profiles.codex-url-only.model" -> "gpt-5-codex",
+        "textus.ai.model-profiles.codex-url-only.tools" -> "url_context"
+      ))))
+
+      When("the Web-research purpose is required")
+      val result = _runner(CodexRuntimeConfig(), profiles).generate(
+        AiGenerateRequest(
+          "confidential URL",
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-web-research"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("the runtime fails before it selects a process or an implicit fallback")
+      result.isFaillure shouldBe true
+      result.toString should include ("Codex URL context requires the web_search capability")
+      fixture.profile.driver.executions shouldBe Vector.empty
+    }
+
+    "reject an unsupported Codex reasoning policy before process selection" in {
+      Given("a Web-research purpose profile with an unsupported Codex reasoning level")
+      val fixture = _fixture(_result("{}"))
+      given ExecutionContext = _context(fixture)
+      val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
+        "textus.ai.purposes.artscene-exhibition-web-research.model-profile" -> "codex-invalid-reasoning",
+        "textus.ai.model-profiles.codex-invalid-reasoning.provider" -> "codex",
+        "textus.ai.model-profiles.codex-invalid-reasoning.model" -> "gpt-5-codex",
+        "textus.ai.model-profiles.codex-invalid-reasoning.reasoning-level" -> "experimental",
+        "textus.ai.model-profiles.codex-invalid-reasoning.tools" -> "url_context,web_search"
+      ))))
+
+      When("the caller requires that purpose")
+      val result = _runner(CodexRuntimeConfig(), profiles).generate(
+        AiGenerateRequest(
+          "confidential Web research",
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-web-research"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("the unsupported policy is reported without invoking the local process")
+      result.isFaillure shouldBe true
+      result.toString should include ("unsupported reasoning-level")
+      fixture.profile.driver.executions shouldBe Vector.empty
+    }
   }
 
-  private def _runner()(using ExecutionContext): AiRunner = {
-    val config = CodexRuntimeConfig()
+  private def _runner(
+    config: CodexRuntimeConfig = CodexRuntimeConfig(),
+    profiles: AiProfileConfig = AiProfileConfig.empty
+  )(using ExecutionContext): AiRunner = {
     val component = new Component() {}
       .withBinding("generate", AiRuntimeGenerateBinding.create(None, None, None, Some(config)))
       .withBinding("chat", AiRuntimeChatBinding.create(None, None, None, Some(config)))
     new TextusAiRunnerProvider(
       component,
-      SpiSelection(provider = Some("codex"), mode = Some("local"), engine = Some("codex-cli"))
+      SpiSelection(provider = Some("codex"), mode = Some("local"), engine = Some("codex-cli")),
+      profiles
     ).provide(
       SpiContract("ai-runner", classOf[AiRunner]),
       SpiSelection(provider = Some("codex"), mode = Some("local"), engine = Some("codex-cli"))
     ).toOption.get
   }
 
-  private def _fixture(result: ProcessExecutionResult): ProcessExecutionTestFixture = {
-    val capability = ProcessCapabilityId.parseC("codex-cli").toOption.get
+  private def _fixture(
+    result: ProcessExecutionResult,
+    capabilityname: String = "codex-cli"
+  ): ProcessExecutionTestFixture = {
+    val capability = ProcessCapabilityId.parseC(capabilityname).toOption.get
     val schema = ProcessArtifactName.parseC("schema").toOption.get
     ProcessExecutionTestProfile.admittedC(
       capability,

@@ -118,10 +118,9 @@ completed on 2026-07-18.
 - Current phase: Phase 2, Purpose Policy Runtime.
 - Current phase dashboard: `docs/phase/phase-2.md`
 - Current phase checklist: `docs/phase/phase-2-checklist.md`
-- Current next task: PP-05 phase-wide executable specification and release
-  checkpoint. PP-04 maximum-output, timeout, record-retry, and scoped
-  concurrency policies are now enforced by supported provider and CNCF runtime
-  boundaries.
+- Current next task: PP-07 generic purpose and logical-level policy. PP-06
+  now compiles approved Codex purpose model profiles into finite managed-process
+  capabilities for fixed model, reasoning, and Web-search settings.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

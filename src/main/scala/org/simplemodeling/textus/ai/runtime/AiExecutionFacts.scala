@@ -22,6 +22,7 @@ private[textus] object AiExecutionFacts {
   val PURPOSE = "ai.execution.purpose"
   val LOCATION = "ai.execution.location"
   val TOOLS = "ai.execution.tools"
+  val ENABLED_TOOLS = "ai.execution.enabled_tools"
   val TOOL_RESULT_SUMMARY = "ai.execution.tool_result_summary"
   val NORMALIZATION_MODE = "ai.execution.normalization_mode"
   val RESPONSE_ID = "ai.execution.response_id"
@@ -38,6 +39,8 @@ private[textus] object AiExecutionFacts {
   val POLICY_MAX_CONCURRENT = "ai.policy.max_concurrent"
   val POLICY_OUTPUT_SCHEMA_ID = "ai.policy.output_schema_id"
   val POLICY_PROMPT_CONTRACT_ID = "ai.policy.prompt_contract_id"
+  val POLICY_MODEL_PROFILE = "ai.policy.model_profile"
+  val POLICY_REASONING_LEVEL = "ai.policy.reasoning_level"
 
   def normalize(
     selection: SpiSelection,

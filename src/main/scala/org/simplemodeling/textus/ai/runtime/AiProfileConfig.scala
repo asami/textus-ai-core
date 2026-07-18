@@ -33,6 +33,8 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.model-profiles.<profile>.mode
  * - textus.ai.model-profiles.<profile>.engine
  * - textus.ai.model-profiles.<profile>.model
+ * - textus.ai.model-profiles.<profile>.reasoning-level
+ * - textus.ai.model-profiles.<profile>.tools
  * - textus.ai.model-profiles.<profile>.role
  * - textus.ai.model-profiles.<profile>.quality
  * - textus.ai.model-profiles.<profile>.cost
@@ -48,6 +50,8 @@ private[textus] final case class AiModelProfile(
   mode: Option[String] = None,
   engine: Option[String] = None,
   model: Option[String] = None,
+  reasoningLevel: Option[String] = None,
+  tools: Vector[AiTool] = Vector.empty,
   role: Option[String] = None,
   quality: Option[String] = None,
   cost: Option[String] = None,
@@ -84,7 +88,10 @@ private[textus] final case class AiPurposeProfile(
       mode = requirement.mode.orElse(mode).orElse(modelprofile.flatMap(_.mode)),
       engine = requirement.engine.orElse(engine).orElse(modelprofile.flatMap(_.engine)),
       model = requirement.model.orElse(model).orElse(modelprofile.flatMap(_.model)),
-      tools = if (requirement.tools.nonEmpty) requirement.tools else tools
+      tools = if (requirement.tools.nonEmpty) requirement.tools else tools match {
+        case values if values.nonEmpty => values
+        case _ => modelprofile.map(_.tools).getOrElse(Vector.empty)
+      }
     )
 }
 
@@ -169,7 +176,8 @@ private[textus] final case class AiPurposePolicy(
 
 private[textus] final case class AiProfileResolution(
   requirement: AiRunnerRequirement,
-  policy: AiPurposePolicy = AiPurposePolicy.empty
+  policy: AiPurposePolicy = AiPurposePolicy.empty,
+  modelProfile: Option[AiModelProfile] = None
 ) {
   def maxTokens(request: Option[Int]): Option[Int] =
     request.orElse(policy.maxOutputTokens)
@@ -177,7 +185,16 @@ private[textus] final case class AiProfileResolution(
   def requestProperties(
     properties: Vector[org.goldenport.protocol.Property]
   ): Vector[org.goldenport.protocol.Property] =
-    properties ++ policy.requestProperties
+    properties ++ policy.requestProperties ++ _codex_execution_profile_property
+
+  def isCodexProfile: Boolean =
+    requirement.provider.exists(_is_codex)
+
+  def codexExecutionProfile: Option[String] =
+    Option.when(isCodexProfile)(modelProfile.map(_.name)).flatten
+
+  def reasoningLevel: Option[String] =
+    Option.when(isCodexProfile)(modelProfile.flatMap(_.reasoningLevel)).flatten
 
   def executionMetadata(
     maxTokens: Option[Int],
@@ -190,10 +207,23 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT -> recordRetryLimit.map(_.toString),
       AiExecutionFacts.POLICY_MAX_CONCURRENT -> policy.maxConcurrent.map(_.toString),
       AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID -> policy.outputSchemaId,
-      AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID -> policy.promptContractId
+      AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID -> policy.promptContractId,
+      AiExecutionFacts.POLICY_MODEL_PROFILE -> codexExecutionProfile,
+      AiExecutionFacts.POLICY_REASONING_LEVEL -> reasoningLevel,
+      AiExecutionFacts.ENABLED_TOOLS -> Option.when(codexExecutionProfile.nonEmpty && requirement.tools.nonEmpty)(
+        requirement.tools.map(_.id).mkString(",")
+      )
     ).collect {
       case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim
     }.toMap
+
+  private def _codex_execution_profile_property: Vector[org.goldenport.protocol.Property] =
+    codexExecutionProfile.map { value =>
+      org.goldenport.protocol.Property(AiRequestProperties.CODEX_EXECUTION_PROFILE, value, None)
+    }.toVector
+
+  private def _is_codex(value: String): Boolean =
+    value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")
 }
 
 private[textus] object AiPurposePolicy {
@@ -291,6 +321,15 @@ private[textus] final class AiProfileConfig(
         mode = _config_string(_model_profile_keys(normalized, "mode")),
         engine = _config_string(_model_profile_keys(normalized, "engine")),
         model = _config_string(_model_profile_keys(normalized, "model")),
+        reasoningLevel = _config_string(
+          _model_profile_keys(normalized, "reasoning-level") ++
+            _model_profile_keys(normalized, "reasoningLevel")
+        ),
+        tools = _config_tools(
+          _model_profile_keys(normalized, "tools") ++
+            _model_profile_keys(normalized, "enabled-tools") ++
+            _model_profile_keys(normalized, "enabledTools")
+        ),
         role = _config_string(_model_profile_keys(normalized, "role")),
         quality = _config_string(_model_profile_keys(normalized, "quality")),
         cost = _config_string(_model_profile_keys(normalized, "cost")),
@@ -302,6 +341,8 @@ private[textus] final class AiProfileConfig(
         profile.mode.nonEmpty ||
         profile.engine.nonEmpty ||
         profile.model.nonEmpty ||
+        profile.reasoningLevel.nonEmpty ||
+        profile.tools.nonEmpty ||
         profile.role.nonEmpty ||
         profile.quality.nonEmpty ||
         profile.cost.nonEmpty ||
@@ -344,12 +385,15 @@ private[textus] final class AiProfileConfig(
       policy <- _purpose_policy(profile)
       resolution <- {
         val profileprovider = profile.provider.orElse(modelprofile.flatMap(_.provider))
+        val effective = profile.applyTo(requirement, modelprofile)
         if (requiresprovider && profileprovider.isEmpty)
           Consequence.configurationInvalid(
             s"AI purpose profile must select a provider: ${profile.purpose}"
           )
         else
-          Consequence.success(AiProfileResolution(profile.applyTo(requirement, modelprofile), policy))
+          _validate_codex_profile(requirement, effective, modelprofile).map { _ =>
+            AiProfileResolution(effective, policy, modelprofile)
+          }
       }
     } yield resolution
 
@@ -365,6 +409,51 @@ private[textus] final class AiProfileConfig(
       case None =>
         Consequence.success(None)
     }
+
+  private def _validate_codex_profile(
+    requested: AiRunnerRequirement,
+    effective: AiRunnerRequirement,
+    modelprofile: Option[AiModelProfile]
+  ): Consequence[Unit] =
+    if (!_is_codex(effective.provider))
+      Consequence.unit
+    else if (requested.model.nonEmpty)
+      Consequence.configurationInvalid(
+        "Codex model selection must come from an approved purpose model-profile"
+      )
+    else {
+      val tools = effective.tools.toSet
+      modelprofile match {
+        case Some(profile) if profile.reasoningLevel.exists(value => !_is_codex_reasoning_level(value)) =>
+          Consequence.configurationInvalid(
+            s"Codex model-profile '${profile.name}' has an unsupported reasoning-level"
+          )
+        case Some(profile) if !tools.subsetOf(profile.tools.toSet) =>
+          Consequence.configurationInvalid(
+            s"Codex purpose requests tools outside model-profile '${profile.name}'"
+          )
+        case None if tools.nonEmpty =>
+          Consequence.configurationInvalid(
+            "Codex tools require an approved purpose model-profile"
+          )
+        case _ if tools.contains(AiTool.UrlContext) && !tools.contains(AiTool.WebSearch) =>
+          Consequence.configurationInvalid(
+            "Codex URL context requires the web_search capability"
+          )
+        case _ =>
+          Consequence.unit
+      }
+    }
+
+  private def _is_codex(provider: Option[String]): Boolean =
+    provider.exists { value =>
+      value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")
+    }
+
+  private def _is_codex_reasoning_level(value: String): Boolean =
+    Set("minimal", "low", "medium", "high", "xhigh").contains(
+      value.trim.toLowerCase(java.util.Locale.ROOT)
+    )
 
   private def _purpose_policy(
     profile: AiPurposeProfile

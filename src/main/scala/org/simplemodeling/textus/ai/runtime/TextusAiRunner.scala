@@ -483,13 +483,16 @@ final class TextusAiRunner(
     resolution: AiProfileResolution
   ): Vector[Property] = {
     val requirement = resolution.requirement
-    val modelproperty = requirement.model.map(value => Property("ai.model", value, None))
+    val modelproperty = Option.when(!resolution.isCodexProfile)(requirement.model).flatten.map { value =>
+      Property("ai.model", value, None)
+    }
     val purposeproperty = requirement.purpose.map(value => Property("ai.purpose", value, None))
     val toolsproperty =
       Option.when(requirement.tools.nonEmpty)(
         Property("ai.tools", requirement.tools.map(_.id).mkString(","), None)
       )
-    resolution.requestProperties(properties) ++ modelproperty ++ purposeproperty ++ toolsproperty
+    resolution.requestProperties(AiRequestProperties.withoutInternalCodexProfile(properties)) ++
+      modelproperty ++ purposeproperty ++ toolsproperty
   }
 
   private def _chat_input(req: AiChatRequest): String =

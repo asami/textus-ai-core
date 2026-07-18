@@ -12,6 +12,8 @@ import org.goldenport.cncf.unitofwork.UnitOfWorkOp
 import org.goldenport.protocol.Property
 
 private[textus] object AiRequestProperties:
+  val CODEX_EXECUTION_PROFILE = "ai.textus.codex.execution-profile"
+
   def model(
     properties: Vector[Property],
     provider: String
@@ -137,6 +139,18 @@ private[textus] object AiRequestProperties:
         )
     }
 
+  // This marker is installed only after purpose-profile resolution. Caller
+  // properties must not select a managed-process capability.
+  def withoutInternalCodexProfile(
+    properties: Vector[Property]
+  ): Vector[Property] =
+    properties.filterNot(_.name.equalsIgnoreCase(CODEX_EXECUTION_PROFILE))
+
+  def codexExecutionProfile(
+    properties: Vector[Property]
+  ): Option[String] =
+    _property_string(properties, Vector(CODEX_EXECUTION_PROFILE))
+
   private def _property_string(
     properties: Vector[Property],
     names: Vector[String]
@@ -154,7 +168,7 @@ private[textus] object AiProviderAdmission:
   ): Consequence[Unit] =
     for {
       tools <- AiRequestProperties.validateTools(properties)
-      _ <- _validate_tools(_provider(selection), tools)
+      _ <- _validate_tools(_provider(selection), tools, properties)
       _ <- _validate_model_override(_provider(selection), properties)
     } yield ()
 
@@ -169,9 +183,15 @@ private[textus] object AiProviderAdmission:
 
   private def _validate_tools(
     provider: String,
-    tools: Vector[AiTool]
+    tools: Vector[AiTool],
+    properties: Vector[Property]
   ): Consequence[Unit] =
-    if (tools.isEmpty || provider == "google" || provider == "openai")
+    if (
+      tools.isEmpty ||
+      provider == "google" ||
+      provider == "openai" ||
+      (provider == "codex" && AiRequestProperties.codexExecutionProfile(properties).nonEmpty)
+    )
       Consequence.unit
     else
       Consequence.configurationInvalid(

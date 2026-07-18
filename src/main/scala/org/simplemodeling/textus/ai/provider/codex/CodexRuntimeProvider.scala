@@ -9,18 +9,50 @@ import org.goldenport.cncf.component.{Component, ExtensionPoint, ServiceContract
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.processexecution.*
+import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.cncf.unitofwork.UnitOfWorkOp
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
 import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService}
 
+final case class CodexExecutionProfile(
+  name: String,
+  model: String,
+  reasoningLevel: Option[CodexReasoningLevel] = None,
+  tools: Set[AiTool] = Set.empty
+) {
+  def plainCapability: String = s"codex-cli-profile-$name"
+  def webCapability: String = s"${plainCapability}-web"
+
+  def supports(requested: Set[AiTool]): Boolean =
+    requested.subsetOf(tools) &&
+      (!requested.contains(AiTool.UrlContext) || requested.contains(AiTool.WebSearch))
+
+  def supportsWeb: Boolean =
+    tools.contains(AiTool.WebSearch)
+}
+
+enum CodexReasoningLevel(val id: String) {
+  case Minimal extends CodexReasoningLevel("minimal")
+  case Low extends CodexReasoningLevel("low")
+  case Medium extends CodexReasoningLevel("medium")
+  case High extends CodexReasoningLevel("high")
+  case XHigh extends CodexReasoningLevel("xhigh")
+}
+
+object CodexReasoningLevel {
+  def parse(value: String): Option[CodexReasoningLevel] =
+    values.find(_.id.equalsIgnoreCase(value.trim))
+}
+
 final case class CodexRuntimeConfig(
   mode: String = "local",
   engine: String = "codex-cli",
   schemaMaximumBytes: Long = 65536L,
   executable: String = "/runtime/codex-cli",
-  executionLimits: ProcessExecutionLimits = CodexRuntimeConfig.defaultExecutionLimits
+  executionLimits: ProcessExecutionLimits = CodexRuntimeConfig.defaultExecutionLimits,
+  executionProfiles: Map[String, CodexExecutionProfile] = Map.empty
 )
 
 object CodexRuntimeConfig {
@@ -54,7 +86,8 @@ object CodexConfig {
             schemaMaximumBytes = _config_string(configuration, "schema-maximum-bytes", "schemaMaximumBytes")
               .flatMap(_.toLongOption)
               .filter(_ > 0L)
-              .getOrElse(65536L)
+              .getOrElse(65536L),
+            executionProfiles = _execution_profiles(configuration)
           )
         }
 
@@ -87,31 +120,133 @@ object CodexConfig {
       .filter(_.isAbsolute)
       .map(_.normalize.toString)
       .filter(_.nonEmpty)
+
+  private def _execution_profiles(
+    configuration: ResolvedConfiguration
+  ): Map[String, CodexExecutionProfile] =
+    configuration.configuration.values.keys.iterator
+      .flatMap(_model_profile_name)
+      .toVector
+      .distinct
+      .sorted
+      .flatMap { name =>
+        val provider = _model_profile_string(configuration, name, "provider")
+        val model = _model_profile_string(configuration, name, "model")
+        val reasoning = _model_profile_string(configuration, name, "reasoning-level")
+          .orElse(_model_profile_string(configuration, name, "reasoningLevel"))
+          .flatMap(CodexReasoningLevel.parse)
+        val tools = _model_profile_string(configuration, name, "tools")
+          .map(AiTool.parseList)
+          .getOrElse(Vector.empty)
+          .toSet
+        Option.when(_is_codex(provider) && _safe_profile_name(name) && _safe_model(model)) {
+          name -> CodexExecutionProfile(name, model.get, reasoning, tools)
+        }
+      }
+      .toMap
+
+  private def _model_profile_name(key: String): Option[String] = {
+    val prefixes = Vector(
+      "textus.ai.model-profiles.",
+      "textus.ai.modelProfiles.",
+      "textus.ai.model-profile.",
+      "textus.runtime.ai.model-profiles.",
+      "cncf.ai.model-profiles.",
+      "cncf.runtime.ai.model-profiles."
+    )
+    prefixes.iterator.flatMap { prefix =>
+      Option.when(key.startsWith(prefix)) {
+        key.drop(prefix.length).takeWhile(_ != '.')
+      }
+    }.map(_.trim).find(_.nonEmpty)
+  }
+
+  private def _model_profile_string(
+    configuration: ResolvedConfiguration,
+    profile: String,
+    leaf: String
+  ): Option[String] =
+    Vector(
+      s"textus.ai.model-profiles.$profile.$leaf",
+      s"textus.ai.modelProfiles.$profile.$leaf",
+      s"textus.ai.model-profile.$profile.$leaf",
+      s"textus.runtime.ai.model-profiles.$profile.$leaf",
+      s"cncf.ai.model-profiles.$profile.$leaf",
+      s"cncf.runtime.ai.model-profiles.$profile.$leaf"
+    ).iterator
+      .flatMap(key => Try(RuntimeConfig.getString(configuration, key)).toOption.flatten)
+      .map(_.trim)
+      .find(_.nonEmpty)
+
+  private def _is_codex(provider: Option[String]): Boolean =
+    provider.exists { value =>
+      value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")
+    }
+
+  private def _safe_profile_name(value: String): Boolean =
+    value.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+
+  private def _safe_model(value: Option[String]): Boolean =
+    value.exists(_.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
 }
 
 final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionContext) extends GenerateService {
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
     for {
-      _ <- AiRequestProperties.requireNoUnsupportedTools("codex", req.properties)
       _ <- AiRequestProperties.requireNoModelOverride("codex", req.properties)
       _ <- _require_no_output_token_limit(req.maxTokens)
-      request <- _request_c(req.prompt, req.recordSchema, req.properties)
+      executionprofile <- _execution_profile_c(req.properties)
+      request <- _request_c(req.prompt, req.recordSchema, req.properties, executionprofile)
       result <- _execute_c(request)
-      response <- _response_c(result)
+      response <- _response_c(result, executionprofile)
     } yield response
 
   private def _request_c(
     prompt: String,
     schema: Option[org.goldenport.record.Record],
-    properties: Vector[org.goldenport.protocol.Property]
+    properties: Vector[org.goldenport.protocol.Property],
+    executionprofile: _ExecutionProfile
   ): Consequence[ProcessExecutionRequest] =
     for {
-      capability <- ProcessCapabilityId.parseC("codex-cli")
+      capability <- ProcessCapabilityId.parseC(executionprofile.capability)
       request <- schema match {
         case Some(value) => _record_request_c(capability, prompt, value, properties)
         case None => Consequence.success(_plain_request(capability, prompt, properties))
       }
     } yield request
+
+  private def _execution_profile_c(
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Consequence[_ExecutionProfile] =
+    for {
+      tools <- AiRequestProperties.validateTools(properties)
+      profile <- _configured_profile_c(properties, tools.toSet)
+    } yield profile
+
+  private def _configured_profile_c(
+    properties: Vector[org.goldenport.protocol.Property],
+    tools: Set[AiTool]
+  ): Consequence[_ExecutionProfile] =
+    AiRequestProperties.codexExecutionProfile(properties) match {
+      case Some(name) =>
+        config.executionProfiles.get(name) match {
+          case Some(profile) if profile.supports(tools) =>
+            val capability = if (tools.nonEmpty) profile.webCapability else profile.plainCapability
+            Consequence.success(_ExecutionProfile(capability, Some(profile), tools))
+          case Some(_) =>
+            Consequence.configurationInvalid(
+              s"Codex execution profile '$name' does not support requested tools: ${tools.toVector.map(_.id).sorted.mkString(",")}"
+            )
+          case None =>
+            Consequence.configurationInvalid(s"Codex execution profile is not admitted: $name")
+        }
+      case None if tools.nonEmpty =>
+        Consequence.configurationInvalid(
+          s"Codex tools require an admitted purpose model-profile: ${tools.toVector.map(_.id).sorted.mkString(",")}"
+        )
+      case None =>
+        Consequence.success(_ExecutionProfile("codex-cli", None, Set.empty))
+    }
 
   private def _plain_request(
     capability: ProcessCapabilityId,
@@ -171,15 +306,18 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
       context.runtime.unitOfWorkInterpreter(UnitOfWorkOp.ProcessExec(execution))
     }
 
-  private def _response_c(result: ProcessExecutionResult): Consequence[GenerateResponse] =
+  private def _response_c(
+    result: ProcessExecutionResult,
+    executionprofile: _ExecutionProfile
+  ): Consequence[GenerateResponse] =
     result.termination match {
       case ProcessExecutionTermination.Exited(0) =>
         val text = new String(result.stdout.content.toArray, StandardCharsets.UTF_8).trim
         if (text.nonEmpty)
           Consequence.success(GenerateResponse(
             text,
-            None,
-            Map("codex.finish_reason" -> "exited")
+            executionprofile.profile.map(_.model),
+            Map("codex.finish_reason" -> "exited") ++ executionprofile.metadata
           ))
         else
           Consequence.valueInvalid("Codex CLI returned empty output")
@@ -196,6 +334,21 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
       case ProcessExecutionTermination.ArtifactLimitExceeded =>
         Consequence.operationIllegal("codex", "Codex CLI artifacts exceeded the configured limit")
     }
+
+  private final case class _ExecutionProfile(
+    capability: String,
+    profile: Option[CodexExecutionProfile],
+    tools: Set[AiTool]
+  ) {
+    def metadata: Map[String, String] =
+      profile.map { value =>
+        Map(
+          "codex.profile" -> value.name,
+          "codex.reasoning_level" -> value.reasoningLevel.map(_.id).getOrElse(""),
+          "codex.enabled_tools" -> tools.toVector.map(_.id).sorted.mkString(",")
+        ).filter(_._2.nonEmpty)
+      }.getOrElse(Map.empty)
+  }
 }
 
 final class CodexChatService(config: CodexRuntimeConfig, context: ExecutionContext) extends ChatService {

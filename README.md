@@ -153,15 +153,45 @@ the driver runs every invocation in a managed WorkArea. The CNCF UnitOfWork
 owns each WorkArea and process-handle lifecycle; the local driver's launch
 workers are shared daemon runtime infrastructure.
 
-The capability definition also owns Codex model selection. Textus AI does not
-accept a model request property for this provider until CNCF exposes a bounded
-argument policy for provider-controlled model values.
+For a Codex purpose, model and reasoning selection must come from an approved
+named `model-profile`; caller model properties and request-level model
+requirements remain invalid. At component startup Textus AI compiles every
+configured Codex model profile into a finite Process Execution capability. A
+profile capability contains a fixed `--model` value and, when configured, one
+of the fixed reasoning levels `minimal`, `low`, `medium`, `high`, or `xhigh`
+as `model_reasoning_effort`. Configuration values are therefore not copied into
+per-request CLI arguments.
+
+Codex Web research is also purpose/profile controlled. A profile that permits
+`web_search` receives a separate fixed capability with global `--search` before
+`exec`; `url_context` is supported only together with `web_search`, because the
+installed Codex CLI exposes no narrower URL-only command capability. A missing
+profile, a direct model override, a URL-only request, or a tool set outside the
+profile fails structurally before process execution.
+
+```yaml
+textus:
+  ai:
+    purposes:
+      artscene-exhibition-web-research:
+        model-profile: codex-artscene-research
+    model-profiles:
+      codex-artscene-research:
+        provider: codex
+        mode: local
+        engine: codex-cli
+        model: gpt-5-codex
+        reasoning-level: high
+        tools: url_context, web_search
+```
 
 Codex authentication remains the responsibility of the locally installed
 Codex CLI. Textus AI never exposes authentication material in request,
 response, metadata, or CallTree data. The executable specification uses the
 CNCF deterministic Process Execution test profile and does not invoke a live
-Codex CLI, network service, or account.
+Codex CLI, network service, or account. A live `--search` invocation is an
+optional operator smoke only after local CLI authentication and Web-search
+policy have been approved; it is not part of automated runtime validation.
 
 `purposes` lets application components pass `AiRunnerRequirement.purpose`
 without hard-coding a concrete provider, mode, engine, or model. Direct
@@ -250,7 +280,10 @@ explicitly instead of being applied or ignored.
 
 Successful AI responses and their CallTree entries publish safe effective policy
 facts under `ai.policy.*`: maximum output tokens, timeout, record retry limit,
-maximum concurrency, output-schema ID, and prompt-contract ID when configured.
+maximum concurrency, output-schema ID, prompt-contract ID, and Codex
+model-profile/reasoning-level when configured. Codex profile resolution also
+publishes `ai.execution.enabled_tools`; it does not publish URLs, prompts, or
+raw CLI output.
 When a purpose configures `max-concurrent`, Textus AI uses CNCF's runtime-owned
 scoped admission and returns a structured saturation failure without selecting
 another provider or invoking the provider binding. Tool-enabled Google
@@ -265,13 +298,17 @@ tools to provider-specific APIs:
   and map `web_search` to Google's `google_search` tool.
 - OpenAI: `url_context` and `web_search` use the OpenAI Responses API with the
   `web_search` tool.
-- Gemma/Ollama and Codex CLI: tool requests fail explicitly because those
-  runtimes do not provide these provider web tools.
+- Gemma/Ollama: tool requests fail explicitly because those runtimes do not
+  provide these provider web tools.
+- Codex CLI: a selected purpose model profile maps `web_search` (and optional
+  paired `url_context`) to its fixed global `--search` capability. Other Codex
+  tool selections fail explicitly.
 
 Before a provider binding is resolved, `TextusAiRunner` validates the effective
-logical tools and known provider-local model constraints. This prevents an
-unsupported tool or Codex model override from binding a provider and never
-downgrades a tool-enabled request to plain generation.
+logical tools and known provider-local model constraints. The Codex provider
+then resolves the selected profile to its fixed admitted capability. This
+prevents an unsupported tool or Codex model override from binding a provider
+and never downgrades a tool-enabled request to plain generation.
 
 Provider-local parameters should be passed as request `Property` values rather
 than as global system properties. Supported property keys include:

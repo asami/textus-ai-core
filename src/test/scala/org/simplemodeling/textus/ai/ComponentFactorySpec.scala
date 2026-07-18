@@ -166,6 +166,46 @@ final class ComponentFactorySpec
       component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
     }
 
+    "compile an admitted Codex purpose profile into fixed model, reasoning, and Web arguments" in {
+      Given("an enabled Codex runtime and one approved Web-research model profile")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.codex.enabled" -> ConfigurationValue.StringValue("true"),
+          "textus.ai.codex.executable" -> ConfigurationValue.StringValue("/runtime/codex-cli"),
+          "textus.ai.model-profiles.codex-artscene-research.provider" -> ConfigurationValue.StringValue("codex"),
+          "textus.ai.model-profiles.codex-artscene-research.model" -> ConfigurationValue.StringValue("gpt-5-codex"),
+          "textus.ai.model-profiles.codex-artscene-research.reasoning-level" -> ConfigurationValue.StringValue("high"),
+          "textus.ai.model-profiles.codex-artscene-research.tools" -> ConfigurationValue.StringValue("url_context,web_search")
+        )),
+        ConfigurationTrace.empty
+      )
+      val component = new ComponentFactory().create(ComponentCreate(
+        new Subsystem(name = "textus-ai-codex-profile-spec", configuration = configuration),
+        ComponentOrigin.Main
+      )).primary
+      component.withScopeContext(ScopeContext(
+        ScopeKind.Runtime,
+        "textus-ai-codex-profile-spec",
+        None,
+        summon[ExecutionContext].observability
+      ))
+      val capability = ProcessCapabilityId.parseC("codex-cli-profile-codex-artscene-research-web").toOption.get
+
+      When("the profile Web capability is resolved")
+      val result = ProcessExecutionAdmission.resolveC(
+        component.scopeContext,
+        ProcessExecutionRequest(capability, Vector("-"))
+      )
+
+      Then("only the fixed approved model, reasoning, and global Web option are admitted")
+      result.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
+        "--search", "exec", "--model", "gpt-5-codex",
+        "--config", "model_reasoning_effort=\"high\"",
+        "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "-"
+      ))
+    }
+
     "leave Codex process execution unavailable when the provider is disabled" in {
       Given("a Textus AI runtime without enabled Codex configuration")
       given ExecutionContext = ExecutionContext.create()
