@@ -1,7 +1,8 @@
 # Phase 3 - Execution Class and Accounting
 
-status=in-progress
+status=complete
 started_at=2026-07-18
+completed_at=2026-07-18
 strategy=[Textus AI Development Strategy](../strategy/textus-ai-development-strategy.md)
 
 ## Purpose
@@ -58,7 +59,7 @@ multi-step workflow.
 | EA-02 | Input-budget admission | Execution-class policy validates and enforces bounded input-token admission before provider execution. | done |
 | EA-03 | Cost accounting and admission | Execution-class policy can apply an operator-owned rate schedule and reject over-budget or unaccountable execution explicitly. | done |
 | WB-01 | Workflow boundary | A separate decision records that Phase 3 keeps workflow orchestration application-owned and defines the entry contract for any later runtime workflow phase. | done |
-| ES-01 | Executable specification | Deterministic specifications, operator documentation, and review evidence close the phase. | open |
+| ES-01 | Executable specification | Deterministic specifications, operator documentation, and review evidence close the phase. | done |
 
 ## Exit Criteria
 
@@ -91,5 +92,7 @@ multi-step workflow.
 - [AI Input-Budget Admission](../design/ai-input-budget-admission.md)
 - [AI Cost Accounting and Admission](../design/ai-cost-accounting-admission.md)
 - [AI Runtime Workflow Boundary](../design/ai-runtime-workflow-boundary.md)
+- [AI Phase 3 Executable Evidence](../spec/ai-phase-3-executable-evidence.md)
+- [Phase 3 Closure](phase-3-closure.md)
 - [ArtScene AI Fetch Purpose Contract Handoff](../journal/2026/07/2026-07-18-artscene-ai-fetch-purpose-contract-handoff.md)
 - [Phase 3 Checklist](phase-3-checklist.md)

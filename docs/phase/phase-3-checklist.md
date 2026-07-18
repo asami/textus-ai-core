@@ -1,6 +1,6 @@
 # Phase 3 Checklist - Execution Class and Accounting
 
-status=in-progress
+status=complete
 phase=[Phase 3 - Execution Class and Accounting](phase-3.md)
 
 ## Stage EC-01 - Execution Class
@@ -84,17 +84,17 @@ Stage Status:
 ## Stage ES-01 - Executable Specification and Closure
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Close only when every prior checklist item has deterministic
   evidence, operator documentation, review, and validation evidence.
 
-- [ ] Add deterministic specifications for admission success, input-budget
+- [x] Map deterministic specifications for admission success, input-budget
   rejection, unknown usage and price, cost-budget rejection, and accounting
   summaries.
-- [ ] Add deterministic specifications for execution-class binding and
+- [x] Map deterministic specifications for execution-class binding and
   configured no-fallback behavior.
-- [ ] Document configuration and safe observability for execution classes,
+- [x] Document configuration and safe observability for execution classes,
   budgets, rates, and workflow-boundary facts.
-- [ ] Run review, fix actionable findings, validate the phase, and record
+- [x] Run review, fix actionable findings, validate the phase, and record
   closure evidence.

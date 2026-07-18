@@ -149,10 +149,10 @@ completed on 2026-07-18.
 ## Process Status
 
 - Phase 2: complete on 2026-07-18.
-- Current phase: Phase 3, Execution Class and Accounting.
-- Current phase dashboard: `docs/phase/phase-3.md`
-- Current phase checklist: `docs/phase/phase-3-checklist.md`
-- Current next task: ES-01 Phase 3 closure evidence.
+- Phase 3: complete on 2026-07-18.
+- Latest phase closure: `docs/phase/phase-3-closure.md`
+- No implementation phase is active. A later workflow phase requires a
+  concrete caller contract and a separately approved strategy item.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
