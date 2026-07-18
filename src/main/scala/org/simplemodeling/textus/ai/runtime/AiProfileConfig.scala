@@ -43,6 +43,11 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.levels.<level>.model-profile
  * - textus.ai.generic-purposes.<purpose>.level
  *
+ * A configured logical level is also an implicit caller purpose. For example,
+ * purpose `standard-work` resolves through
+ * textus.ai.levels.standard-work.model-profile. Model-profile names are never
+ * implicit caller purposes.
+ *
  * @since   Jul.  4, 2026
  * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
@@ -431,7 +436,11 @@ private[textus] final class AiProfileConfig(
   ): Consequence[AiProfileResolution] =
     requirement.purpose.map(_.trim).filter(_.nonEmpty) match {
       case Some(purpose) =>
-        if (resolvePurpose(purpose).nonEmpty || resolveGenericPurpose(purpose).nonEmpty)
+        if (
+          resolvePurpose(purpose).nonEmpty ||
+          resolveGenericPurpose(purpose).nonEmpty ||
+          _is_configured_logical_level(purpose)
+        )
           _resolve_named_purpose(requirement.copy(purpose = Some(purpose)), purpose, false)
         else
           Consequence.success(AiProfileResolution(requirement))
@@ -462,9 +471,31 @@ private[textus] final class AiProfileConfig(
               )
             }
           case None =>
-            Consequence.configurationInvalid(s"AI purpose profile not configured: $purpose")
+            _resolve_implicit_level_purpose(requirement, purpose, requiresprovider)
         }
     }
+
+  private def _resolve_implicit_level_purpose(
+    requirement: AiRunnerRequirement,
+    purpose: String,
+    requiresprovider: Boolean
+  ): Consequence[AiProfileResolution] =
+    if (_is_configured_logical_level(purpose)) {
+      val profile = AiPurposeProfile(purpose = purpose, level = Some(purpose))
+      _materialize_generic_purpose(profile).flatMap { materialized =>
+        _resolve_profile(
+          requirement,
+          materialized,
+          requiresprovider,
+          Some(_ProfileOrigin(None, Some(purpose)))
+        )
+      }
+    } else {
+      Consequence.configurationInvalid(s"AI purpose profile not configured: $purpose")
+    }
+
+  private def _is_configured_logical_level(level: String): Boolean =
+    _config_string(_level_keys(level, "model-profile") ++ _level_keys(level, "modelProfile")).nonEmpty
 
   private def _resolve_inherited_purpose(
     requirement: AiRunnerRequirement,

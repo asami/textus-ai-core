@@ -1178,13 +1178,21 @@ final class TextusAiRunnerSpec
       )
       val profiles = AiProfileConfig.fromConfiguration(Some(configuration))
 
-      When("a caller requires only the generic purpose")
+      When("a caller requires the generic purpose or the configured level name")
       val result = profiles.resolveRequired(AiRunnerRequirement(
         purpose = Some("analysis"),
         purposeRequired = true
       ))
+      val implicitresult = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("standard-consideration"),
+        purposeRequired = true
+      ))
+      val modelprofileresult = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("openai-standard-consideration"),
+        purposeRequired = true
+      ))
 
-      Then("the level selects the approved provider/model/reasoning policy")
+      Then("the level selects the approved provider/model/reasoning policy without exposing the model profile")
       result.toOption.map(_.requirement.provider) shouldBe Some(Some("openai"))
       result.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
       result.toOption.flatMap(_.genericPurpose) shouldBe Some("analysis")
@@ -1194,6 +1202,11 @@ final class TextusAiRunnerSpec
       result.toOption.flatMap(_.requestProperties(Vector.empty).find { property =>
         property.name == "ai.openai.reasoning.effort" && property.value.toString == "medium"
       }) should not be empty
+      implicitresult.toOption.map(_.requirement.provider) shouldBe Some(Some("openai"))
+      implicitresult.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
+      implicitresult.toOption.flatMap(_.genericPurpose) shouldBe None
+      implicitresult.toOption.flatMap(_.logicalLevel) shouldBe Some("standard-consideration")
+      modelprofileresult.toOption shouldBe None
     }
 
     "permit an application purpose to narrow but not broaden its generic base purpose" in {

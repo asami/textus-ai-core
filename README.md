@@ -297,6 +297,11 @@ design moves those operational choices into an operator-managed execution
 profile, while callers continue to select only `purpose`. See
 [`docs/design/ai-purpose-catalog.md`](docs/design/ai-purpose-catalog.md).
 
+Each configured logical level is also available as an implicit purpose. For
+example, `AiRunnerRequirement(purpose = Some("standard-work"))` resolves the
+configured `standard-work` level without exposing its model profile. A model
+profile name is not an implicit purpose.
+
 Textus AI maps an effective output-token limit to Google `generateContent` and
 Interactions requests, OpenAI Chat Completions and Responses requests, and
 Gemma/Ollama `options.num_predict`. It rejects an effective output-token limit

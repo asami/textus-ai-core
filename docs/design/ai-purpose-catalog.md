@@ -27,6 +27,23 @@ purpose
   -> provider, mode, engine, model, reasoning, tools, and limits
 ```
 
+## Implicit Baseline Purposes
+
+The four configured logical-level names are also standard implicit purposes:
+`simple-work`, `standard-work`, `standard-consideration`, and
+`deep-consideration`. A caller may use one directly when it needs the baseline
+profile without adding semantic intent.
+
+```text
+purpose = standard-work
+  -> configured standard-work execution profile
+  -> effective provider and model
+```
+
+This mechanism applies only to logical-level names. An operator model-profile
+name is never a caller purpose. For example, `purpose=openai-standard` must
+fail unless an explicit purpose binding exists for that name.
+
 ## Standard Catalog
 
 | Purpose | Intended profile level | Intent |
@@ -51,6 +68,10 @@ reasoning setting, or tool set through provider-specific request fields.
 `consideration` expresses the amount of analysis expected from the selected
 profile. It intentionally avoids the stronger connotation of `deliberation`;
 the level is not a claim that a provider performs formal deliberation.
+
+The semantic purposes in this catalog add readable intent above the implicit
+baseline purposes. Use `standard-consideration` when only the baseline level is
+known; use `analysis` when the caller is specifically requesting analysis.
 
 ## Application Purposes
 
