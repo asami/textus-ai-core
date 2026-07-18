@@ -104,6 +104,37 @@ Artifacts:
 - [Phase 2 Checklist](../phase/phase-2-checklist.md)
 - [ArtScene AI Fetch Purpose Contract Handoff](../journal/2026/07/2026-07-18-artscene-ai-fetch-purpose-contract-handoff.md)
 
+### Phase 3: Managed Research and Execution Accounting
+
+Goal: execute purpose-selected research as a bounded runtime workflow and make
+input-token and cost decisions attributable without inventing unavailable
+provider facts.
+
+Scope:
+
+- define stable provider-neutral execution facts for usage, estimation,
+  accounting identity, and limitations;
+- enforce purpose-policy input-token budgets before execution;
+- support operator-owned rate schedules, explicit cost admission, and measured
+  accounting where provider usage permits it; and
+- orchestrate finite managed-research, source-comparison, and structured
+  synthesis steps through resolved purpose policy and admitted CNCF
+  capabilities.
+
+Non-goals:
+
+- arbitrary agent process, network, write, credential, or provider-command
+  access;
+- fabricated usage, price, quota, or monetary-cost values;
+- implicit provider/model/tool or application fetch-method fallback; and
+- application evidence policy, source authority, or final domain-result
+  acceptance.
+
+Artifacts:
+
+- [Phase 3 Dashboard](../phase/phase-3.md)
+- [Phase 3 Checklist](../phase/phase-3-checklist.md)
+
 ## Phase Ordering
 
 Phase 1 was reopened on 2026-07-16 after the user clarified that Codex CLI is
@@ -116,10 +147,10 @@ completed on 2026-07-18.
 ## Process Status
 
 - Phase 2: complete on 2026-07-18.
-- Completed phase dashboard: `docs/phase/phase-2.md`
-- Completed phase checklist: `docs/phase/phase-2-checklist.md`
-- Next phase: Phase 3 managed-research orchestration, input-token budgeting,
-  and cost admission/accounting.
+- Current phase: Phase 3, Managed Research and Execution Accounting.
+- Current phase dashboard: `docs/phase/phase-3.md`
+- Current phase checklist: `docs/phase/phase-3-checklist.md`
+- Current next task: MR-01 execution-fact contract consolidation.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
