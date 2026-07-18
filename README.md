@@ -260,35 +260,33 @@ textus:
       standard-work: { model-profile: openai-standard }
       simple-work: { model-profile: local-simple }
     generic-purposes:
-      web-research:
-        level: deep-consideration
-        tools: url_context, web_search
-        timeout-seconds: 90
-      deep-analysis:
-        level: deep-consideration
-      analysis:
+      software-analysis:
         level: standard-consideration
+      software-design:
+        level: deep-consideration
+      software-implementation:
+        level: standard-work
+      web-analysis:
+        level: deep-consideration
       structured-extraction:
         level: standard-work
-      quick-response:
-        level: simple-work
     purposes:
       artscene-exhibition-web-research:
-        base-purpose: web-research
+        base-purpose: web-analysis
         max-output-tokens: 240
         max-concurrent: 1
 ```
 
 `base-purpose` must name a configured generic purpose. The standard catalog is
-`quick-response`, `structured-extraction`, `analysis`, `deep-analysis`, and
-`web-research`; its rationale and boundaries are in
+`software-analysis`, `software-design`, `software-implementation`,
+`web-analysis`, and `structured-extraction`; its rationale and boundaries are in
 [`docs/design/ai-purpose-catalog.md`](docs/design/ai-purpose-catalog.md). An application purpose
 cannot replace its inherited provider, mode, engine, model-profile, model, or
 reasoning setting; it may only select a subset of inherited tools and reduce
 maximum-output, timeout, retry, or concurrency bounds. Unknown generic levels,
 missing bases, and broadening configuration fail before a provider binding is
 selected. Generic purpose names are ordinary purpose values, so a caller may
-request `AiRunnerRequirement(purpose = Some("analysis"))` without
+request `AiRunnerRequirement(purpose = Some("software-analysis"))` without
 provider fields.
 
 The current `generic-purposes` configuration is transitional: it binds logical

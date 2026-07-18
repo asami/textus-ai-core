@@ -1162,7 +1162,7 @@ final class TextusAiRunnerSpec
     }
 
     "resolve a generic purpose through its logical level without caller provider fields" in {
-      Given("a standard-consideration level and a generic analysis purpose")
+      Given("a standard-consideration level and a generic software-analysis purpose")
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.levels.standard-consideration.model-profile" -> ConfigurationValue.StringValue("openai-standard-consideration"),
@@ -1171,8 +1171,8 @@ final class TextusAiRunnerSpec
           "textus.ai.model-profiles.openai-standard-consideration.engine" -> ConfigurationValue.StringValue("gpt"),
           "textus.ai.model-profiles.openai-standard-consideration.model" -> ConfigurationValue.StringValue("gpt-5"),
           "textus.ai.model-profiles.openai-standard-consideration.reasoning-level" -> ConfigurationValue.StringValue("medium"),
-          "textus.ai.generic-purposes.analysis.level" -> ConfigurationValue.StringValue("standard-consideration"),
-          "textus.ai.generic-purposes.analysis.max-output-tokens" -> ConfigurationValue.StringValue("480")
+          "textus.ai.generic-purposes.software-analysis.level" -> ConfigurationValue.StringValue("standard-consideration"),
+          "textus.ai.generic-purposes.software-analysis.max-output-tokens" -> ConfigurationValue.StringValue("480")
         )),
         ConfigurationTrace.empty
       )
@@ -1180,7 +1180,7 @@ final class TextusAiRunnerSpec
 
       When("a caller requires the generic purpose or the configured level name")
       val result = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("analysis"),
+        purpose = Some("software-analysis"),
         purposeRequired = true
       ))
       val implicitresult = profiles.resolveRequired(AiRunnerRequirement(
@@ -1195,7 +1195,7 @@ final class TextusAiRunnerSpec
       Then("the level selects the approved provider/model/reasoning policy without exposing the model profile")
       result.toOption.map(_.requirement.provider) shouldBe Some(Some("openai"))
       result.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
-      result.toOption.flatMap(_.genericPurpose) shouldBe Some("analysis")
+      result.toOption.flatMap(_.genericPurpose) shouldBe Some("software-analysis")
       result.toOption.flatMap(_.logicalLevel) shouldBe Some("standard-consideration")
       result.toOption.flatMap(_.reasoningLevel) shouldBe Some("medium")
       result.toOption.map(_.policy.maxOutputTokens) shouldBe Some(Some(480))
@@ -1210,26 +1210,26 @@ final class TextusAiRunnerSpec
     }
 
     "permit an application purpose to narrow but not broaden its generic base purpose" in {
-      Given("a Web-research generic purpose and one narrowed application purpose")
+      Given("a Web-analysis generic purpose and one narrowed application purpose")
       val values = Map(
-        "textus.ai.levels.standard-consideration.model-profile" -> ConfigurationValue.StringValue("openai-web-research"),
+        "textus.ai.levels.deep-consideration.model-profile" -> ConfigurationValue.StringValue("openai-web-research"),
         "textus.ai.model-profiles.openai-web-research.provider" -> ConfigurationValue.StringValue("openai"),
         "textus.ai.model-profiles.openai-web-research.mode" -> ConfigurationValue.StringValue("remote"),
         "textus.ai.model-profiles.openai-web-research.engine" -> ConfigurationValue.StringValue("gpt"),
         "textus.ai.model-profiles.openai-web-research.model" -> ConfigurationValue.StringValue("gpt-5"),
-        "textus.ai.generic-purposes.web-research.level" -> ConfigurationValue.StringValue("standard-consideration"),
-        "textus.ai.generic-purposes.web-research.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
-        "textus.ai.generic-purposes.web-research.max-output-tokens" -> ConfigurationValue.StringValue("480"),
-        "textus.ai.generic-purposes.web-research.timeout-seconds" -> ConfigurationValue.StringValue("90"),
-        "textus.ai.generic-purposes.web-research.max-concurrent" -> ConfigurationValue.StringValue("2"),
-        "textus.ai.purposes.artscene-exhibition-web-research.base-purpose" -> ConfigurationValue.StringValue("web-research"),
+        "textus.ai.generic-purposes.web-analysis.level" -> ConfigurationValue.StringValue("deep-consideration"),
+        "textus.ai.generic-purposes.web-analysis.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
+        "textus.ai.generic-purposes.web-analysis.max-output-tokens" -> ConfigurationValue.StringValue("480"),
+        "textus.ai.generic-purposes.web-analysis.timeout-seconds" -> ConfigurationValue.StringValue("90"),
+        "textus.ai.generic-purposes.web-analysis.max-concurrent" -> ConfigurationValue.StringValue("2"),
+        "textus.ai.purposes.artscene-exhibition-web-research.base-purpose" -> ConfigurationValue.StringValue("web-analysis"),
         "textus.ai.purposes.artscene-exhibition-web-research.tools" -> ConfigurationValue.StringValue("web_search"),
         "textus.ai.purposes.artscene-exhibition-web-research.max-output-tokens" -> ConfigurationValue.StringValue("240"),
         "textus.ai.purposes.artscene-exhibition-web-research.timeout-seconds" -> ConfigurationValue.StringValue("45"),
         "textus.ai.purposes.artscene-exhibition-web-research.max-concurrent" -> ConfigurationValue.StringValue("1"),
-        "textus.ai.purposes.invalid-web-research.base-purpose" -> ConfigurationValue.StringValue("web-research"),
-        "textus.ai.purposes.invalid-web-research.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
-        "textus.ai.purposes.invalid-web-research.timeout-seconds" -> ConfigurationValue.StringValue("120")
+        "textus.ai.purposes.invalid-web-analysis.base-purpose" -> ConfigurationValue.StringValue("web-analysis"),
+        "textus.ai.purposes.invalid-web-analysis.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
+        "textus.ai.purposes.invalid-web-analysis.timeout-seconds" -> ConfigurationValue.StringValue("120")
       )
       val profiles = AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(
         Configuration(values),
@@ -1242,7 +1242,7 @@ final class TextusAiRunnerSpec
         purposeRequired = true
       ))
       val broadened = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("invalid-web-research"),
+        purpose = Some("invalid-web-analysis"),
         purposeRequired = true
       ))
 

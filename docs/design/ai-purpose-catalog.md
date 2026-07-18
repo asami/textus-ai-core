@@ -48,17 +48,15 @@ fail unless an explicit purpose binding exists for that name.
 
 | Purpose | Intended profile level | Intent |
 | --- | --- | --- |
-| `quick-response` | `simple-work` | Produce a bounded direct response from caller-supplied input. |
+| `software-analysis` | `standard-consideration` | Understand existing software, investigate causes, and assess change impact. |
+| `software-design` | `deep-consideration` | Develop design alternatives, boundaries, and implementation direction. |
+| `software-implementation` | `standard-work` | Produce bounded software changes, including code and tests. |
+| `web-analysis` | `deep-consideration` | Consider a supplied problem using information from the Web. |
 | `structured-extraction` | `standard-work` | Extract or normalize caller-supplied material into a required structured result. |
-| `analysis` | `standard-consideration` | Compare, explain, classify, or reason over caller-supplied material. |
-| `deep-analysis` | `deep-consideration` | Perform higher-cost, deeper reasoning over caller-supplied material. |
-| `web-research` | `deep-consideration` | Request an approved research-oriented execution profile. |
 
-The first four purposes cover every standard logical level. `web-research`
-shares `deep-consideration` because research-oriented execution usually needs
-stronger source, timeout, concurrency, and cost controls. It is separate from
-local analysis because its selected profile may admit external capabilities
-and requires a different observability policy.
+`simple-work` has no semantic catalog entry: callers use that implicit baseline
+purpose directly when they only need lightweight work. The remaining three
+logical levels are covered by the semantic purposes above.
 
 The intended level is an approved policy baseline, not a caller choice. An
 operator can bind a purpose to a different approved profile without changing
@@ -71,7 +69,8 @@ the level is not a claim that a provider performs formal deliberation.
 
 The semantic purposes in this catalog add readable intent above the implicit
 baseline purposes. Use `standard-consideration` when only the baseline level is
-known; use `analysis` when the caller is specifically requesting analysis.
+known; use `software-analysis` when the caller is specifically requesting
+software analysis.
 
 ## Application Purposes
 
@@ -88,7 +87,7 @@ textus:
         base-purpose: structured-extraction
         max-output-tokens: 240
       artscene-exhibition-web-research:
-        base-purpose: web-research
+        base-purpose: web-analysis
         max-output-tokens: 240
         max-concurrent: 1
 ```
@@ -108,21 +107,26 @@ The following are not standard purposes:
 
 - provider or product names such as `codex`, `openai`, `gemini`, or `gemma`;
 - model names, reasoning labels, and CLI capability names;
-- project-specific activities such as `implementation-work` or
-  `specification-analysis`; and
+- command execution, which is a runtime capability rather than a caller
+  purpose; and
 - transport or output-shape labels such as `chat`, `generate`, or
   `generateRecord`.
 
-`implementation-work` and `specification-analysis` were provisional generic
-configuration examples. They are application purposes when needed, normally
-inheriting `analysis` or `deep-analysis`. A Codex CLI profile may be the
-operator-selected resolution for either purpose, but it does not define their
-meaning.
+`software-implementation` replaces the provisional `implementation-work`
+example. A Codex CLI profile may be the operator-selected resolution, but it
+does not define the purpose's meaning.
 
 `local-source-extraction` is likewise an application purpose that inherits
 `structured-extraction` and supplies bounded, admitted source material. It is
 not a separate generic purpose because it requires no capability beyond the
 standard structured-extraction boundary.
+
+## Catalog Growth
+
+This five-purpose set is the initial standard catalog. Add a standard purpose
+only when a recurring, provider-neutral caller intent needs a distinct approved
+profile policy. Do not add names for a provider, model, command capability,
+output transport, or a one-off application workflow.
 
 ## Workflow Separation
 
