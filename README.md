@@ -261,16 +261,16 @@ textus:
       simple-work: { model-profile: local-simple }
     generic-purposes:
       web-research:
-        level: standard-deliberation
+        level: deep-deliberation
         tools: url_context, web_search
         timeout-seconds: 90
-      specification-analysis:
-        level: standard-work
-      implementation-work:
-        level: standard-work
+      deep-analysis:
+        level: deep-deliberation
+      analysis:
+        level: standard-deliberation
       structured-extraction:
         level: standard-work
-      local-source-extraction:
+      quick-response:
         level: simple-work
     purposes:
       artscene-exhibition-web-research:
@@ -279,13 +279,16 @@ textus:
         max-concurrent: 1
 ```
 
-`base-purpose` must name a configured generic purpose. An application purpose
+`base-purpose` must name a configured generic purpose. The standard catalog is
+`quick-response`, `structured-extraction`, `analysis`, `deep-analysis`, and
+`web-research`; its rationale and boundaries are in
+[`docs/design/ai-purpose-catalog.md`](docs/design/ai-purpose-catalog.md). An application purpose
 cannot replace its inherited provider, mode, engine, model-profile, model, or
 reasoning setting; it may only select a subset of inherited tools and reduce
 maximum-output, timeout, retry, or concurrency bounds. Unknown generic levels,
 missing bases, and broadening configuration fail before a provider binding is
 selected. Generic purpose names are ordinary purpose values, so a caller may
-request `AiRunnerRequirement(purpose = Some("specification-analysis"))` without
+request `AiRunnerRequirement(purpose = Some("analysis"))` without
 provider fields.
 
 Textus AI maps an effective output-token limit to Google `generateContent` and

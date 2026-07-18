@@ -19,8 +19,9 @@ evidence policy or final domain decisions.
 - Add purpose-policy configuration and admission for input-token budgets.
 - Add purpose-policy configuration for cost budgets, operator-owned rate data,
   and explicit treatment of unavailable usage or pricing facts.
-- Define a managed-research workflow with explicit, bounded research,
-  source-comparison, and structured-synthesis steps.
+- Define a managed-research workflow for an application purpose inheriting
+  `web-research`, with explicit, bounded research, source-comparison, and
+  structured-synthesis steps.
 - Bind every managed-research step to the resolved purpose policy, admitted
   logical tools, CNCF execution capability, timeout, retry, concurrency, and
   budget scope.
@@ -57,8 +58,9 @@ evidence policy or final domain decisions.
 
 ## Exit Criteria
 
-- A managed-research purpose resolves to a finite workflow and an effective
-  budget scope before any provider or external tool invocation.
+- An application managed-research purpose inheriting `web-research` resolves
+  to a finite workflow and an effective budget scope before any provider or
+  external tool invocation.
 - Input-token admission uses a documented estimate or measured value and
   exposes its basis and limitations safely.
 - Cost admission and accounting use only configured rate data and reported or
@@ -76,5 +78,6 @@ evidence policy or final domain decisions.
 ## References
 
 - [CAR Review AI Runtime Design](../notes/car-review-ai-runtime-design.md)
+- [AI Purpose Catalog](../design/ai-purpose-catalog.md)
 - [ArtScene AI Fetch Purpose Contract Handoff](../journal/2026/07/2026-07-18-artscene-ai-fetch-purpose-contract-handoff.md)
 - [Phase 3 Checklist](phase-3-checklist.md)

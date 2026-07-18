@@ -56,7 +56,7 @@ Stage Status:
   resolved purpose policy and deterministic specifications prove its failures.
 
 - [ ] Define the provider-neutral managed-research workflow contract and
-  finite step vocabulary.
+  finite step vocabulary for an application purpose inheriting `web-research`.
 - [ ] Bind research, source-comparison, and structured-synthesis steps to
   purpose policy, logical tools, and CNCF capabilities.
 - [ ] Scope timeout, retry, concurrency, input budget, and cost budget across
