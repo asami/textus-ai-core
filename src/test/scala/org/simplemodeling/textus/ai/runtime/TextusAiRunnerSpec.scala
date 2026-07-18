@@ -1162,7 +1162,7 @@ final class TextusAiRunnerSpec
     }
 
     "resolve a generic purpose through its logical level without caller provider fields" in {
-      Given("a standard-consideration level and a generic software-analysis purpose")
+      Given("configured consideration, work, and simple levels with generic purposes")
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.levels.standard-consideration.model-profile" -> ConfigurationValue.StringValue("openai-standard-consideration"),
@@ -1172,7 +1172,18 @@ final class TextusAiRunnerSpec
           "textus.ai.model-profiles.openai-standard-consideration.model" -> ConfigurationValue.StringValue("gpt-5"),
           "textus.ai.model-profiles.openai-standard-consideration.reasoning-level" -> ConfigurationValue.StringValue("medium"),
           "textus.ai.generic-purposes.software-analysis.level" -> ConfigurationValue.StringValue("standard-consideration"),
-          "textus.ai.generic-purposes.software-analysis.max-output-tokens" -> ConfigurationValue.StringValue("480")
+          "textus.ai.generic-purposes.software-analysis.max-output-tokens" -> ConfigurationValue.StringValue("480"),
+          "textus.ai.levels.standard-work.model-profile" -> ConfigurationValue.StringValue("openai-standard-work"),
+          "textus.ai.model-profiles.openai-standard-work.provider" -> ConfigurationValue.StringValue("openai"),
+          "textus.ai.model-profiles.openai-standard-work.mode" -> ConfigurationValue.StringValue("remote"),
+          "textus.ai.model-profiles.openai-standard-work.engine" -> ConfigurationValue.StringValue("gpt"),
+          "textus.ai.model-profiles.openai-standard-work.model" -> ConfigurationValue.StringValue("gpt-5"),
+          "textus.ai.levels.simple-work.model-profile" -> ConfigurationValue.StringValue("openai-simple-work"),
+          "textus.ai.model-profiles.openai-simple-work.provider" -> ConfigurationValue.StringValue("openai"),
+          "textus.ai.model-profiles.openai-simple-work.mode" -> ConfigurationValue.StringValue("remote"),
+          "textus.ai.model-profiles.openai-simple-work.engine" -> ConfigurationValue.StringValue("gpt"),
+          "textus.ai.model-profiles.openai-simple-work.model" -> ConfigurationValue.StringValue("gpt-5"),
+          "textus.ai.generic-purposes.command-execution.level" -> ConfigurationValue.StringValue("simple-work")
         )),
         ConfigurationTrace.empty
       )
@@ -1191,6 +1202,10 @@ final class TextusAiRunnerSpec
         purpose = Some("openai-standard-consideration"),
         purposeRequired = true
       ))
+      val commandresult = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("command-execution"),
+        purposeRequired = true
+      ))
 
       Then("the level selects the approved provider/model/reasoning policy without exposing the model profile")
       result.toOption.map(_.requirement.provider) shouldBe Some(Some("openai"))
@@ -1207,6 +1222,8 @@ final class TextusAiRunnerSpec
       implicitresult.toOption.flatMap(_.genericPurpose) shouldBe None
       implicitresult.toOption.flatMap(_.logicalLevel) shouldBe Some("standard-consideration")
       modelprofileresult.toOption shouldBe None
+      commandresult.toOption.flatMap(_.genericPurpose) shouldBe Some("command-execution")
+      commandresult.toOption.flatMap(_.logicalLevel) shouldBe Some("simple-work")
     }
 
     "permit an application purpose to narrow but not broaden its generic base purpose" in {

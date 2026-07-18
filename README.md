@@ -266,6 +266,8 @@ textus:
         level: deep-consideration
       software-implementation:
         level: standard-work
+      command-execution:
+        level: simple-work
       web-analysis:
         level: deep-consideration
       structured-extraction:
@@ -279,7 +281,7 @@ textus:
 
 `base-purpose` must name a configured generic purpose. The standard catalog is
 `software-analysis`, `software-design`, `software-implementation`,
-`web-analysis`, and `structured-extraction`; its rationale and boundaries are in
+`command-execution`, `web-analysis`, and `structured-extraction`; its rationale and boundaries are in
 [`docs/design/ai-purpose-catalog.md`](docs/design/ai-purpose-catalog.md). An application purpose
 cannot replace its inherited provider, mode, engine, model-profile, model, or
 reasoning setting; it may only select a subset of inherited tools and reduce

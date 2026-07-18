@@ -51,12 +51,11 @@ fail unless an explicit purpose binding exists for that name.
 | `software-analysis` | `standard-consideration` | Understand existing software, investigate causes, and assess change impact. |
 | `software-design` | `deep-consideration` | Develop design alternatives, boundaries, and implementation direction. |
 | `software-implementation` | `standard-work` | Produce bounded software changes, including code and tests. |
+| `command-execution` | `simple-work` | Perform a command-execution task. |
 | `web-analysis` | `deep-consideration` | Consider a supplied problem using information from the Web. |
 | `structured-extraction` | `standard-work` | Extract or normalize caller-supplied material into a required structured result. |
 
-`simple-work` has no semantic catalog entry: callers use that implicit baseline
-purpose directly when they only need lightweight work. The remaining three
-logical levels are covered by the semantic purposes above.
+The remaining logical levels are covered by the semantic purposes above.
 
 The intended level is an approved policy baseline, not a caller choice. An
 operator can bind a purpose to a different approved profile without changing
@@ -107,8 +106,7 @@ The following are not standard purposes:
 
 - provider or product names such as `codex`, `openai`, `gemini`, or `gemma`;
 - model names, reasoning labels, and CLI capability names;
-- command execution, which is a runtime capability rather than a caller
-  purpose; and
+- command-line names, arguments, and runtime capability names; and
 - transport or output-shape labels such as `chat`, `generate`, or
   `generateRecord`.
 
@@ -123,10 +121,10 @@ standard structured-extraction boundary.
 
 ## Catalog Growth
 
-This five-purpose set is the initial standard catalog. Add a standard purpose
+This six-purpose set is the initial standard catalog. Add a standard purpose
 only when a recurring, provider-neutral caller intent needs a distinct approved
-profile policy. Do not add names for a provider, model, command capability,
-output transport, or a one-off application workflow.
+profile policy. Do not add names for a provider, model, command-line
+capability, output transport, or a one-off application workflow.
 
 ## Workflow Separation
 
