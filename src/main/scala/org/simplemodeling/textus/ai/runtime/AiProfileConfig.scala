@@ -25,6 +25,8 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.purposes.<purpose>.max-output-tokens
  * - textus.ai.purposes.<purpose>.timeout-seconds
  * - textus.ai.purposes.<purpose>.record-retry-limit
+ * - textus.ai.purposes.<purpose>.output-schema-id
+ * - textus.ai.purposes.<purpose>.prompt-contract-id
  * - textus.ai.model-profiles.<profile>.provider
  * - textus.ai.model-profiles.<profile>.mode
  * - textus.ai.model-profiles.<profile>.engine
@@ -65,7 +67,10 @@ private[textus] final case class AiPurposeProfile(
   tools: Vector[AiTool] = Vector.empty,
   maxOutputTokens: Option[String] = None,
   timeoutSeconds: Option[String] = None,
-  recordRetryLimit: Option[String] = None
+  recordRetryLimit: Option[String] = None,
+  outputSchemaId: Option[String] = None,
+  promptContractId: Option[String] = None,
+  unsupportedPromptPolicy: Option[String] = None
 ) {
   def applyTo(
     requirement: AiRunnerRequirement,
@@ -83,11 +88,78 @@ private[textus] final case class AiPurposeProfile(
 private[textus] final case class AiPurposePolicy(
   maxOutputTokens: Option[Int] = None,
   timeoutSeconds: Option[Long] = None,
-  recordRetryLimit: Option[Int] = None
+  recordRetryLimit: Option[Int] = None,
+  outputSchemaId: Option[String] = None,
+  promptContractId: Option[String] = None
 ) {
   def requestProperties: Vector[org.goldenport.protocol.Property] =
     timeoutSeconds.map(value => org.goldenport.protocol.Property("ai.timeout-seconds", value.toString, None)).toVector ++
       recordRetryLimit.map(value => org.goldenport.protocol.Property("ai.record.retry-limit", value.toString, None)).toVector
+
+  def validateGenerate(
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Consequence[Unit] =
+    for {
+      _ <- _validate_prompt_contract(properties)
+      _ <- _reject_structured_output("generate")
+    } yield ()
+
+  def validateRecord(
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Consequence[Unit] =
+    for {
+      _ <- _validate_prompt_contract(properties)
+      _ <- _validate_output_schema(properties)
+    } yield ()
+
+  def validateChat(
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Consequence[Unit] =
+    for {
+      _ <- _validate_prompt_contract(properties)
+      _ <- _reject_structured_output("chat")
+    } yield ()
+
+  private def _validate_prompt_contract(
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Consequence[Unit] =
+    _validate_identity(promptContractId, properties, "prompt-contract-id")
+
+  private def _validate_output_schema(
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Consequence[Unit] =
+    _validate_identity(outputSchemaId, properties, "output-schema-id")
+
+  private def _reject_structured_output(
+    operation: String
+  ): Consequence[Unit] =
+    outputSchemaId match {
+      case Some(_) =>
+        Consequence.configurationInvalid(
+          s"AI purpose output-schema-id requires generateRecord, not $operation"
+        )
+      case None =>
+        Consequence.unit
+    }
+
+  private def _validate_identity(
+    expected: Option[String],
+    properties: Vector[org.goldenport.protocol.Property],
+    label: String
+  ): Consequence[Unit] =
+    expected match {
+      case Some(value) =>
+        AiRequestProperties.string(properties, Vector(
+          s"ai.$label",
+          s"textus.ai.$label",
+          s"cncf.ai.$label"
+        )) match {
+          case Some(actual) if actual == value => Consequence.unit
+          case _ => Consequence.configurationInvalid(s"AI purpose requires $label '$value'")
+        }
+      case None =>
+        Consequence.unit
+    }
 }
 
 private[textus] final case class AiProfileResolution(
@@ -150,7 +222,18 @@ private[textus] final class AiProfileConfig(
         recordRetryLimit = _config_string(
           _purpose_keys(normalized, "record-retry-limit") ++
             _purpose_keys(normalized, "recordRetryLimit")
-        )
+        ),
+        outputSchemaId = _config_string(
+          _purpose_keys(normalized, "output-schema-id") ++
+            _purpose_keys(normalized, "outputSchemaId") ++
+            _purpose_keys(normalized, "schema-id") ++
+            _purpose_keys(normalized, "schemaId")
+        ),
+        promptContractId = _config_string(
+          _purpose_keys(normalized, "prompt-contract-id") ++
+            _purpose_keys(normalized, "promptContractId")
+        ),
+        unsupportedPromptPolicy = _unsupported_prompt_policy(normalized)
       )
     }.filter(profile =>
       profile.modelProfile.nonEmpty ||
@@ -165,7 +248,10 @@ private[textus] final class AiProfileConfig(
         profile.tools.nonEmpty ||
         profile.maxOutputTokens.nonEmpty ||
         profile.timeoutSeconds.nonEmpty ||
-        profile.recordRetryLimit.nonEmpty
+        profile.recordRetryLimit.nonEmpty ||
+        profile.outputSchemaId.nonEmpty ||
+        profile.promptContractId.nonEmpty ||
+        profile.unsupportedPromptPolicy.nonEmpty
     )
 
   def resolveModelProfile(
@@ -261,7 +347,16 @@ private[textus] final class AiProfileConfig(
       maxtokens <- _positive_int(profile.maxOutputTokens, "max-output-tokens", profile.purpose)
       timeoutseconds <- _positive_long(profile.timeoutSeconds, "timeout-seconds", profile.purpose)
       retrylimit <- _bounded_int(profile.recordRetryLimit, "record-retry-limit", profile.purpose, 0, 3)
-    } yield AiPurposePolicy(maxtokens, timeoutseconds, retrylimit)
+      outputschemaid <- _policy_id(profile.outputSchemaId, "output-schema-id", profile.purpose)
+      promptcontractid <- _policy_id(profile.promptContractId, "prompt-contract-id", profile.purpose)
+      _ <- _validate_prompt_policy(profile)
+    } yield AiPurposePolicy(
+      maxOutputTokens = maxtokens,
+      timeoutSeconds = timeoutseconds,
+      recordRetryLimit = retrylimit,
+      outputSchemaId = outputschemaid,
+      promptContractId = promptcontractid
+    )
 
   private def _positive_int(
     value: Option[String],
@@ -306,6 +401,38 @@ private[textus] final class AiProfileConfig(
         }
       case None => Consequence.success(None)
     }
+
+  private def _policy_id(
+    value: Option[String],
+    label: String,
+    purpose: String
+  ): Consequence[Option[String]] =
+    value match {
+      case Some(raw) if raw.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}") =>
+        Consequence.success(Some(raw))
+      case Some(_) =>
+        Consequence.configurationInvalid(s"Invalid AI purpose $label for $purpose")
+      case None =>
+        Consequence.success(None)
+    }
+
+  private def _validate_prompt_policy(
+    profile: AiPurposeProfile
+  ): Consequence[Unit] =
+    profile.unsupportedPromptPolicy match {
+      case Some(label) =>
+        Consequence.configurationInvalid(
+          s"AI purpose $label is not supported; configure prompt-contract-id instead: ${profile.purpose}"
+        )
+      case None =>
+        Consequence.unit
+    }
+
+  private def _unsupported_prompt_policy(
+    purpose: String
+  ): Option[String] =
+    Vector("prompt", "system-instruction", "source-restrictions", "output-constraints")
+      .find(label => _config_string(_purpose_keys(purpose, label)).nonEmpty)
 
   private def _purpose_keys(
     purpose: String,

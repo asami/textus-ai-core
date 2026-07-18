@@ -681,6 +681,179 @@ final class TextusAiRunnerSpec
       _GenerateServiceState.count(prompt) shouldBe 0
     }
 
+    "require profile-owned prompt and output-schema identities without owning their content" in {
+      Given("a record purpose that names a caller-owned prompt contract and output schema")
+      given ExecutionContext = ExecutionContext.create()
+      val rejectedprompt = "structured-policy-plain"
+      val rejectedschema = "structured-policy-record"
+      val mismatchschema = "structured-policy-mismatch"
+      _GenerateServiceState.reset(rejectedprompt)
+      _GenerateServiceState.reset(rejectedschema)
+      _GenerateServiceState.reset(mismatchschema)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
+            ConfigurationValue.StringValue("gemma"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.output-schema-id" ->
+            ConfigurationValue.StringValue("artscene.exhibitions.v1"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.prompt-contract-id" ->
+            ConfigurationValue.StringValue("artscene.exhibition.extract.v1")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+      val requirement = AiRunnerRequirement(
+        purpose = Some("artscene-exhibition-extraction-from-source"),
+        purposeRequired = true
+      )
+      val identities = Vector(
+        Property("ai.output-schema-id", "artscene.exhibitions.v1", None),
+        Property("ai.prompt-contract-id", "artscene.exhibition.extract.v1", None)
+      )
+
+      When("the caller requests a matching record and incompatible operations")
+      val accepted = runner.generateRecord(
+        AiRecordRequest("strict-record", _artscene_record_schema, requirement = requirement, properties = identities)
+      )
+      val plain = runner.generate(
+        AiGenerateRequest(rejectedprompt, requirement = requirement, properties = identities)
+      )
+      val missingschema = runner.generateRecord(
+        AiRecordRequest(
+          rejectedschema,
+          _artscene_record_schema,
+          requirement = requirement,
+          properties = identities.filterNot(_.name == "ai.output-schema-id")
+        )
+      )
+      val mismatchedschema = runner.generateRecord(
+        AiRecordRequest(
+          mismatchschema,
+          _artscene_record_schema,
+          requirement = requirement,
+          properties = identities.updated(0, Property("ai.output-schema-id", "other.schema.v1", None))
+        )
+      )
+      val missingprompt = runner.chat(
+        AiChatRequest(
+          Vector(AiMessage("user", "missing prompt contract")),
+          requirement = requirement,
+          properties = identities.filterNot(_.name == "ai.prompt-contract-id")
+        )
+      )
+
+      Then("only a matching generateRecord call reaches the provider")
+      accepted.toOption.get.record.getAny("exhibitions") should not be empty
+      Vector(plain, missingschema, mismatchedschema, missingprompt).foreach {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("AI purpose")
+        case _ =>
+          fail("a purpose policy mismatch must fail before provider execution")
+      }
+      _GenerateServiceState.count(rejectedprompt) shouldBe 0
+      _GenerateServiceState.count(rejectedschema) shouldBe 0
+      _GenerateServiceState.count(mismatchschema) shouldBe 0
+    }
+
+    "reject malformed structured-output and prompt-policy identities before provider execution" in {
+      Given("a required purpose profile with an invalid output-schema identity")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "invalid-structured-policy"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
+            ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-managed-research.output-schema-id" ->
+            ConfigurationValue.StringValue("invalid schema id")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("the caller requests the malformed required purpose")
+      val result = runner.generateRecord(
+        AiRecordRequest(
+          prompt,
+          _artscene_record_schema,
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-managed-research"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("configuration validation fails before a provider operation")
+      result shouldBe a[Consequence.Failure[_]]
+      result match {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("Invalid AI purpose output-schema-id")
+        case _ =>
+          fail("an invalid output schema identity must fail before execution")
+      }
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
+    "reject profile-owned prompt content before it can reach a provider" in {
+      Given("a required purpose profile that embeds a system instruction")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "unsupported-profile-prompt"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
+            ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-managed-research.system-instruction" ->
+            ConfigurationValue.StringValue("Do not store this prompt content.")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("the caller requests that purpose")
+      val result = runner.generate(
+        AiGenerateRequest(
+          prompt,
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-managed-research"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("the raw prompt configuration fails without exposing its content")
+      result shouldBe a[Consequence.Failure[_]]
+      result match {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("system-instruction is not supported")
+          conclusion.display should not include "Do not store this prompt content."
+        case _ =>
+          fail("profile-owned prompt content must fail before execution")
+      }
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
     "prefer direct request model over a configured purpose profile" in {
       Given("an AI runner configured with a purpose model profile")
       given ExecutionContext = ExecutionContext.create()

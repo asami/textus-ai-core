@@ -16,12 +16,12 @@ Phase: [Phase 2 - Purpose Policy Runtime](phase-2.md)
 - [x] Validate named model profiles and bounded-policy values before provider binding.
 - [ ] Add concurrency policy resolution and its supported enforcement boundary.
 - [x] Validate known provider-local model constraints and logical-tool compatibility before provider binding.
-- [ ] Define validated structured-output and prompt-policy configuration boundaries.
+- [x] Define validated structured-output and prompt-policy configuration boundaries.
 
 ## PP-03 Admission And Observability
 
 - [x] Reject provider/tool incompatibility before invoking a provider.
-- [ ] Reject required-purpose execution when no valid purpose profile resolves.
+- [x] Reject required-purpose execution when no valid purpose profile resolves.
 - [ ] Record effective purpose, profile selection, provider, model, tools, and bounded facts in safe CallTree attributes.
 - [ ] Surface safe policy and tool-result summaries in response metadata where available.
 

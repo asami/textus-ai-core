@@ -211,6 +211,28 @@ invoked. `AiGenerateRequest.maxTokens`, an `ai.timeout-seconds` request
 property, and an `ai.record.retry-limit` request property override the
 corresponding profile default.
 
+Purpose profiles may require caller-owned structured-output and prompt
+identities without storing an application schema or prompt text:
+
+```yaml
+textus:
+  ai:
+    purposes:
+      artscene-exhibition-extraction-from-source:
+        output-schema-id: artscene.exhibitions.v1
+        prompt-contract-id: artscene.exhibition.extract.v1
+```
+
+`output-schema-id` permits only `generateRecord`; the caller must provide its
+concrete `Record` schema and pass the matching `ai.output-schema-id` property.
+`prompt-contract-id` requires the matching `ai.prompt-contract-id` property on
+every operation. IDs use letters, digits, `.`, `_`, and `-`; they do not carry
+prompt text, system instructions, source restrictions, or provider-specific
+prompt options. Those remain application-owned contracts until CNCF defines a
+provider-neutral prompt-contract model. Profile keys such as `prompt`,
+`system-instruction`, `source-restrictions`, and `output-constraints` fail
+explicitly instead of being applied or ignored.
+
 Request-level tools still win over profile tools. The runtime maps logical
 tools to provider-specific APIs:
 
@@ -230,6 +252,8 @@ Provider-local parameters should be passed as request `Property` values rather
 than as global system properties. Supported property keys include:
 
 - `ai.tools`: comma-separated logical tools for direct request-level use.
+- `ai.output-schema-id`: caller-owned structured output identity.
+- `ai.prompt-contract-id`: caller-owned prompt contract identity.
 - `ai.model`: request-level model override.
 - `ai.timeout-seconds`: request-level HTTP timeout.
 - `ai.openai.web_search.search_context_size`: OpenAI web search context size.

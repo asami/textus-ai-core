@@ -36,6 +36,7 @@ final class TextusAiRunner(
       val properties = _request_properties(req.properties, resolution)
       _with_generate_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
+          _ <- resolution.policy.validateGenerate(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           service <- provider.generateService(effective)
           response <- service.generate(
@@ -57,6 +58,7 @@ final class TextusAiRunner(
       val properties = _request_properties(req.properties, resolution)
       _with_record_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
+          _ <- resolution.policy.validateRecord(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           service <- provider.generateService(effective)
           response <- _generate_record_raw_with_retry(
@@ -78,6 +80,7 @@ final class TextusAiRunner(
       val properties = _request_properties(req.properties, resolution)
       _with_chat_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
+          _ <- resolution.policy.validateChat(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           service <- provider.chatService(effective)
           response <- service.chat(
