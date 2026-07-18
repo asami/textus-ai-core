@@ -57,7 +57,7 @@ multi-step workflow.
 | EA-01 | Execution facts | Stable provider-neutral usage, estimate, accounting, and limitation facts have defined ownership and safe publication. | done |
 | EA-02 | Input-budget admission | Execution-class policy validates and enforces bounded input-token admission before provider execution. | done |
 | EA-03 | Cost accounting and admission | Execution-class policy can apply an operator-owned rate schedule and reject over-budget or unaccountable execution explicitly. | done |
-| WB-01 | Workflow boundary | A separate decision records whether future runtime workflow support is needed and what contract it would require. | open |
+| WB-01 | Workflow boundary | A separate decision records that Phase 3 keeps workflow orchestration application-owned and defines the entry contract for any later runtime workflow phase. | done |
 | ES-01 | Executable specification | Deterministic specifications, operator documentation, and review evidence close the phase. | open |
 
 ## Exit Criteria
@@ -90,5 +90,6 @@ multi-step workflow.
 - [Execution Class Terminology Handoff](../journal/2026/07/2026-07-18-execution-class-terminology-handoff.md)
 - [AI Input-Budget Admission](../design/ai-input-budget-admission.md)
 - [AI Cost Accounting and Admission](../design/ai-cost-accounting-admission.md)
+- [AI Runtime Workflow Boundary](../design/ai-runtime-workflow-boundary.md)
 - [ArtScene AI Fetch Purpose Contract Handoff](../journal/2026/07/2026-07-18-artscene-ai-fetch-purpose-contract-handoff.md)
 - [Phase 3 Checklist](phase-3-checklist.md)

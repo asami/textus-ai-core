@@ -23,6 +23,7 @@ This repository follows the document lifecycle defined by `ai/directive/core`.
 - `docs/spec/ai-execution-facts.md` records source-qualified usage and safe accounting metadata behavior
 - `docs/spec/ai-input-budget-admission.md` records execution-class input admission behavior
 - `docs/spec/ai-cost-accounting-admission.md` records operator rate and cost admission behavior
+- `docs/design/ai-runtime-workflow-boundary.md` records the workflow ownership boundary and later-phase entry contract
 - `docs/spec/mock-ai-executable-spec.md` records the deterministic mock AI executable specification
 
 ## Rules

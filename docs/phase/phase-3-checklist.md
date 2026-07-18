@@ -69,16 +69,16 @@ Stage Status:
 ## Stage WB-01 - Workflow Boundary
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark DONE only after a design decision records whether runtime
   workflow support is needed and a later phase owns any implementation.
 
-- [ ] Determine whether any caller needs a Textus AI runtime workflow rather
-  than application orchestration.
-- [ ] If needed, define the required public contract, ownership, admission,
+- [x] Determine that current callers need application orchestration, not a
+  Textus AI runtime workflow.
+- [x] Define the required future public contract, ownership, admission,
   lifecycle, budget scope, failure semantics, and executable specification.
-- [ ] Record workflow implementation as a later phase; do not implement it in
+- [x] Record workflow implementation as a later phase; do not implement it in
   this phase.
 
 ## Stage ES-01 - Executable Specification and Closure
