@@ -75,6 +75,35 @@ Non-goals:
 
 Artifact: [Phase 1 dashboard](../phase/phase-1.md).
 
+### Phase 2: Purpose Policy Runtime
+
+Goal: make `AiRunnerRequirement.purpose` a strict, provider-neutral policy
+boundary for application AI workflows.
+
+Scope:
+
+- require and validate purpose-profile resolution when a caller marks purpose
+  as mandatory;
+- resolve explicit provider, model, logical tools, and bounded execution policy
+  from the selected purpose profile;
+- reject absent profiles and unsupported provider/tool combinations rather than
+  applying an implicit fallback; and
+- propagate effective policy through runtime observability and enforce supported
+  maximum-output, timeout, retry, and concurrency limits.
+
+Non-goals:
+
+- ArtScene caller integration, fetch-method fallback, prompts, and result
+  schemas; and
+- managed research orchestration, input-token budgeting, and cost
+  admission/accounting.
+
+Artifacts:
+
+- [Phase 2 Dashboard](../phase/phase-2.md)
+- [Phase 2 Checklist](../phase/phase-2-checklist.md)
+- [ArtScene AI Fetch Purpose Contract Handoff](../journal/2026/07/2026-07-18-artscene-ai-fetch-purpose-contract-handoff.md)
+
 ## Phase Ordering
 
 Phase 1 was reopened on 2026-07-16 after the user clarified that Codex CLI is
@@ -86,11 +115,10 @@ completed on 2026-07-18.
 
 ## Process Status
 
-- Current phase: Phase 1, complete through AR-06 Codex CLI provider execution.
-- Current phase dashboard: `docs/phase/phase-1.md`
-- Current phase checklist: `docs/phase/phase-1-checklist.md`
-- Current next task: select the next phase scope; no new runtime behavior is
-  active work.
+- Current phase: Phase 2, Purpose Policy Runtime.
+- Current phase dashboard: `docs/phase/phase-2.md`
+- Current phase checklist: `docs/phase/phase-2-checklist.md`
+- Current next task: PP-01 strict purpose contract in the CNCF AI runner API.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

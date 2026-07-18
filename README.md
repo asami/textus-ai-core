@@ -262,6 +262,8 @@ src/
 - [Mock AI Executable Specification](docs/spec/mock-ai-executable-spec.md)
 - [Phase 1 AI Runner Executable Specification](docs/spec/phase-1-ai-runner-executable-spec.md)
 - [Phase 1 Dashboard](docs/phase/phase-1.md)
+- [Phase 2 Dashboard](docs/phase/phase-2.md)
+- [Phase 2 Checklist](docs/phase/phase-2-checklist.md)
 
 ## AI Directive
 
