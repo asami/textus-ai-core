@@ -202,14 +202,29 @@ textus:
         max-output-tokens: 240
         timeout-seconds: 90
         record-retry-limit: 2
+        max-concurrent: 2
 ```
 
 `max-output-tokens` must be positive, `timeout-seconds` must be positive, and
-`record-retry-limit` is an integer from `0` through `3`. Invalid values and a
+`record-retry-limit` is an integer from `0` through `3`. `max-concurrent` must
+be positive and is an operator-owned per-purpose admission limit; it cannot be
+widened by a request property. Invalid values and a
 missing named `model-profile` fail as configuration errors before a provider is
 invoked. `AiGenerateRequest.maxTokens`, an `ai.timeout-seconds` request
 property, and an `ai.record.retry-limit` request property override the
 corresponding profile default.
+
+Textus AI maps an effective output-token limit to Google `generateContent` and
+Interactions requests, OpenAI Chat Completions and Responses requests, and
+Gemma/Ollama `options.num_predict`. It rejects an effective output-token limit
+for Codex CLI because the admitted CLI capability has no equivalent token-limit
+control. A provider-reported output count above the effective limit is a
+structured failure. When a provider omits output usage, the request remains
+bounded at its provider boundary and reports
+`ai.limitation.codes=output_limit_not_verified` rather than claiming an
+independent measurement. HTTP providers receive the effective timeout through
+the CNCF HTTP UnitOfWork; Codex CLI converts it to a managed-process execution
+limit.
 
 Purpose profiles may require caller-owned structured-output and prompt
 identities without storing an application schema or prompt text:
@@ -235,7 +250,10 @@ explicitly instead of being applied or ignored.
 
 Successful AI responses and their CallTree entries publish safe effective policy
 facts under `ai.policy.*`: maximum output tokens, timeout, record retry limit,
-output-schema ID, and prompt-contract ID when configured. Tool-enabled Google
+maximum concurrency, output-schema ID, and prompt-contract ID when configured.
+When a purpose configures `max-concurrent`, Textus AI uses CNCF's runtime-owned
+scoped admission and returns a structured saturation failure without selecting
+another provider or invoking the provider binding. Tool-enabled Google
 and OpenAI responses also publish `ai.execution.tool_result_summary` with only
 provider-reported numeric counters. Neither surface contains raw prompts,
 schemas, URLs, provider payloads, or credentials.

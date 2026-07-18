@@ -108,6 +108,13 @@ private object GemmaSupport:
     ).collect { case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim }.toMap
   }
 
+  def generationOptions(maxTokens: Option[Int]): Json =
+    maxTokens
+      .map(value => Json.obj(
+        "options" -> Json.obj("num_predict" -> Json.fromInt(value))
+      ))
+      .getOrElse(Json.obj())
+
 final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: ExecutionContext) extends GenerateService:
   override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
     given ExecutionContext = context
@@ -118,7 +125,7 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
         "model" -> Json.fromString(model),
         "prompt" -> Json.fromString(req.prompt),
         "stream" -> Json.False
-      )
+      ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
       response <- _request_with_fallback(GemmaSupport.endpoints(config), "/api/generate", body, req.properties) { json =>
         json.hcursor.get[String]("response") match
           case Right(text) => Consequence.success(GenerateResponse(text, Some(model), GemmaSupport.responseMetadata(json)))
@@ -163,7 +170,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
           }
         ),
         "stream" -> Json.False
-      )
+      ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
       response <- _request_with_fallback(GemmaSupport.endpoints(config), "/api/chat", body, req.properties) { json =>
         json.hcursor.downField("message").get[String]("content") match
           case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(model), GemmaSupport.responseMetadata(json)))

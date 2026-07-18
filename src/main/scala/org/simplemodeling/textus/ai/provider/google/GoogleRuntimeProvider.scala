@@ -125,7 +125,13 @@ private object GoogleJson:
     _string_at(json.hcursor, List("candidates", "0", "content", "parts", "0", "text"))
 
   def interactionGenerateRequest(request: GenerateRequest, model: String): Json =
-    _interaction_request(model, Json.fromString(_safe_string(request.prompt)), request.properties)
+    _interaction_request(
+      model,
+      Json.fromString(_safe_string(request.prompt)),
+      request.properties,
+      request.temperature,
+      request.maxTokens
+    )
 
   def interactionChatRequest(request: ChatRequest, model: String): Json =
     val input = Json.fromValues(
@@ -136,7 +142,7 @@ private object GoogleJson:
         )
       }
     )
-    _interaction_request(model, input, request.properties)
+    _interaction_request(model, input, request.properties, request.temperature, request.maxTokens)
 
   def extractInteractionText(json: Json): Consequence[String] =
     json.hcursor.get[String]("output_text") match
@@ -184,13 +190,30 @@ private object GoogleJson:
   private def _interaction_request(
     model: String,
     input: Json,
-    properties: Vector[org.goldenport.protocol.Property]
-  ): Json =
+    properties: Vector[org.goldenport.protocol.Property],
+    temperature: Option[Double],
+    maxTokens: Option[Int]
+  ): Json = {
     Json.obj(
       "model" -> Json.fromString(model),
       "input" -> input,
-      "tools" -> Json.fromValues(_provider_tools(AiRequestProperties.tools(properties)).map(_._2))
+      "tools" -> Json.fromValues(_provider_tools(AiRequestProperties.tools(properties)).map(_._2)),
+      "generation_config" -> Json.fromJsonObject(_interaction_generation_config(temperature, maxTokens))
     )
+  }
+
+  private def _interaction_generation_config(
+    temperature: Option[Double],
+    maxTokens: Option[Int]
+  ): JsonObject =
+    maxTokens
+      .map(value => JsonObject("max_output_tokens" -> Json.fromInt(value)))
+      .getOrElse(JsonObject.empty)
+      .deepMerge(
+        temperature
+          .map(value => JsonObject("temperature" -> Json.fromDoubleOrNull(value)))
+          .getOrElse(JsonObject.empty)
+      )
 
   private def _provider_tools(tools: Vector[AiTool]): Vector[(String, Json)] =
     tools.distinct.flatMap {
@@ -215,15 +238,18 @@ private object GoogleJson:
       "google.finish_reason" -> _string_at_paths(json.hcursor, Vector(List("candidates", "0", "finishReason"))),
       "google.usage.input_tokens" -> _long_at_paths(json.hcursor, Vector(
         List("usageMetadata", "promptTokenCount"),
-        List("usage", "inputTokens")
+        List("usage", "inputTokens"),
+        List("usage", "total_input_tokens")
       )),
       "google.usage.output_tokens" -> _long_at_paths(json.hcursor, Vector(
         List("usageMetadata", "candidatesTokenCount"),
-        List("usage", "outputTokens")
+        List("usage", "outputTokens"),
+        List("usage", "total_output_tokens")
       )),
       "google.usage.total_tokens" -> _long_at_paths(json.hcursor, Vector(
         List("usageMetadata", "totalTokenCount"),
-        List("usage", "totalTokens")
+        List("usage", "totalTokens"),
+        List("usage", "total_tokens")
       ))
     ))
 

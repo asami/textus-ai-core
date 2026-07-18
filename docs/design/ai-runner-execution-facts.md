@@ -88,17 +88,20 @@ identifiers. It is absent when no limitation applies. Initial identifiers are:
 - `provider_identity_unavailable`
 - `cancellation_not_propagated`
 - `concurrency_not_enforced`
+- `output_limit_not_verified`
 
 The value identifies a missing measurement or execution boundary. It must not
 contain provider error bodies, credentials, account data, URLs, prompt text, or
 response text.
 
 Current Textus AI runner responses always record
-`cancellation_not_propagated` and `concurrency_not_enforced`: the synchronous
-provider binding does not propagate a caller cancellation signal and does not
-enforce a component-wide concurrency budget. Record generation retries only
-empty responses and explicit timeout-like failures, at most three times, using
-`ai.record.retry-limit` (default `1`).
+`cancellation_not_propagated`: the synchronous provider binding does not yet
+propagate a caller cancellation signal. `concurrency_not_enforced` is omitted
+when a purpose configures and acquires CNCF scoped concurrency admission.
+`output_limit_not_verified` is added when an effective output-token limit is
+sent to a provider that omits its output-token measurement. Record generation
+retries only empty responses and explicit timeout-like failures, at most three
+times, using `ai.record.retry-limit` (default `1`).
 
 ## Confidentiality Boundary
 

@@ -94,6 +94,7 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
     for {
       _ <- AiRequestProperties.requireNoUnsupportedTools("codex", req.properties)
       _ <- AiRequestProperties.requireNoModelOverride("codex", req.properties)
+      _ <- _require_no_output_token_limit(req.maxTokens)
       request <- _request_c(req.prompt, req.recordSchema, req.properties)
       result <- _execute_c(request)
       response <- _response_c(result)
@@ -146,12 +147,23 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
   private def _requested_limits(
     properties: Vector[org.goldenport.protocol.Property]
   ): ProcessExecutionLimits =
-    val timeout = AiRequestProperties.string(properties, Vector(
+    val codextimeout = AiRequestProperties.string(properties, Vector(
       "ai.codex.timeout-millis",
       "textus.ai.codex.timeout-millis",
       "cncf.ai.codex.timeout-millis"
     )).flatMap(_.toLongOption).filter(_ > 0L)
-    ProcessExecutionLimits(executionTimeoutMillis = timeout)
+    val purposetimeout = AiRequestProperties.purposeTimeoutSeconds(properties)
+      .flatMap(value => Try(Math.multiplyExact(value, 1000L)).toOption)
+    ProcessExecutionLimits(executionTimeoutMillis = codextimeout.orElse(purposetimeout))
+
+  private def _require_no_output_token_limit(
+    maxTokens: Option[Int]
+  ): Consequence[Unit] =
+    maxTokens match
+      case Some(_) =>
+        Consequence.configurationInvalid("AI maximum output tokens are not supported by provider 'codex'")
+      case None =>
+        Consequence.unit
 
   private def _execute_c(request: ProcessExecutionRequest): Consequence[ProcessExecutionResult] =
     given ExecutionContext = context

@@ -138,6 +138,18 @@ final class AiExecutionFactsSpec
         "cancellation_not_propagated,concurrency_not_enforced,usage_unavailable"
     }
 
+    "record an unverified output limit when a bounded provider response omits usage" in {
+      Given("a bounded policy response without an output-token measurement")
+      val metadata = Map(AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS -> "120")
+
+      When("Textus AI adds lifecycle limitations")
+      val normalized = AiExecutionFacts.lifecycleLimitations(metadata)
+
+      Then("the response does not claim an independently verified maximum")
+      normalized(AiExecutionFacts.LIMITATION_CODES) shouldBe
+        "cancellation_not_propagated,concurrency_not_enforced,output_limit_not_verified"
+    }
+
     "omit execution facts that are unknown instead of synthesizing values" in {
       Given("an unresolved selection with no provider response model or optional requirement")
       val selection = SpiSelection()

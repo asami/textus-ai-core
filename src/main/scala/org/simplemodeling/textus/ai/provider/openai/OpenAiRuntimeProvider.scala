@@ -125,7 +125,7 @@ private object OpenAiJson:
     _string_at(json.hcursor, List("choices", "0", "message", "content"))
 
   def responseGenerateRequest(request: GenerateRequest, model: String): Json =
-    _response_request(model, Json.fromString(request.prompt), request.properties)
+    _response_request(model, Json.fromString(request.prompt), request.properties, request.maxTokens)
 
   def responseChatRequest(request: ChatRequest, model: String): Json =
     val input = Json.fromValues(
@@ -136,7 +136,7 @@ private object OpenAiJson:
         )
       }
     )
-    _response_request(model, input, request.properties)
+    _response_request(model, input, request.properties, request.maxTokens)
 
   def extractResponseText(json: Json): Consequence[String] =
     json.hcursor.get[String]("output_text") match
@@ -158,14 +158,15 @@ private object OpenAiJson:
   private def _response_request(
     model: String,
     input: Json,
-    properties: Vector[org.goldenport.protocol.Property]
+    properties: Vector[org.goldenport.protocol.Property],
+    maxTokens: Option[Int]
   ): Json =
     val base = JsonObject(
       "model" -> Json.fromString(model),
       "input" -> input,
       "tools" -> Json.fromValues(_provider_tools(AiRequestProperties.tools(properties), properties).map(_._2))
     )
-    Json.fromJsonObject(_with_response_options(base, properties))
+    Json.fromJsonObject(_with_response_options(base, properties, maxTokens))
 
   private def _provider_tools(
     tools: Vector[AiTool],
@@ -179,15 +180,18 @@ private object OpenAiJson:
 
   private def _with_response_options(
     base: JsonObject,
-    properties: Vector[org.goldenport.protocol.Property]
-  ): JsonObject =
+    properties: Vector[org.goldenport.protocol.Property],
+    maxTokens: Option[Int]
+  ): JsonObject = {
+    val withmax = maxTokens.map(value => base.add("max_output_tokens", Json.fromInt(value))).getOrElse(base)
     AiRequestProperties.string(properties, Vector(
       "ai.openai.reasoning.effort",
       "textus.ai.openai.reasoning.effort",
       "openai.reasoning.effort"
     )).map(value =>
-      base.add("reasoning", Json.obj("effort" -> Json.fromString(value)))
-    ).getOrElse(base)
+      withmax.add("reasoning", Json.obj("effort" -> Json.fromString(value)))
+    ).getOrElse(withmax)
+  }
 
   private def _with_openai_web_search_options(
     base: JsonObject,

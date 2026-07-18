@@ -3,6 +3,7 @@ package org.simplemodeling.textus.ai
 import cats.~>
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentOrigin}
+import org.goldenport.cncf.admission.ConcurrencyScopeId
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.{ExecutionContext, GlobalContext, RuntimeContext, ScopeContext, ScopeKind}
 import org.goldenport.cncf.processexecution.{LocalProcessExecutionDriver, ProcessArtifactName, ProcessCapabilityId, ProcessExecutionAdmission, ProcessExecutionInputFile, ProcessExecutionRequest, WorkAreaRelativePath}
@@ -32,6 +33,43 @@ final class ComponentFactorySpec
   with GivenWhenThen
   with OptionValues {
   "ComponentFactory" should {
+    "install configured purpose concurrency admission in the provider component scope" in {
+      Given("a Textus AI runtime with one bounded ArtScene purpose")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
+            ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-web-research.max-concurrent" ->
+            ConfigurationValue.StringValue("1")
+        )),
+        ConfigurationTrace.empty
+      )
+      val subsystem = new Subsystem(
+        name = "textus-ai-concurrency-scope-spec",
+        configuration = configuration
+      )
+      val component = new ComponentFactory().create(ComponentCreate(subsystem, ComponentOrigin.Main)).primary
+      val parent = ScopeContext(
+        ScopeKind.Runtime,
+        "textus-ai-concurrency-scope-spec",
+        None,
+        summon[ExecutionContext].observability
+      )
+      component.withScopeContext(parent)
+      val key = ConcurrencyScopeId.parseC("artscene-exhibition-web-research").toOption.get
+
+      When("the component resolves and consumes the configured permit")
+      val admission = component.scopeContext.scopedConcurrencyAdmissionOption
+      val first = admission.flatMap(_.acquireC(key).toOption)
+      val saturated = admission.map(_.acquireC(key))
+      first.foreach(_.release())
+
+      Then("the component owns a per-purpose runtime admission boundary")
+      admission should not be empty
+      saturated.exists(_.isFaillure) shouldBe true
+    }
+
     "publish the artifact component name required by an assembly descriptor" in {
       Given("a Textus AI Runtime component factory")
       val factory = new ComponentFactory()

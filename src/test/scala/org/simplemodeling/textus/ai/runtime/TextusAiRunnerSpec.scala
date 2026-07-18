@@ -4,8 +4,9 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import cats.~>
 import org.goldenport.Consequence
+import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.component.{Component, ExtensionPoint, Port}
-import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext}
+import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext, ScopeContext, ScopeKind}
 import org.goldenport.cncf.http.HttpDriver
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiSelection}
@@ -655,6 +656,62 @@ final class TextusAiRunnerSpec
       _GenerateServiceState.count(prompt) shouldBe 3
     }
 
+    "enforce a purpose concurrency limit through the provider component scope" in {
+      Given("a required purpose with one configured runtime-owned concurrency permit")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "purpose-concurrency-limit"
+      _GenerateServiceState.reset(prompt)
+      val key = ConcurrencyScopeId.parseC("artscene-exhibition-web-research").toOption.get
+      val admission = ScopedConcurrencyAdmission.createC(Vector(ConcurrencyGrant(key, 1))).toOption.get
+      val component = _component()
+      component.withScopeContext(ScopeContext(
+        kind = ScopeKind.Component,
+        name = "textus-ai-concurrency-spec",
+        parent = None,
+        observabilityContext = summon[ExecutionContext].observability,
+        scopedConcurrencyAdmissionOption = Some(admission)
+      ))
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
+            ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-web-research.max-concurrent" ->
+            ConfigurationValue.StringValue("1")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        component,
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+      val requirement = AiRunnerRequirement(
+        purpose = Some("artscene-exhibition-web-research"),
+        purposeRequired = true
+      )
+
+      When("another operation already holds the purpose permit")
+      val lease = admission.acquireC(key).toOption.get
+      val saturated = runner.generate(AiGenerateRequest(prompt, requirement = requirement))
+      lease.release()
+      val admitted = runner.generate(AiGenerateRequest(prompt, requirement = requirement))
+
+      Then("the saturated call fails without provider execution and release restores the same purpose")
+      saturated shouldBe a[Consequence.Failure[_]]
+      saturated match {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("Concurrency admission is saturated")
+        case _ =>
+          fail("a saturated purpose must fail before provider execution")
+      }
+      _GenerateServiceState.count(prompt) shouldBe 1
+      admitted.toOption.get.metadata(AiExecutionFacts.POLICY_MAX_CONCURRENT) shouldBe "1"
+      admitted.toOption.get.metadata(AiExecutionFacts.LIMITATION_CODES) should not include "concurrency_not_enforced"
+    }
+
     "reject malformed purpose policy values before invoking a provider" in {
       Given("a required purpose profile with an invalid output-token limit")
       given ExecutionContext = ExecutionContext.create()
@@ -696,6 +753,51 @@ final class TextusAiRunnerSpec
           conclusion.display should include ("Invalid AI purpose max-output-tokens")
         case _ =>
           fail("a malformed purpose policy must fail before execution")
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
+    "reject malformed purpose concurrency before invoking a provider" in {
+      Given("a required purpose profile with an invalid concurrency limit")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "invalid-purpose-concurrency"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
+            ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-managed-research.max-concurrent" ->
+            ConfigurationValue.StringValue("zero")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(mode = Some("remote"), engine = Some("http")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("generation requires the malformed bounded purpose")
+      val result = runner.generate(
+        AiGenerateRequest(
+          prompt,
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-managed-research"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("configuration fails before the runtime attempts provider admission")
+      result shouldBe a[Consequence.Failure[_]]
+      result match {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("Invalid AI purpose max-concurrent")
+        case _ =>
+          fail("a malformed concurrency limit must fail before execution")
+      }
       _GenerateServiceState.count(prompt) shouldBe 0
     }
 
@@ -1078,6 +1180,7 @@ final class TextusAiRunnerSpec
       val response = service.generate(
         GenerateRequest(
           prompt = "find official page",
+          maxTokens = Some(120),
           properties = Vector(Property("ai.tools", "url_context,web_search", None))
         )
       ).toOption.get
@@ -1087,6 +1190,7 @@ final class TextusAiRunnerSpec
       driver.headers.get("x-goog-api-key") shouldBe Some("test-google-key")
       driver.body.value should include (""""type":"url_context"""")
       driver.body.value should include (""""type":"google_search"""")
+      driver.body.value should include ("\"generation_config\":{\"max_output_tokens\":120}")
       response.metadata("ai.provider_tools") shouldBe "url_context,google_search"
       response.metadata("google.google_search_calls") shouldBe "1"
       response.metadata("google.url_citations") shouldBe "1"
@@ -1199,6 +1303,7 @@ final class TextusAiRunnerSpec
       val response = service.generate(
         GenerateRequest(
           prompt = "find official page",
+          maxTokens = Some(120),
           properties = Vector(
             Property("ai.tools", "url_context", None),
             Property("ai.openai.web_search.search_context_size", "low", None)
@@ -1211,9 +1316,64 @@ final class TextusAiRunnerSpec
       driver.headers.get("Authorization") shouldBe Some("Bearer test-openai-key")
       driver.body.value should include (""""type":"web_search"""")
       driver.body.value should include (""""search_context_size":"low"""")
+      driver.body.value should include ("\"max_output_tokens\":120")
       response.metadata("ai.provider_tools") shouldBe "web_search"
       response.metadata("openai.web_search_calls") shouldBe "1"
       response.metadata("openai.response_id") shouldBe "resp_test"
+    }
+
+    "map Gemma output and timeout policies to the CNCF HTTP boundary" in {
+      Given("a Gemma service with a deterministic HTTP driver")
+      val driver = new _FakeHttpDriver(
+        """{"response":"gemma answer","done_reason":"stop","prompt_eval_count":9,"eval_count":5}"""
+      )
+      given ExecutionContext = _context(driver)
+      val service = new GemmaOllamaGenerateService(
+        GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")),
+        summon[ExecutionContext]
+      )
+
+      When("a bounded generation request reaches the local provider")
+      val response = service.generate(
+        GenerateRequest(
+          "bounded local answer",
+          maxTokens = Some(17),
+          properties = Vector(Property("ai.timeout-seconds", "44", None))
+        )
+      ).toOption.get
+
+      Then("Ollama receives its output cap and CNCF receives the effective timeout")
+      response.text shouldBe "gemma answer"
+      driver.body.value should include ("\"options\":{\"num_predict\":17}")
+      driver.lastProperties.find(_.name == "http.timeout-seconds").map(_.value.toString) shouldBe Some("44")
+    }
+
+    "reject provider responses that exceed an effective output-token maximum" in {
+      Given("a runner whose deterministic Google binding reports eight output tokens")
+      given ExecutionContext = ExecutionContext.create()
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("google"), mode = Some("remote"), engine = Some("gemini"))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+      val requirement = AiRunnerRequirement(provider = Some("google"))
+
+      When("generate, record, and chat each request a lower output-token maximum")
+      val results = Vector(
+        runner.generate(AiGenerateRequest("execution-facts", maxTokens = Some(7), requirement = requirement)),
+        runner.generateRecord(AiRecordRequest("strict-record", _artscene_record_schema, maxTokens = Some(7), requirement = requirement)),
+        runner.chat(AiChatRequest(Vector(AiMessage("user", "limited")), maxTokens = Some(7), requirement = requirement))
+      )
+
+      Then("all operations return a structured limit failure rather than a successful over-budget response")
+      results.foreach {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("AI provider output tokens exceeded maximum: limit=7 actual=8")
+        case _ =>
+          fail("an over-budget provider response must not be returned as success")
+      }
     }
 
     "preserve provider response facts for plain provider endpoints" in {
@@ -1990,6 +2150,9 @@ final class TextusAiRunnerSpec
     var calls: Vector[String] = Vector.empty
     var body: Option[String] = None
     var headers: Map[String, String] = Map.empty
+    private var _last_properties: Vector[Property] = Vector.empty
+
+    def lastProperties: Vector[Property] = _last_properties
 
     override def get(
       path: String,
@@ -2007,6 +2170,7 @@ final class TextusAiRunnerSpec
       calls = calls :+ s"POST $path"
       this.body = body
       this.headers = headers
+      _last_properties = properties
       _http_response(response, status)
     }
 

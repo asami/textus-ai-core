@@ -4,6 +4,7 @@ import java.util.Locale
 import io.circe.Json
 import io.circe.parser.parse
 import org.goldenport.Consequence
+import org.goldenport.cncf.admission.ScopedConcurrencyAdmission
 import org.goldenport.cncf.component.Component
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.spi.{SpiContract, SpiProvider, SpiSelection}
@@ -40,15 +41,20 @@ final class TextusAiRunner(
         for {
           _ <- resolution.policy.validateGenerate(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
-          service <- provider.generateService(effective)
-          response <- service.generate(
-            GenerateRequest(
-              prompt = req.prompt,
-              temperature = req.temperature,
-              maxTokens = maxtokens,
-              properties = properties
-            )
-          )
+          response <- _with_concurrency_admission_c(resolution) {
+            for {
+              service <- provider.generateService(effective)
+              response <- service.generate(
+                GenerateRequest(
+                  prompt = req.prompt,
+                  temperature = req.temperature,
+                  maxTokens = maxtokens,
+                  properties = properties
+                )
+              )
+              _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
+            } yield response
+          }
         } yield _to_ai_generate_response(req, response, requirement, policymetadata)
       }
     }
@@ -65,13 +71,17 @@ final class TextusAiRunner(
         for {
           _ <- resolution.policy.validateRecord(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
-          service <- provider.generateService(effective)
-          response <- _generate_record_raw_with_retry(
-            service,
-            req,
-            resolution,
-            retries
-          )
+          response <- _with_concurrency_admission_c(resolution) {
+            provider.generateService(effective).flatMap { service =>
+              _generate_record_raw_with_retry(
+                service,
+                req,
+                resolution,
+                retries
+              )
+            }
+          }
+          _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
         } yield response
       } { response =>
         _normalize_record_response(req, response, requirement, policymetadata)
@@ -89,15 +99,20 @@ final class TextusAiRunner(
         for {
           _ <- resolution.policy.validateChat(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
-          service <- provider.chatService(effective)
-          response <- service.chat(
-            ChatRequest(
-              messages = req.messages.map(_to_textus_message),
-              temperature = req.temperature,
-              maxTokens = maxtokens,
-              properties = properties
-            )
-          )
+          response <- _with_concurrency_admission_c(resolution) {
+            for {
+              service <- provider.chatService(effective)
+              response <- service.chat(
+                ChatRequest(
+                  messages = req.messages.map(_to_textus_message),
+                  temperature = req.temperature,
+                  maxTokens = maxtokens,
+                  properties = properties
+                )
+              )
+              _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
+            } yield response
+          }
         } yield _to_ai_chat_response(req, response, requirement, policymetadata)
       }
     }
@@ -156,6 +171,18 @@ final class TextusAiRunner(
       .getOrElse(1)
       .max(0)
       .min(3)
+
+  private def _with_concurrency_admission_c[A](
+    resolution: AiProfileResolution
+  )(
+    body: => Consequence[A]
+  ): Consequence[A] =
+    resolution.policy.concurrencyScope match {
+      case Some(scope) =>
+        ScopedConcurrencyAdmission.withPermitC(provider.componentScope, scope)(body)
+      case None =>
+        body
+    }
 
   private def _with_record_calltree(
     req: AiRecordRequest,
@@ -763,6 +790,7 @@ final class TextusAiRunnerProvider(
   defaultselection: SpiSelection = SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
   profiles: AiProfileConfig = AiProfileConfig.empty
 ) extends SpiProvider[AiRunner] {
+  private[runtime] def componentScope = component.scopeContext
   def supports(
     contract: SpiContract[AiRunner],
     selection: SpiSelection

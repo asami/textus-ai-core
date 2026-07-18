@@ -2,6 +2,7 @@ package org.simplemodeling.textus.ai.runtime
 
 import scala.util.Try
 import org.goldenport.Consequence
+import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.spi.ai.runner.{AiRunnerRequirement, AiTool}
 import org.goldenport.configuration.ResolvedConfiguration
@@ -25,6 +26,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.purposes.<purpose>.max-output-tokens
  * - textus.ai.purposes.<purpose>.timeout-seconds
  * - textus.ai.purposes.<purpose>.record-retry-limit
+ * - textus.ai.purposes.<purpose>.max-concurrent
  * - textus.ai.purposes.<purpose>.output-schema-id
  * - textus.ai.purposes.<purpose>.prompt-contract-id
  * - textus.ai.model-profiles.<profile>.provider
@@ -68,6 +70,7 @@ private[textus] final case class AiPurposeProfile(
   maxOutputTokens: Option[String] = None,
   timeoutSeconds: Option[String] = None,
   recordRetryLimit: Option[String] = None,
+  maxConcurrent: Option[String] = None,
   outputSchemaId: Option[String] = None,
   promptContractId: Option[String] = None,
   unsupportedPromptPolicy: Option[String] = None
@@ -89,6 +92,8 @@ private[textus] final case class AiPurposePolicy(
   maxOutputTokens: Option[Int] = None,
   timeoutSeconds: Option[Long] = None,
   recordRetryLimit: Option[Int] = None,
+  maxConcurrent: Option[Int] = None,
+  concurrencyScope: Option[ConcurrencyScopeId] = None,
   outputSchemaId: Option[String] = None,
   promptContractId: Option[String] = None
 ) {
@@ -183,6 +188,7 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS -> maxTokens.map(_.toString),
       AiExecutionFacts.POLICY_TIMEOUT_SECONDS -> AiRequestProperties.timeoutSeconds(properties).map(_.toString),
       AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT -> recordRetryLimit.map(_.toString),
+      AiExecutionFacts.POLICY_MAX_CONCURRENT -> policy.maxConcurrent.map(_.toString),
       AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID -> policy.outputSchemaId,
       AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID -> policy.promptContractId
     ).collect {
@@ -238,6 +244,10 @@ private[textus] final class AiProfileConfig(
           _purpose_keys(normalized, "record-retry-limit") ++
             _purpose_keys(normalized, "recordRetryLimit")
         ),
+        maxConcurrent = _config_string(
+          _purpose_keys(normalized, "max-concurrent") ++
+            _purpose_keys(normalized, "maxConcurrent")
+        ),
         outputSchemaId = _config_string(
           _purpose_keys(normalized, "output-schema-id") ++
             _purpose_keys(normalized, "outputSchemaId") ++
@@ -264,6 +274,7 @@ private[textus] final class AiProfileConfig(
         profile.maxOutputTokens.nonEmpty ||
         profile.timeoutSeconds.nonEmpty ||
         profile.recordRetryLimit.nonEmpty ||
+        profile.maxConcurrent.nonEmpty ||
         profile.outputSchemaId.nonEmpty ||
         profile.promptContractId.nonEmpty ||
         profile.unsupportedPromptPolicy.nonEmpty
@@ -362,6 +373,8 @@ private[textus] final class AiProfileConfig(
       maxtokens <- _positive_int(profile.maxOutputTokens, "max-output-tokens", profile.purpose)
       timeoutseconds <- _positive_long(profile.timeoutSeconds, "timeout-seconds", profile.purpose)
       retrylimit <- _bounded_int(profile.recordRetryLimit, "record-retry-limit", profile.purpose, 0, 3)
+      maxconcurrent <- _positive_int(profile.maxConcurrent, "max-concurrent", profile.purpose)
+      concurrencyscope <- _concurrency_scope_c(profile.purpose, maxconcurrent)
       outputschemaid <- _policy_id(profile.outputSchemaId, "output-schema-id", profile.purpose)
       promptcontractid <- _policy_id(profile.promptContractId, "prompt-contract-id", profile.purpose)
       _ <- _validate_prompt_policy(profile)
@@ -369,9 +382,22 @@ private[textus] final class AiProfileConfig(
       maxOutputTokens = maxtokens,
       timeoutSeconds = timeoutseconds,
       recordRetryLimit = retrylimit,
+      maxConcurrent = maxconcurrent,
+      concurrencyScope = concurrencyscope,
       outputSchemaId = outputschemaid,
       promptContractId = promptcontractid
     )
+
+  private def _concurrency_scope_c(
+    purpose: String,
+    maxconcurrent: Option[Int]
+  ): Consequence[Option[ConcurrencyScopeId]] =
+    maxconcurrent match {
+      case Some(_) =>
+        ConcurrencyScopeId.parseC(purpose).map(Some(_))
+      case None =>
+        Consequence.success(None)
+    }
 
   private def _positive_int(
     value: Option[String],
@@ -488,6 +514,57 @@ private[textus] final class AiProfileConfig(
     keys: Vector[String]
   ): Vector[AiTool] =
     _config_string(keys).map(AiTool.parseList).getOrElse(Vector.empty)
+
+  def concurrencyAdmissionC: Consequence[Option[ScopedConcurrencyAdmission]] =
+    _concurrency_grants_c.flatMap { grants =>
+      if (grants.nonEmpty)
+        ScopedConcurrencyAdmission.createC(grants).map(Some(_))
+      else
+        Consequence.success(None)
+    }
+
+  private def _concurrency_grants_c: Consequence[Vector[ConcurrencyGrant]] =
+    _concurrency_purposes.foldLeft(Consequence.success(Vector.empty[ConcurrencyGrant])) { (z, purpose) =>
+      z.flatMap { grants =>
+        resolvePurpose(purpose) match {
+          case Some(profile) =>
+            _purpose_policy(profile).map { policy =>
+              (policy.concurrencyScope, policy.maxConcurrent) match {
+                case (Some(scope), Some(limit)) => grants :+ ConcurrencyGrant(scope, limit)
+                case _ => grants
+              }
+            }
+          case None =>
+            Consequence.success(grants)
+        }
+      }
+    }
+
+  private def _concurrency_purposes: Vector[String] =
+    configuration.toVector
+      .flatMap(_.configuration.values.keys)
+      .flatMap(_concurrency_purpose)
+      .distinct
+      .sorted
+
+  private def _concurrency_purpose(key: String): Option[String] =
+    _purpose_prefixes.iterator.flatMap { prefix =>
+      _concurrency_suffixes.iterator.flatMap { suffix =>
+        Option.when(key.startsWith(prefix) && key.endsWith(suffix))(
+          key.drop(prefix.length).dropRight(suffix.length)
+        )
+      }
+    }.map(_.trim).find(_.nonEmpty)
+
+  private val _purpose_prefixes = Vector(
+    "textus.ai.purposes.",
+    "textus.ai.purpose.",
+    "textus.runtime.ai.purposes.",
+    "cncf.ai.purposes.",
+    "cncf.runtime.ai.purposes."
+  )
+
+  private val _concurrency_suffixes = Vector(".max-concurrent", ".maxConcurrent")
 }
 
 private[textus] object AiProfileConfig {

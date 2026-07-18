@@ -168,11 +168,16 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
         "confidential prompt",
         properties = Vector(Property("ai.codex-cli.model", "unconfigured-cli-model", None))
       )
+      val outputlimitedrequest = AiGenerateRequest(
+        "confidential prompt",
+        maxTokens = Some(64)
+      )
 
       When("generation is requested through the Codex provider")
       val results = Vector(
         _runner().generate(genericrequest),
-        _runner().generate(scopedrequest)
+        _runner().generate(scopedrequest),
+        _runner().generate(outputlimitedrequest)
       )
 
       Then("the unsupported override fails before any process execution")
@@ -180,6 +185,29 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
         result.isFaillure shouldBe true
         result.toString should not include "unconfigured"
       }
+      fixture.profile.driver.executions shouldBe Vector.empty
+    }
+
+    "submit purpose timeout through the admitted managed-process limit" in {
+      Given("an admitted Codex capability and a generic purpose timeout")
+      val fixture = _fixture(_result("{}"))
+      given ExecutionContext = _context(fixture)
+
+      When("generation is routed through the Codex provider")
+      val result = _runner().generate(
+        AiGenerateRequest(
+          "bounded prompt",
+          properties = Vector(Property("ai.timeout-seconds", "45", None))
+        )
+      )
+
+      Then("the capability admission rejects the converted limit before process execution")
+      result shouldBe a[Consequence.Failure[_]]
+      result match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("45000")
+        case _ =>
+          fail("an over-broad process timeout must be rejected by admission")
       fixture.profile.driver.executions shouldBe Vector.empty
     }
   }

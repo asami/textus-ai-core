@@ -35,6 +35,7 @@ private[textus] object AiExecutionFacts {
   val POLICY_MAX_OUTPUT_TOKENS = "ai.policy.max_output_tokens"
   val POLICY_TIMEOUT_SECONDS = "ai.policy.timeout_seconds"
   val POLICY_RECORD_RETRY_LIMIT = "ai.policy.record_retry_limit"
+  val POLICY_MAX_CONCURRENT = "ai.policy.max_concurrent"
   val POLICY_OUTPUT_SCHEMA_ID = "ai.policy.output_schema_id"
   val POLICY_PROMPT_CONTRACT_ID = "ai.policy.prompt_contract_id"
 
@@ -82,13 +83,37 @@ private[textus] object AiExecutionFacts {
 
   def lifecycleLimitations(metadata: Map[String, String]): Map[String, String] = {
     val existing = metadata.get(LIMITATION_CODES).toVector.flatMap(_.split(","))
-    val codes = (existing ++ Vector("cancellation_not_propagated", "concurrency_not_enforced"))
+    val concurrency = Option.when(!metadata.contains(POLICY_MAX_CONCURRENT))("concurrency_not_enforced").toVector
+    val outputverification = Option.when(
+      metadata.contains(POLICY_MAX_OUTPUT_TOKENS) && !metadata.contains(OUTPUT_TOKENS)
+    )("output_limit_not_verified").toVector
+    val codes = (existing ++ Vector("cancellation_not_propagated") ++ concurrency ++ outputverification)
       .map(_.trim.toLowerCase(Locale.ROOT))
       .filter(_.nonEmpty)
       .distinct
       .sorted
     metadata.updated(LIMITATION_CODES, codes.mkString(","))
   }
+
+  def validateMaxOutputTokens(
+    selection: SpiSelection,
+    maximum: Option[Int],
+    metadata: Map[String, String]
+  ): org.goldenport.Consequence[Unit] =
+    maximum match {
+      case Some(limit) =>
+        _output_token_count(selection, metadata) match {
+          case Some(actual) if actual > limit =>
+            org.goldenport.Consequence.operationIllegal(
+              _provider_name(selection),
+              s"AI provider output tokens exceeded maximum: limit=$limit actual=$actual"
+            )
+          case _ =>
+            org.goldenport.Consequence.unit
+        }
+      case None =>
+        org.goldenport.Consequence.unit
+    }
 
   private def _provider_metadata(
     metadata: Map[String, String]
@@ -129,6 +154,24 @@ private[textus] object AiExecutionFacts {
       .flatMap(provider => metadata.get(s"$provider.$suffix"))
       .map(_.trim)
       .filter(_.nonEmpty)
+
+  private def _output_token_count(
+    selection: SpiSelection,
+    metadata: Map[String, String]
+  ): Option[Int] =
+    metadata.get(s"${_provider_name(selection)}.usage.output_tokens")
+      .flatMap(_.trim.toIntOption)
+      .filter(_ >= 0)
+
+  private def _provider_name(selection: SpiSelection): String =
+    selection.provider
+      .map(_.trim.toLowerCase(Locale.ROOT))
+      .filter(_.nonEmpty)
+      .map {
+        case "codex-cli" => "codex"
+        case value => value
+      }
+      .getOrElse("gemma")
 
   private def _usage_value(
     selection: SpiSelection,

@@ -2,6 +2,7 @@ package org.simplemodeling.textus.ai
 
 import scala.util.Try
 import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentId, ComponentOrigin}
+import org.goldenport.cncf.admission.ScopedConcurrencyAdmission
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.{ScopeContext, ScopeKind}
 import org.goldenport.cncf.processexecution.{LocalProcessExecutionDriver, ProcessExecutionAdmission, ProcessExecutionDriver}
@@ -26,8 +27,9 @@ class ComponentFactory extends TextusAiComponent.Factory:
     val bootstrapcontext = params.subsystem
     val configuration = Some(bootstrapcontext.configuration)
     val codex = configuration.flatMap(CodexConfig.fromConfiguration)
+    val concurrency = AiProfileConfig.fromConfiguration(configuration).concurrencyAdmissionC.toOption.flatten
     ComponentFactory.configureRuntimeSpi(
-      new TextusAiRuntimeComponent(codex),
+      new TextusAiRuntimeComponent(codex, concurrency),
       configuration,
       codex
     )
@@ -157,7 +159,8 @@ object ComponentFactory:
     }
 
 private final class TextusAiRuntimeComponent(
-  codex: Option[CodexRuntimeConfig]
+  codex: Option[CodexRuntimeConfig],
+  concurrency: Option[ScopedConcurrencyAdmission]
 ) extends TextusAiComponent {
   private lazy val _codex_runtime: Option[(ProcessExecutionAdmission, ProcessExecutionDriver)] =
     codex.flatMap { config =>
@@ -167,19 +170,22 @@ private final class TextusAiRuntimeComponent(
     }
 
   override def withScopeContext(parent: ScopeContext): Component = {
-    val scope = _codex_runtime.fold(parent) { case (admission, driver) =>
-      ScopeContext(
-        kind = ScopeKind.Component,
-        name = "textus-ai-codex-runtime",
-        parent = Some(parent),
-        observabilityContext = parent.observabilityContext.createChild(
-          parent,
-          ScopeKind.Component,
-          "textus-ai-codex-runtime"
-        ),
-        processExecutionDriverOption = Some(driver),
-        processExecutionAdmissionOption = Some(admission)
-      )
+    val scope = (_codex_runtime, concurrency) match {
+      case (None, None) => parent
+      case (codexruntime, admission) =>
+        ScopeContext(
+          kind = ScopeKind.Component,
+          name = if (codexruntime.nonEmpty) "textus-ai-codex-runtime" else "textus-ai-concurrency-runtime",
+          parent = Some(parent),
+          observabilityContext = parent.observabilityContext.createChild(
+            parent,
+            ScopeKind.Component,
+            if (codexruntime.nonEmpty) "textus-ai-codex-runtime" else "textus-ai-concurrency-runtime"
+          ),
+          processExecutionDriverOption = codexruntime.map(_._2),
+          processExecutionAdmissionOption = codexruntime.map(_._1),
+          scopedConcurrencyAdmissionOption = admission
+        )
     }
     super.withScopeContext(scope)
   }

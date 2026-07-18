@@ -64,6 +64,17 @@ private[textus] object AiRequestProperties:
       "timeoutSeconds"
     )).flatMap(_.toLongOption).filter(_ > 0)
 
+  def purposeTimeoutSeconds(
+    properties: Vector[Property]
+  ): Option[Long] =
+    _property_string(properties, Vector(
+      "ai.timeout-seconds",
+      "textus.ai.timeout-seconds",
+      "cncf.ai.timeout-seconds",
+      "timeout-seconds",
+      "timeoutSeconds"
+    )).flatMap(_.toLongOption).filter(_ > 0)
+
   def effectiveTimeoutSeconds(
     configured: Long,
     properties: Vector[Property]
