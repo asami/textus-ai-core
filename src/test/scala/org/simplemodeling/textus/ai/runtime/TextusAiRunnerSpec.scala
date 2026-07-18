@@ -268,18 +268,14 @@ final class TextusAiRunnerSpec
       generated.toOption.get.text shouldBe "purpose:linear-feature.worker.anchor-plan;model:gpt-4.1-mini"
     }
 
-    "resolve purpose-specific model profiles from CNCF configuration" in {
-      Given("an AI runner configured with a purpose profile and a model profile")
+    "resolve an application purpose through a runtime-profile class binding" in {
+      Given("an AI runner configured with a Gemini profile and application-purpose mapping")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.purposes.linear-feature.worker.anchor-plan.model-profile" -> ConfigurationValue.StringValue("linear-worker"),
-          "textus.ai.model-profiles.linear-worker.provider" -> ConfigurationValue.StringValue("google"),
-          "textus.ai.model-profiles.linear-worker.model" -> ConfigurationValue.StringValue("gemini-worker"),
-          "textus.ai.model-profiles.linear-worker.role" -> ConfigurationValue.StringValue("worker"),
-          "textus.ai.model-profiles.linear-worker.quality" -> ConfigurationValue.StringValue("standard"),
-          "textus.ai.model-profiles.linear-worker.cost" -> ConfigurationValue.StringValue("low"),
-          "textus.ai.model-profiles.linear-worker.latency" -> ConfigurationValue.StringValue("low")
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.application-purposes.linear-feature.worker.anchor-plan.purpose" -> ConfigurationValue.StringValue("structured-extraction"),
+          "textus.ai.execution-classes.standard-work.model" -> ConfigurationValue.StringValue("gemini-worker")
         )),
         ConfigurationTrace.empty
       )
@@ -302,20 +298,19 @@ final class TextusAiRunnerSpec
         )
       )
 
-      Then("the configured profile chooses the provider and model for that purpose")
+      Then("the runtime profile chooses the provider and model for that purpose")
       generated.toOption.get.text shouldBe "purpose:linear-feature.worker.anchor-plan;model:gemini-worker"
       generated.toOption.get.model shouldBe Some("google")
     }
 
-    "resolve purpose-specific mode and engine without overriding a request" in {
-      Given("an AI runner with a locally selected default and a remote purpose profile")
+    "reject a caller attempt to override an application-purpose runtime binding" in {
+      Given("an AI runner with a mapped application purpose and operator class binding")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.purposes.sanpomap-scenario-generation.provider" -> ConfigurationValue.StringValue("gemma"),
-          "textus.ai.purposes.sanpomap-scenario-generation.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.purposes.sanpomap-scenario-generation.engine" -> ConfigurationValue.StringValue("http"),
-          "textus.ai.purposes.sanpomap-scenario-generation.model" -> ConfigurationValue.StringValue("operator-profile-model")
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.application-purposes.sanpomap-scenario-generation.purpose" -> ConfigurationValue.StringValue("structured-extraction"),
+          "textus.ai.execution-classes.standard-work.model" -> ConfigurationValue.StringValue("operator-profile-model")
         )),
         ConfigurationTrace.empty
       )
@@ -336,7 +331,7 @@ final class TextusAiRunnerSpec
         )
       )
 
-      And("another request explicitly selects local Gemma")
+      And("another request attempts to select local Gemma")
       val overridden = runner.generate(
         AiGenerateRequest(
           prompt = "inspect-ai-selection",
@@ -349,21 +344,21 @@ final class TextusAiRunnerSpec
         )
       )
 
-      Then("the profile controls the first request and explicit request fields retain precedence")
-      profiled.toOption.get.model shouldBe Some("remote")
+      Then("the runtime profile controls the first request and rejects caller selection")
+      profiled.toOption.get.model shouldBe Some("google")
       profiled.toOption.get.text shouldBe "purpose:sanpomap-scenario-generation;model:operator-profile-model"
-      overridden.toOption.get.model shouldBe Some("local")
-      overridden.toOption.get.text shouldBe "purpose:sanpomap-scenario-generation;model:operator-request-model"
+      overridden.isFaillure shouldBe true
+      overridden.toString should include ("callers may select only an application purpose")
     }
 
-    "report an unavailable purpose provider without silently using the default provider" in {
-      Given("an AI runner whose purpose profile selects no installed provider")
+    "reject operator attempts to replace the selected runtime provider" in {
+      Given("a configured application purpose that attempts to choose a provider")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.purposes.sanpomap-location-investigation.provider" -> ConfigurationValue.StringValue("unavailable-provider"),
-          "textus.ai.purposes.sanpomap-location-investigation.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.purposes.sanpomap-location-investigation.engine" -> ConfigurationValue.StringValue("http")
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.application-purposes.sanpomap-location-investigation.purpose" -> ConfigurationValue.StringValue("software-analysis"),
+          "textus.ai.application-purposes.sanpomap-location-investigation.provider" -> ConfigurationValue.StringValue("unavailable-provider")
         )),
         ConfigurationTrace.empty
       )
@@ -376,7 +371,7 @@ final class TextusAiRunnerSpec
         SpiSelection()
       ).toOption.get
 
-      When("a request selects the unavailable profile")
+      When("a request selects the invalid application purpose")
       val result = runner.generate(
         AiGenerateRequest(
           prompt = "inspect-ai-selection",
@@ -384,26 +379,31 @@ final class TextusAiRunnerSpec
         )
       )
 
-      Then("the request fails instead of falling back to the local default provider")
+      Then("the request fails instead of accepting an application-owned provider")
       result shouldBe a[Consequence.Failure[_]]
       result match
         case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("unavailable-provider")
-        case _ => fail("an unavailable purpose provider must fail explicitly")
+          conclusion.display should include ("application purpose may not configure this key")
+        case _ => fail("application purposes must not choose a provider")
     }
 
-    "reject an unresolved required purpose before any AI operation reaches a provider" in {
-      Given("an AI runner with no profile for a required purpose")
+    "reject an unknown required application purpose before any AI operation reaches a provider" in {
+      Given("an AI runner with a selected runtime profile but no application mapping")
       given ExecutionContext = ExecutionContext.create()
-      val prompt = "required-purpose-profile-unconfigured"
+      val prompt = "required-application-purpose-unconfigured"
       _GenerateServiceState.reset(prompt)
-      val runner = new TextusAiRunnerProvider(_component())
-        .provide(
-          SpiContract("ai-runner", classOf[AiRunner]),
-          SpiSelection(mode = Some("remote"), engine = Some("http"))
-        )
-        .toOption
-        .get
+      val configuration = ResolvedConfiguration(
+        Configuration(Map("textus.ai.profile" -> ConfigurationValue.StringValue("gemini"))),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(mode = Some("remote"), engine = Some("http")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
       val requirement = AiRunnerRequirement(
         purpose = Some("artscene-exhibition-web-research"),
         purposeRequired = true
@@ -412,587 +412,30 @@ final class TextusAiRunnerSpec
       When("generate, record generation, and chat request that purpose")
       val generated = runner.generate(AiGenerateRequest(prompt, requirement = requirement))
       val recorded = runner.generateRecord(AiRecordRequest(prompt, _artscene_record_schema, requirement = requirement))
-      val chatted = runner.chat(
-        AiChatRequest(Vector(AiMessage("user", prompt)), requirement = requirement)
-      )
-      val missing = runner.generate(
-        AiGenerateRequest(prompt, requirement = AiRunnerRequirement(purposeRequired = true))
-      )
-      val blank = runner.chat(
-        AiChatRequest(
-          Vector(AiMessage("user", prompt)),
-          requirement = AiRunnerRequirement(purpose = Some(" "), purposeRequired = true)
-        )
-      )
+      val chatted = runner.chat(AiChatRequest(Vector(AiMessage("user", prompt)), requirement = requirement))
 
-      Then("each invalid purpose fails structurally without invoking the generate provider")
+      Then("each unknown application purpose fails structurally without invoking the provider")
       Vector(generated, recorded, chatted).foreach {
         case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("AI purpose profile not configured")
-        case _ =>
-          fail("a required purpose without a profile must fail before execution")
-      }
-      Vector(missing, blank).foreach {
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("AI purpose is required")
-        case _ =>
-          fail("a missing or blank required purpose must fail before execution")
+          conclusion.display should include ("AI purpose is not configured")
+        case _ => fail("an unknown application purpose must fail before execution")
       }
       _GenerateServiceState.count(prompt) shouldBe 0
     }
 
-    "reject a required purpose profile that does not select a provider" in {
-      Given("an AI runner with a descriptive but providerless purpose profile")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "required-purpose-profile-providerless"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.role" ->
-            ConfigurationValue.StringValue("extractor")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(mode = Some("remote"), engine = Some("http")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("generation requires that purpose")
-      val result = runner.generate(
-        AiGenerateRequest(
-          prompt,
-          requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-extraction-from-source"),
-            purposeRequired = true
-          )
-        )
-      )
-
-      Then("the default provider is not used")
-      result shouldBe a[Consequence.Failure[_]]
-      result match
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("AI purpose profile must select a provider")
-        case _ =>
-          fail("a providerless required purpose profile must fail before execution")
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "resolve a configured required purpose through its selected provider" in {
-      Given("an AI runner with an ArtScene purpose profile that selects Google")
+    "apply an application-purpose policy to a runtime profile without caller selection" in {
+      Given("a Gemini profile, a bounded standard class, and a mapped record purpose")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
-            ConfigurationValue.StringValue("google")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("generation requires the configured purpose")
-      val result = runner.generate(
-        AiGenerateRequest(
-          "required-purpose-profile-configured",
-          requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-web-research"),
-            purposeRequired = true
-          )
-        )
-      )
-
-      Then("the configured provider executes instead of the component default")
-      result.toOption.get.text shouldBe "generated:google:required-purpose-profile-configured"
-      result.toOption.get.model shouldBe Some("google")
-    }
-
-    "resolve every ArtScene purpose through its configured provider-neutral profile" in {
-      Given("the three ArtScene purposes are configured without provider details in requests")
-      given ExecutionContext = ExecutionContext.create()
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
-            ConfigurationValue.StringValue("gemma"),
-          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
-            ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-web-research.tools" ->
-            ConfigurationValue.StringValue("url_context,web_search"),
-          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
-            ConfigurationValue.StringValue("openai")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-      def _required_(purpose: String): AiRunnerRequirement =
-        AiRunnerRequirement(purpose = Some(purpose), purposeRequired = true)
-
-      When("each purpose is requested through the provider-neutral AI runner contract")
-      val extraction = runner.generateRecord(
-        AiRecordRequest(
-          "strict-record",
-          _artscene_record_schema,
-          requirement = _required_("artscene-exhibition-extraction-from-source")
-        )
-      ).toOption.get
-      val web = runner.generate(
-        AiGenerateRequest(
-          "inspect-ai-tools",
-          requirement = _required_("artscene-exhibition-web-research")
-        )
-      ).toOption.get
-      val managed = runner.generate(
-        AiGenerateRequest(
-          "managed-research-purpose",
-          requirement = _required_("artscene-exhibition-managed-research")
-        )
-      ).toOption.get
-
-      Then("the profile selects the expected provider and logical tools without request provider fields")
-      extraction.record.getAny("exhibitions") should not be empty
-      extraction.metadata(AiExecutionFacts.PROVIDER) shouldBe "gemma"
-      extraction.metadata(AiExecutionFacts.PURPOSE) shouldBe "artscene-exhibition-extraction-from-source"
-      web.text shouldBe "tools:url_context,web_search"
-      web.metadata(AiExecutionFacts.PROVIDER) shouldBe "google"
-      web.metadata(AiExecutionFacts.PURPOSE) shouldBe "artscene-exhibition-web-research"
-      web.metadata(AiExecutionFacts.TOOLS) shouldBe "url_context,web_search"
-      managed.metadata(AiExecutionFacts.PROVIDER) shouldBe "openai"
-      managed.metadata(AiExecutionFacts.PURPOSE) shouldBe "artscene-exhibition-managed-research"
-    }
-
-    "apply bounded execution defaults from a purpose profile while preserving request overrides" in {
-      Given("an AI runner with output-token and timeout defaults for a purpose")
-      given ExecutionContext = ExecutionContext.create()
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
-            ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-web-research.max-output-tokens" ->
-            ConfigurationValue.StringValue("240"),
-          "textus.ai.purposes.artscene-exhibition-web-research.timeout-seconds" ->
-            ConfigurationValue.StringValue("90")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-      val requirement = AiRunnerRequirement(purpose = Some("artscene-exhibition-web-research"))
-
-      When("a request uses the profile and another request supplies direct limits")
-      val profiled = runner.generate(
-        AiGenerateRequest("inspect-profile-policy", requirement = requirement)
-      )
-      val overridden = runner.generate(
-        AiGenerateRequest(
-          "inspect-profile-policy",
-          maxTokens = Some(12),
-          requirement = requirement,
-          properties = Vector(Property("ai.timeout-seconds", "17", None))
-        )
-      )
-
-      Then("the profile fills missing limits but never replaces a request limit")
-      profiled.toOption.get.text shouldBe "max:240;timeout:90"
-      overridden.toOption.get.text shouldBe "max:12;timeout:17"
-    }
-
-    "apply a purpose record retry default before record generation starts" in {
-      Given("a purpose profile with two record retries")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "empty-twice-then-strict-record"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
-            ConfigurationValue.StringValue("gemma"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.record-retry-limit" ->
-            ConfigurationValue.StringValue("2")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(mode = Some("remote"), engine = Some("http")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("structured generation initially receives two blank responses")
-      val result = runner.generateRecord(
-        AiRecordRequest(
-          prompt,
-          _artscene_record_schema,
-          requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-extraction-from-source")
-          )
-        )
-      )
-
-      Then("the profile retry policy permits the third provider attempt")
-      result.toOption.get.record.getAny("exhibitions") should not be empty
-      _GenerateServiceState.count(prompt) shouldBe 3
-    }
-
-    "enforce a purpose concurrency limit through the provider component scope" in {
-      Given("a required purpose with one configured runtime-owned concurrency permit")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "purpose-concurrency-limit"
-      _GenerateServiceState.reset(prompt)
-      val key = ConcurrencyScopeId.parseC("artscene-exhibition-web-research").toOption.get
-      val admission = ScopedConcurrencyAdmission.createC(Vector(ConcurrencyGrant(key, 1))).toOption.get
-      val component = _component()
-      component.withScopeContext(ScopeContext(
-        kind = ScopeKind.Component,
-        name = "textus-ai-concurrency-spec",
-        parent = None,
-        observabilityContext = summon[ExecutionContext].observability,
-        scopedConcurrencyAdmissionOption = Some(admission)
-      ))
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
-            ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-web-research.max-concurrent" ->
-            ConfigurationValue.StringValue("1")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        component,
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-      val requirement = AiRunnerRequirement(
-        purpose = Some("artscene-exhibition-web-research"),
-        purposeRequired = true
-      )
-
-      When("another operation already holds the purpose permit")
-      val lease = admission.acquireC(key).toOption.get
-      val saturated = runner.generate(AiGenerateRequest(prompt, requirement = requirement))
-      lease.release()
-      val admitted = runner.generate(AiGenerateRequest(prompt, requirement = requirement))
-
-      Then("the saturated call fails without provider execution and release restores the same purpose")
-      saturated shouldBe a[Consequence.Failure[_]]
-      saturated match {
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("Concurrency admission is saturated")
-        case _ =>
-          fail("a saturated purpose must fail before provider execution")
-      }
-      _GenerateServiceState.count(prompt) shouldBe 1
-      admitted.toOption.get.metadata(AiExecutionFacts.POLICY_MAX_CONCURRENT) shouldBe "1"
-      admitted.toOption.get.metadata(AiExecutionFacts.LIMITATION_CODES) should not include "concurrency_not_enforced"
-    }
-
-    "reject malformed purpose policy values before invoking a provider" in {
-      Given("a required purpose profile with an invalid output-token limit")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "invalid-purpose-policy"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
-            ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-managed-research.max-output-tokens" ->
-            ConfigurationValue.StringValue("zero")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(mode = Some("remote"), engine = Some("http")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("generation requires the malformed purpose profile")
-      val result = runner.generate(
-        AiGenerateRequest(
-          prompt,
-          requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-managed-research"),
-            purposeRequired = true
-          )
-        )
-      )
-
-      Then("the policy failure is structured and no provider call occurs")
-      result shouldBe a[Consequence.Failure[_]]
-      result match
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("Invalid AI purpose max-output-tokens")
-        case _ =>
-          fail("a malformed purpose policy must fail before execution")
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "admit a bounded execution-class request and publish its estimated input usage" in {
-      Given("a purpose resolved through an execution class with an input budget")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "budget"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.execution-classes.simple-work.model-profile" -> ConfigurationValue.StringValue("gemma-simple"),
-          "textus.ai.execution-classes.simple-work.max-input-tokens" -> ConfigurationValue.StringValue("16"),
-          "textus.ai.model-profiles.gemma-simple.provider" -> ConfigurationValue.StringValue("gemma"),
-          "textus.ai.model-profiles.gemma-simple.mode" -> ConfigurationValue.StringValue("local"),
-          "textus.ai.model-profiles.gemma-simple.engine" -> ConfigurationValue.StringValue("ollama"),
-          "textus.ai.model-profiles.gemma-simple.model" -> ConfigurationValue.StringValue("gemma-test"),
-          "textus.ai.purposes.budgeted-work.execution-class" -> ConfigurationValue.StringValue("simple-work")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("a bounded prompt is generated through that purpose")
-      val result = runner.generate(AiGenerateRequest(
-        prompt,
-        requirement = AiRunnerRequirement(purpose = Some("budgeted-work"), purposeRequired = true)
-      ))
-
-      Then("the provider executes once and the admission estimate is safely attributable")
-      result.toOption.get.metadata(AiExecutionFacts.POLICY_MAX_INPUT_TOKENS) shouldBe "16"
-      result.toOption.get.metadata(AiExecutionFacts.POLICY_INPUT_BUDGET_BASIS) shouldBe
-        AiInputTokenEstimator.basis
-      result.toOption.get.metadata(AiExecutionFacts.INPUT_TOKENS) shouldBe "6"
-      result.toOption.get.metadata(AiExecutionFacts.INPUT_TOKENS_SOURCE) shouldBe "estimated"
-      result.toOption.get.metadata(AiExecutionFacts.INPUT_PAYLOAD_BYTES) shouldBe "6"
-      result.toOption.get.metadata(AiExecutionFacts.LIMITATION_CODES) should include ("input_token_estimated")
-      _GenerateServiceState.count(prompt) shouldBe 1
-    }
-
-    "reject input budgets before generate record or chat provider execution" in {
-      Given("an execution class with an input limit smaller than every request")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "input-too-long"
-      _GenerateServiceState.reset(prompt)
-      _ChatServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.execution-classes.simple-work.model-profile" -> ConfigurationValue.StringValue("gemma-simple"),
-          "textus.ai.execution-classes.simple-work.max-input-tokens" -> ConfigurationValue.StringValue("1"),
-          "textus.ai.model-profiles.gemma-simple.provider" -> ConfigurationValue.StringValue("gemma"),
-          "textus.ai.model-profiles.gemma-simple.mode" -> ConfigurationValue.StringValue("local"),
-          "textus.ai.model-profiles.gemma-simple.engine" -> ConfigurationValue.StringValue("ollama"),
-          "textus.ai.model-profiles.gemma-simple.model" -> ConfigurationValue.StringValue("gemma-test"),
-          "textus.ai.purposes.budgeted-work.execution-class" -> ConfigurationValue.StringValue("simple-work")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-      val requirement = AiRunnerRequirement(purpose = Some("budgeted-work"), purposeRequired = true)
-
-      When("generate record and chat exceed their effective input budget")
-      val results = Vector(
-        runner.generate(AiGenerateRequest(prompt, requirement = requirement)),
-        runner.generateRecord(AiRecordRequest(prompt, _artscene_record_schema, requirement = requirement)),
-        runner.chat(AiChatRequest(Vector(AiMessage("user", prompt)), requirement = requirement))
-      )
-
-      Then("all operations fail structurally before their provider bindings can run")
-      results.foreach {
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("AI input budget exceeded: limit=1")
-        case _ =>
-          fail("an over-budget request must fail before provider execution")
-      }
-      _GenerateServiceState.count(prompt) shouldBe 0
-      _ChatServiceState.count(prompt) shouldBe 0
-    }
-
-    "reject malformed execution-class input policy before invoking a provider" in {
-      Given("an execution class with an invalid input-token limit")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "invalid-input-policy"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.execution-classes.simple-work.model-profile" -> ConfigurationValue.StringValue("gemma-simple"),
-          "textus.ai.execution-classes.simple-work.max-input-tokens" -> ConfigurationValue.StringValue("zero"),
-          "textus.ai.model-profiles.gemma-simple.provider" -> ConfigurationValue.StringValue("gemma"),
-          "textus.ai.purposes.budgeted-work.execution-class" -> ConfigurationValue.StringValue("simple-work"),
-          "textus.ai.purposes.budgeted-work.max-input-tokens" -> ConfigurationValue.StringValue("1")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("the purpose is resolved for generation")
-      val result = runner.generate(AiGenerateRequest(
-        prompt,
-        requirement = AiRunnerRequirement(purpose = Some("budgeted-work"), purposeRequired = true)
-      ))
-
-      Then("configuration validation fails without a provider call")
-      result shouldBe a[Consequence.Failure[_]]
-      result.toString should include ("Invalid AI execution-class max-input-tokens")
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "account provider-reported usage through an operator rate schedule without exposing cost in the response" in {
-      Given("a cost-bounded execution class and a Google provider that reports usage")
-      given ExecutionContext =
-        ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.execution-classes.standard-work.model-profile" -> ConfigurationValue.StringValue("google-standard"),
-          "textus.ai.execution-classes.standard-work.max-cost-microunits" -> ConfigurationValue.StringValue("100"),
-          "textus.ai.execution-classes.standard-work.rate-schedule" -> ConfigurationValue.StringValue("test-rates"),
-          "textus.ai.model-profiles.google-standard.provider" -> ConfigurationValue.StringValue("google"),
-          "textus.ai.model-profiles.google-standard.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.model-profiles.google-standard.engine" -> ConfigurationValue.StringValue("gemini"),
-          "textus.ai.model-profiles.google-standard.model" -> ConfigurationValue.StringValue("gemini-test"),
-          "textus.ai.purposes.costed-work.execution-class" -> ConfigurationValue.StringValue("standard-work"),
-          "textus.ai.purposes.costed-work.max-output-tokens" -> ConfigurationValue.StringValue("10"),
-          "textus.ai.rate-schedules.test-rates.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1000000"),
-          "textus.ai.rate-schedules.test-rates.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
-          "textus.ai.rate-schedules.test-rates.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("2000000"),
-          "textus.ai.rate-schedules.test-rates.reasoning-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("google"), mode = Some("remote"), engine = Some("gemini")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("the bounded purpose generates a response")
-      val generated = runner.generate(AiGenerateRequest(
-        "execution-facts",
-        requirement = AiRunnerRequirement(purpose = Some("costed-work"), purposeRequired = true)
-      )).toOption.get
-
-      Then("response metadata retains policy identity but CallTree alone contains the operator accounting result")
-      generated.metadata(AiExecutionFacts.POLICY_MAX_COST_MICROUNITS) shouldBe "100"
-      generated.metadata should not contain AiExecutionFacts.RATE_SCHEDULE_ID
-      generated.metadata should not contain AiExecutionFacts.COST_MICROUNITS
-      generated.metadata(AiExecutionFacts.LIMITATION_CODES) should not include "rate_schedule_unavailable"
-      val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
-      val record = ObservabilityEngine.callTreeRecord(calltree)
-      val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
-      val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate")).value
-      node.getString(s"response_metadata.${AiExecutionFacts.RATE_SCHEDULE_ID}") shouldBe Some("test-rates")
-      node.getString(s"response_metadata.${AiExecutionFacts.COST_MICROUNITS}") shouldBe Some("29")
-      node.getString(s"response_metadata.${AiExecutionFacts.COST_BASIS}") shouldBe Some(AiCostAccounting.measuredBasis)
-      node.getString("prompt") shouldBe empty
-    }
-
-    "reject a cost budget before provider execution and reject missing cost bounds structurally" in {
-      Given("two execution-class cost policies with an over-budget or incomplete accounting prerequisite")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "cost"
-      _GenerateServiceState.reset(prompt)
-      def _runner_(maxcost: String, includeoutputlimit: Boolean): AiRunner = {
-        val output = if (includeoutputlimit)
-          Map("textus.ai.purposes.costed-work.max-output-tokens" -> ConfigurationValue.StringValue("10"))
-        else Map.empty[String, ConfigurationValue]
-        val values = Map(
-          "textus.ai.execution-classes.standard-work.model-profile" -> ConfigurationValue.StringValue("google-standard"),
-          "textus.ai.execution-classes.standard-work.max-cost-microunits" -> ConfigurationValue.StringValue(maxcost),
-          "textus.ai.execution-classes.standard-work.rate-schedule" -> ConfigurationValue.StringValue("test-rates"),
-          "textus.ai.model-profiles.google-standard.provider" -> ConfigurationValue.StringValue("google"),
-          "textus.ai.model-profiles.google-standard.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.model-profiles.google-standard.engine" -> ConfigurationValue.StringValue("gemini"),
-          "textus.ai.purposes.costed-work.execution-class" -> ConfigurationValue.StringValue("standard-work"),
-          "textus.ai.rate-schedules.test-rates.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1000000"),
-          "textus.ai.rate-schedules.test-rates.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
-          "textus.ai.rate-schedules.test-rates.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("2000000"),
-          "textus.ai.rate-schedules.test-rates.reasoning-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0")
-        ) ++ output
-        new TextusAiRunnerProvider(
-          _component(),
-          SpiSelection(provider = Some("google"), mode = Some("remote"), engine = Some("gemini")),
-          AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(Configuration(values), ConfigurationTrace.empty)))
-        ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.get
-      }
-      val requirement = AiRunnerRequirement(purpose = Some("costed-work"), purposeRequired = true)
-
-      When("one request exceeds its configured upper bound and another has no output bound")
-      val overbudget = _runner_("20", true).generate(AiGenerateRequest(prompt, requirement = requirement))
-      val missingbound = _runner_("100", false).generate(AiGenerateRequest(prompt, requirement = requirement))
-
-      Then("both failures occur before the provider can execute or select a fallback")
-      overbudget.toString should include ("AI cost budget exceeded: limit=20 estimated=24")
-      missingbound.toString should include ("AI cost budget requires max-output-tokens")
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "retain a configured cost upper bound as an explicit estimate when provider usage is unavailable" in {
-      Given("a cost-bounded local execution class whose provider reports no usage")
-      given ExecutionContext =
-        ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.execution-classes.simple-work.model-profile" -> ConfigurationValue.StringValue("gemma-simple"),
-          "textus.ai.execution-classes.simple-work.max-cost-microunits" -> ConfigurationValue.StringValue("20"),
-          "textus.ai.execution-classes.simple-work.rate-schedule" -> ConfigurationValue.StringValue("test-rates"),
-          "textus.ai.model-profiles.gemma-simple.provider" -> ConfigurationValue.StringValue("gemma"),
-          "textus.ai.model-profiles.gemma-simple.mode" -> ConfigurationValue.StringValue("local"),
-          "textus.ai.model-profiles.gemma-simple.engine" -> ConfigurationValue.StringValue("ollama"),
-          "textus.ai.purposes.costed-local.execution-class" -> ConfigurationValue.StringValue("simple-work"),
-          "textus.ai.rate-schedules.test-rates.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1000000"),
-          "textus.ai.rate-schedules.test-rates.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
-          "textus.ai.rate-schedules.test-rates.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
-          "textus.ai.rate-schedules.test-rates.reasoning-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0")
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.execution-classes.standard-work.max-input-tokens" -> ConfigurationValue.StringValue("128"),
+          "textus.ai.execution-classes.standard-work.max-output-tokens" -> ConfigurationValue.StringValue("240"),
+          "textus.ai.execution-classes.standard-work.timeout-seconds" -> ConfigurationValue.StringValue("90"),
+          "textus.ai.execution-classes.standard-work.record-retry-limit" -> ConfigurationValue.StringValue("2"),
+          "textus.ai.application-purposes.artscene-exhibition-extraction.purpose" -> ConfigurationValue.StringValue("structured-extraction"),
+          "textus.ai.application-purposes.artscene-exhibition-extraction.output-schema-id" -> ConfigurationValue.StringValue("artscene.exhibitions.v1"),
+          "textus.ai.application-purposes.artscene-exhibition-extraction.prompt-contract-id" -> ConfigurationValue.StringValue("artscene.exhibition.extract.v1")
         )),
         ConfigurationTrace.empty
       )
@@ -1001,175 +444,8 @@ final class TextusAiRunnerSpec
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
         AiProfileConfig.fromConfiguration(Some(configuration))
       ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.get
-
-      When("the local provider completes without normalized reported usage")
-      val generated = runner.generate(AiGenerateRequest(
-        "costed",
-        requirement = AiRunnerRequirement(purpose = Some("costed-local"), purposeRequired = true)
-      )).toOption.get
-
-      Then("the response records the limitation and CallTree records the schedule-relative upper bound")
-      generated.metadata(AiExecutionFacts.LIMITATION_CODES) should include ("cost_estimated")
-      val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
-      val record = ObservabilityEngine.callTreeRecord(calltree)
-      val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
-      val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate")).value
-      node.getString(s"response_metadata.${AiExecutionFacts.COST_MICROUNITS}") shouldBe Some("6")
-      node.getString(s"response_metadata.${AiExecutionFacts.COST_BASIS}") shouldBe Some(AiCostAccounting.admissionBasis)
-    }
-
-    "reject an incomplete operator rate schedule before provider execution" in {
-      Given("a cost-bounded execution class with one missing schedule rate")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "incomplete-rate-schedule"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.execution-classes.standard-work.model-profile" -> ConfigurationValue.StringValue("google-standard"),
-          "textus.ai.execution-classes.standard-work.max-cost-microunits" -> ConfigurationValue.StringValue("100"),
-          "textus.ai.execution-classes.standard-work.rate-schedule" -> ConfigurationValue.StringValue("incomplete-rates"),
-          "textus.ai.model-profiles.google-standard.provider" -> ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.incomplete-costed.execution-class" -> ConfigurationValue.StringValue("standard-work"),
-          "textus.ai.rate-schedules.incomplete-rates.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1"),
-          "textus.ai.rate-schedules.incomplete-rates.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
-          "textus.ai.rate-schedules.incomplete-rates.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("google"), mode = Some("remote"), engine = Some("gemini")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.get
-
-      When("the purpose resolves its operator schedule")
-      val result = runner.generate(AiGenerateRequest(
-        prompt,
-        requirement = AiRunnerRequirement(purpose = Some("incomplete-costed"), purposeRequired = true)
-      ))
-
-      Then("configuration fails before the selected Google provider runs")
-      result.toString should include ("Invalid AI rate schedule reasoning-microunits-per-million-tokens")
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "reject malformed purpose concurrency before invoking a provider" in {
-      Given("a required purpose profile with an invalid concurrency limit")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "invalid-purpose-concurrency"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
-            ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-managed-research.max-concurrent" ->
-            ConfigurationValue.StringValue("zero")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(mode = Some("remote"), engine = Some("http")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("generation requires the malformed bounded purpose")
-      val result = runner.generate(
-        AiGenerateRequest(
-          prompt,
-          requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-managed-research"),
-            purposeRequired = true
-          )
-        )
-      )
-
-      Then("configuration fails before the runtime attempts provider admission")
-      result shouldBe a[Consequence.Failure[_]]
-      result match {
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("Invalid AI purpose max-concurrent")
-        case _ =>
-          fail("a malformed concurrency limit must fail before execution")
-      }
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "reject a purpose profile that references an unknown model profile" in {
-      Given("a required purpose profile with a missing model profile")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "missing-model-profile"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-managed-research.model-profile" ->
-            ConfigurationValue.StringValue("not-configured")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(mode = Some("remote"), engine = Some("http")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("generation requires that purpose")
-      val result = runner.generate(
-        AiGenerateRequest(
-          prompt,
-          requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-managed-research"),
-            purposeRequired = true
-          )
-        )
-      )
-
-      Then("the missing model profile is a configuration failure without a provider call")
-      result shouldBe a[Consequence.Failure[_]]
-      result match
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("AI model profile not configured")
-        case _ =>
-          fail("an unknown model profile must fail before execution")
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "require profile-owned prompt and output-schema identities without owning their content" in {
-      Given("a record purpose that names a caller-owned prompt contract and output schema")
-      given ExecutionContext = ExecutionContext.create()
-      val rejectedprompt = "structured-policy-plain"
-      val rejectedschema = "structured-policy-record"
-      val mismatchschema = "structured-policy-mismatch"
-      _GenerateServiceState.reset(rejectedprompt)
-      _GenerateServiceState.reset(rejectedschema)
-      _GenerateServiceState.reset(mismatchschema)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
-            ConfigurationValue.StringValue("gemma"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.output-schema-id" ->
-            ConfigurationValue.StringValue("artscene.exhibitions.v1"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.prompt-contract-id" ->
-            ConfigurationValue.StringValue("artscene.exhibition.extract.v1")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
       val requirement = AiRunnerRequirement(
-        purpose = Some("artscene-exhibition-extraction-from-source"),
+        purpose = Some("artscene-exhibition-extraction"),
         purposeRequired = true
       )
       val identities = Vector(
@@ -1177,61 +453,50 @@ final class TextusAiRunnerSpec
         Property("ai.prompt-contract-id", "artscene.exhibition.extract.v1", None)
       )
 
-      When("the caller requests a matching record and incompatible operations")
-      val accepted = runner.generateRecord(
+      When("a caller requests the mapped structured record without concrete selection")
+      val result = runner.generateRecord(
         AiRecordRequest("strict-record", _artscene_record_schema, requirement = requirement, properties = identities)
       )
-      val plain = runner.generate(
-        AiGenerateRequest(rejectedprompt, requirement = requirement, properties = identities)
-      )
-      val missingschema = runner.generateRecord(
-        AiRecordRequest(
-          rejectedschema,
-          _artscene_record_schema,
-          requirement = requirement,
-          properties = identities.filterNot(_.name == "ai.output-schema-id")
-        )
-      )
-      val mismatchedschema = runner.generateRecord(
-        AiRecordRequest(
-          mismatchschema,
-          _artscene_record_schema,
-          requirement = requirement,
-          properties = identities.updated(0, Property("ai.output-schema-id", "other.schema.v1", None))
-        )
-      )
-      val missingprompt = runner.chat(
-        AiChatRequest(
-          Vector(AiMessage("user", "missing prompt contract")),
-          requirement = requirement,
-          properties = identities.filterNot(_.name == "ai.prompt-contract-id")
-        )
-      )
 
-      Then("only a matching generateRecord call reaches the provider")
-      accepted.toOption.get.record.getAny("exhibitions") should not be empty
-      Vector(plain, missingschema, mismatchedschema, missingprompt).foreach {
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("AI purpose")
-        case _ =>
-          fail("a purpose policy mismatch must fail before provider execution")
-      }
-      _GenerateServiceState.count(rejectedprompt) shouldBe 0
-      _GenerateServiceState.count(rejectedschema) shouldBe 0
-      _GenerateServiceState.count(mismatchschema) shouldBe 0
+      Then("the runtime profile selects Gemini and publishes the merged policy")
+      result.toOption.get.metadata(AiExecutionFacts.PROVIDER) shouldBe "google"
+      result.toOption.get.metadata(AiExecutionFacts.POLICY_RUNTIME_PROFILE) shouldBe "gemini"
+      result.toOption.get.metadata(AiExecutionFacts.POLICY_EFFECTIVE_EXECUTION_CLASS) shouldBe "standard-work"
+      result.toOption.get.metadata(AiExecutionFacts.POLICY_MAX_INPUT_TOKENS) shouldBe "128"
+      result.toOption.get.metadata(AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS) shouldBe "240"
+      result.toOption.get.metadata(AiExecutionFacts.POLICY_TIMEOUT_SECONDS) shouldBe "90"
+      result.toOption.get.metadata(AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT) shouldBe "2"
     }
 
-    "reject malformed structured-output and prompt-policy identities before provider execution" in {
-      Given("a required purpose profile with an invalid output-schema identity")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "invalid-structured-policy"
-      _GenerateServiceState.reset(prompt)
+    "reject an application purpose that broadens its runtime-class policy" in {
+      Given("a bounded standard runtime execution and a broader application purpose")
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
-            ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-managed-research.output-schema-id" ->
-            ConfigurationValue.StringValue("invalid schema id")
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.execution-classes.deep-consideration.max-output-tokens" -> ConfigurationValue.StringValue("240"),
+          "textus.ai.application-purposes.invalid-web-analysis.purpose" -> ConfigurationValue.StringValue("web-analysis"),
+          "textus.ai.application-purposes.invalid-web-analysis.max-output-tokens" -> ConfigurationValue.StringValue("241")
+        )),
+        ConfigurationTrace.empty
+      )
+
+      When("the application purpose is resolved")
+      val result = AiProfileConfig.fromConfiguration(Some(configuration)).resolveRequired(
+        AiRunnerRequirement(purpose = Some("invalid-web-analysis"), purposeRequired = true)
+      )
+
+      Then("the policy is rejected before provider selection")
+      result.isFaillure shouldBe true
+      result.toString should include ("may not broaden inherited execution policy")
+    }
+
+    "apply runtime-owned tool defaults through a standard purpose" in {
+      Given("a Gemini deep-consideration override that enables logical Web tools")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.execution-classes.deep-consideration.tools" -> ConfigurationValue.StringValue("url_context,web_search")
         )),
         ConfigurationTrace.empty
       )
@@ -1239,380 +504,36 @@ final class TextusAiRunnerSpec
         _component(),
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
         AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
+      ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.get
 
-      When("the caller requests the malformed required purpose")
-      val result = runner.generateRecord(
-        AiRecordRequest(
-          prompt,
-          _artscene_record_schema,
-          requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-managed-research"),
-            purposeRequired = true
-          )
-        )
-      )
-
-      Then("configuration validation fails before a provider operation")
-      result shouldBe a[Consequence.Failure[_]]
-      result match {
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("Invalid AI purpose output-schema-id")
-        case _ =>
-          fail("an invalid output schema identity must fail before execution")
-      }
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "reject profile-owned prompt content before it can reach a provider" in {
-      Given("a required purpose profile that embeds a system instruction")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "unsupported-profile-prompt"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
-            ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-managed-research.system-instruction" ->
-            ConfigurationValue.StringValue("Do not store this prompt content.")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("the caller requests that purpose")
-      val result = runner.generate(
-        AiGenerateRequest(
-          prompt,
-          requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-managed-research"),
-            purposeRequired = true
-          )
-        )
-      )
-
-      Then("the raw prompt configuration fails without exposing its content")
-      result shouldBe a[Consequence.Failure[_]]
-      result match {
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("system-instruction is not supported")
-          conclusion.display should not include "Do not store this prompt content."
-        case _ =>
-          fail("profile-owned prompt content must fail before execution")
-      }
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "prefer direct request model over a configured purpose profile" in {
-      Given("an AI runner configured with a purpose model profile")
-      given ExecutionContext = ExecutionContext.create()
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.linear-feature.judge.ambiguity-resolution.model-profile" -> ConfigurationValue.StringValue("linear-judge"),
-          "textus.ai.model-profiles.linear-judge.provider" -> ConfigurationValue.StringValue("google"),
-          "textus.ai.model-profiles.linear-judge.model" -> ConfigurationValue.StringValue("gemini-judge")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("a generate request explicitly specifies a model")
-      val generated = runner.generate(
-        AiGenerateRequest(
-          prompt = "inspect-ai-selection",
-          requirement = AiRunnerRequirement(
-            purpose = Some("linear-feature.judge.ambiguity-resolution"),
-            model = Some("operator-selected-model")
-          )
-        )
-      )
-
-      Then("the profile may choose the provider but does not override the request model")
-      generated.toOption.get.text shouldBe "purpose:linear-feature.judge.ambiguity-resolution;model:operator-selected-model"
-      generated.toOption.get.model shouldBe Some("google")
-    }
-
-    "resolve purpose-specific AI tools and pass them to provider requests" in {
-      Given("an AI runner configured with purpose-level tool defaults")
-      given ExecutionContext = ExecutionContext.create()
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-fetch.provider" -> ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-fetch.tools" -> ConfigurationValue.StringValue("url_context, web_search")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("a generate request specifies only the purpose")
-      val generated = runner.generate(
-        AiGenerateRequest(
-          prompt = "inspect-ai-tools",
-          requirement = AiRunnerRequirement(purpose = Some("artscene-exhibition-fetch"))
-        )
-      )
-
-      Then("the configured tools are visible to the concrete provider request")
-      generated.toOption.get.text shouldBe "tools:url_context,web_search"
-    }
-
-    "prefer direct request tools over configured purpose tools" in {
-      Given("an AI runner configured with purpose-level tool defaults")
-      given ExecutionContext = ExecutionContext.create()
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.tool-defaults.provider" -> ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.tool-defaults.tools" -> ConfigurationValue.StringValue("url_context, web_search")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-
-      When("a generate request explicitly specifies one tool")
-      val generated = runner.generate(
-        AiGenerateRequest(
-          prompt = "inspect-ai-tools",
-          requirement = AiRunnerRequirement(
-            purpose = Some("tool-defaults"),
-            tools = Vector(AiTool.UrlContext)
-          )
-        )
-      )
-
-      Then("the request-level tool set is used")
-      generated.toOption.get.text shouldBe "tools:url_context"
-    }
-
-    "reject unsupported purpose tools before a provider operation executes" in {
-      Given("a required purpose profile that selects Gemma and URL context")
-      given ExecutionContext = ExecutionContext.create()
-      val prompt = "unsupported-purpose-tools"
-      _GenerateServiceState.reset(prompt)
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
-            ConfigurationValue.StringValue("gemma"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.tools" ->
-            ConfigurationValue.StringValue("url_context")
-        )),
-        ConfigurationTrace.empty
-      )
-      val runner = new TextusAiRunnerProvider(
-        _component(),
-        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
-      ).provide(
-        SpiContract("ai-runner", classOf[AiRunner]),
-        SpiSelection()
-      ).toOption.get
-      val requirement = AiRunnerRequirement(
-        purpose = Some("artscene-exhibition-extraction-from-source"),
-        purposeRequired = true
-      )
-
-      When("generate, record, and chat request that purpose")
-      val generated = runner.generate(AiGenerateRequest(prompt, requirement = requirement))
-      val recorded = runner.generateRecord(AiRecordRequest(prompt, _artscene_record_schema, requirement = requirement))
-      val chatted = runner.chat(
-        AiChatRequest(Vector(AiMessage("user", prompt)), requirement = requirement)
-      )
-
-      Then("admission rejects every operation before the generate service executes")
-      Vector(generated, recorded, chatted).foreach {
-        case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("AI tools are not supported by provider 'gemma'")
-        case _ =>
-          fail("unsupported purpose tools must fail before provider execution")
-      }
-      _GenerateServiceState.count(prompt) shouldBe 0
-    }
-
-    "resolve a generic purpose through its logical level without caller provider fields" in {
-      Given("configured consideration, work, and simple levels with generic purposes")
-      val configuration = ResolvedConfiguration(
-        Configuration(Map(
-          "textus.ai.levels.standard-consideration.model-profile" -> ConfigurationValue.StringValue("openai-standard-consideration"),
-          "textus.ai.model-profiles.openai-standard-consideration.provider" -> ConfigurationValue.StringValue("openai"),
-          "textus.ai.model-profiles.openai-standard-consideration.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.model-profiles.openai-standard-consideration.engine" -> ConfigurationValue.StringValue("gpt"),
-          "textus.ai.model-profiles.openai-standard-consideration.model" -> ConfigurationValue.StringValue("gpt-5"),
-          "textus.ai.model-profiles.openai-standard-consideration.reasoning-level" -> ConfigurationValue.StringValue("medium"),
-          "textus.ai.generic-purposes.software-analysis.level" -> ConfigurationValue.StringValue("standard-consideration"),
-          "textus.ai.generic-purposes.software-analysis.max-output-tokens" -> ConfigurationValue.StringValue("480"),
-          "textus.ai.levels.standard-work.model-profile" -> ConfigurationValue.StringValue("openai-standard-work"),
-          "textus.ai.model-profiles.openai-standard-work.provider" -> ConfigurationValue.StringValue("openai"),
-          "textus.ai.model-profiles.openai-standard-work.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.model-profiles.openai-standard-work.engine" -> ConfigurationValue.StringValue("gpt"),
-          "textus.ai.model-profiles.openai-standard-work.model" -> ConfigurationValue.StringValue("gpt-5"),
-          "textus.ai.levels.simple-work.model-profile" -> ConfigurationValue.StringValue("openai-simple-work"),
-          "textus.ai.model-profiles.openai-simple-work.provider" -> ConfigurationValue.StringValue("openai"),
-          "textus.ai.model-profiles.openai-simple-work.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.model-profiles.openai-simple-work.engine" -> ConfigurationValue.StringValue("gpt"),
-          "textus.ai.model-profiles.openai-simple-work.model" -> ConfigurationValue.StringValue("gpt-5"),
-          "textus.ai.generic-purposes.command-execution.level" -> ConfigurationValue.StringValue("simple-work")
-        )),
-        ConfigurationTrace.empty
-      )
-      val profiles = AiProfileConfig.fromConfiguration(Some(configuration))
-
-      When("a caller requires the generic purpose or the configured level name")
-      val result = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("software-analysis"),
-        purposeRequired = true
-      ))
-      val implicitresult = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("standard-consideration"),
-        purposeRequired = true
-      ))
-      val modelprofileresult = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("openai-standard-consideration"),
-        purposeRequired = true
-      ))
-      val commandresult = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("command-execution"),
-        purposeRequired = true
+      When("a caller selects web-analysis without a tool override")
+      val result = runner.generate(AiGenerateRequest(
+        "inspect-ai-tools",
+        requirement = AiRunnerRequirement(purpose = Some("web-analysis"), purposeRequired = true)
       ))
 
-      Then("the level selects the approved provider/model/reasoning policy without exposing the model profile")
-      result.toOption.map(_.requirement.provider) shouldBe Some(Some("openai"))
-      result.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
-      result.toOption.flatMap(_.genericPurpose) shouldBe Some("software-analysis")
-      result.toOption.flatMap(_.logicalLevel) shouldBe Some("standard-consideration")
-      result.toOption.flatMap(_.reasoningLevel) shouldBe Some("medium")
-      result.toOption.map(_.policy.maxOutputTokens) shouldBe Some(Some(480))
-      result.toOption.flatMap(_.requestProperties(Vector.empty).find { property =>
-        property.name == "ai.openai.reasoning.effort" && property.value.toString == "medium"
-      }) should not be empty
-      implicitresult.toOption.map(_.requirement.provider) shouldBe Some(Some("openai"))
-      implicitresult.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
-      implicitresult.toOption.flatMap(_.genericPurpose) shouldBe None
-      implicitresult.toOption.flatMap(_.logicalLevel) shouldBe Some("standard-consideration")
-      modelprofileresult.toOption shouldBe None
-      commandresult.toOption.flatMap(_.genericPurpose) shouldBe Some("command-execution")
-      commandresult.toOption.flatMap(_.logicalLevel) shouldBe Some("simple-work")
+      Then("the profile supplies the admitted logical tool set")
+      result.toOption.get.text shouldBe "tools:url_context,web_search"
+      result.toOption.get.metadata(AiExecutionFacts.TOOLS) shouldBe "url_context,web_search"
     }
 
-    "resolve a purpose and execution class through canonical class bindings" in {
-      Given("canonical execution-class bindings and a generic purpose default")
+    "permit an application purpose to narrow but not broaden its standard-purpose policy" in {
+      Given("a bounded Web-analysis execution class and application-purpose mappings")
       val values = Map(
-        "textus.ai.execution-classes.standard-work.model-profile" -> ConfigurationValue.StringValue("openai-standard-work"),
-        "textus.ai.execution-classes.standard-work.max-input-tokens" -> ConfigurationValue.StringValue("96"),
-        "textus.ai.execution-classes.standard-consideration.model-profile" -> ConfigurationValue.StringValue("openai-standard-consideration"),
-        "textus.ai.execution-classes.standard-consideration.max-input-tokens" -> ConfigurationValue.StringValue("128"),
-        "textus.ai.model-profiles.openai-standard-work.provider" -> ConfigurationValue.StringValue("openai"),
-        "textus.ai.model-profiles.openai-standard-work.mode" -> ConfigurationValue.StringValue("remote"),
-        "textus.ai.model-profiles.openai-standard-work.engine" -> ConfigurationValue.StringValue("gpt"),
-        "textus.ai.model-profiles.openai-standard-work.model" -> ConfigurationValue.StringValue("gpt-5"),
-        "textus.ai.model-profiles.openai-standard-consideration.provider" -> ConfigurationValue.StringValue("openai"),
-        "textus.ai.model-profiles.openai-standard-consideration.mode" -> ConfigurationValue.StringValue("remote"),
-        "textus.ai.model-profiles.openai-standard-consideration.engine" -> ConfigurationValue.StringValue("gpt"),
-        "textus.ai.model-profiles.openai-standard-consideration.model" -> ConfigurationValue.StringValue("gpt-5"),
-        "textus.ai.generic-purposes.software-implementation.execution-class" -> ConfigurationValue.StringValue("standard-work"),
-        "textus.ai.generic-purposes.invalid-generic.model-profile" -> ConfigurationValue.StringValue("openai-standard-work")
-      )
-      val profiles = AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(
-        Configuration(values),
-        ConfigurationTrace.empty
-      )))
-
-      When("a caller accepts the purpose default, requests its matching class, or requests another configured class")
-      val defaulted = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("software-implementation"),
-        purposeRequired = true
-      ))
-      val matching = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("software-implementation"),
-        purposeRequired = true,
-        executionClass = Some(AiExecutionClass.StandardWork)
-      ))
-      val classonly = profiles.resolveRequired(AiRunnerRequirement(
-        executionClass = Some(AiExecutionClass.StandardConsideration)
-      ))
-      val incompatible = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("software-implementation"),
-        purposeRequired = true,
-        executionClass = Some(AiExecutionClass.DeepConsideration)
-      ))
-      val unconfigured = profiles.resolveRequired(AiRunnerRequirement(
-        executionClass = Some(AiExecutionClass.SimpleWork)
-      ))
-      val missingclass = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("invalid-generic"),
-        purposeRequired = true
-      ))
-
-      Then("only configured compatible selections reach an approved model profile")
-      defaulted.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardWork)
-      defaulted.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
-      defaulted.toOption.flatMap(_.policy.maxInputTokens) shouldBe Some(96)
-      matching.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardWork)
-      classonly.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardConsideration)
-      classonly.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
-      classonly.toOption.flatMap(_.policy.maxInputTokens) shouldBe Some(128)
-      incompatible.isFaillure shouldBe true
-      incompatible.toString should include ("execution-class is incompatible")
-      unconfigured.isFaillure shouldBe true
-      unconfigured.toString should include ("execution class not configured")
-      missingclass.isFaillure shouldBe true
-      missingclass.toString should include ("generic purpose requires an execution-class")
-    }
-
-    "permit an application purpose to narrow but not broaden its generic base purpose" in {
-      Given("a Web-analysis generic purpose and one narrowed application purpose")
-      val values = Map(
-        "textus.ai.levels.deep-consideration.model-profile" -> ConfigurationValue.StringValue("openai-web-research"),
-        "textus.ai.model-profiles.openai-web-research.provider" -> ConfigurationValue.StringValue("openai"),
-        "textus.ai.model-profiles.openai-web-research.mode" -> ConfigurationValue.StringValue("remote"),
-        "textus.ai.model-profiles.openai-web-research.engine" -> ConfigurationValue.StringValue("gpt"),
-        "textus.ai.model-profiles.openai-web-research.model" -> ConfigurationValue.StringValue("gpt-5"),
-        "textus.ai.generic-purposes.web-analysis.level" -> ConfigurationValue.StringValue("deep-consideration"),
-        "textus.ai.generic-purposes.web-analysis.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
-        "textus.ai.generic-purposes.web-analysis.max-input-tokens" -> ConfigurationValue.StringValue("100"),
-        "textus.ai.generic-purposes.web-analysis.max-output-tokens" -> ConfigurationValue.StringValue("480"),
-        "textus.ai.generic-purposes.web-analysis.timeout-seconds" -> ConfigurationValue.StringValue("90"),
-        "textus.ai.generic-purposes.web-analysis.max-concurrent" -> ConfigurationValue.StringValue("2"),
-        "textus.ai.purposes.artscene-exhibition-web-research.base-purpose" -> ConfigurationValue.StringValue("web-analysis"),
-        "textus.ai.purposes.artscene-exhibition-web-research.tools" -> ConfigurationValue.StringValue("web_search"),
-        "textus.ai.purposes.artscene-exhibition-web-research.max-input-tokens" -> ConfigurationValue.StringValue("50"),
-        "textus.ai.purposes.artscene-exhibition-web-research.max-output-tokens" -> ConfigurationValue.StringValue("240"),
-        "textus.ai.purposes.artscene-exhibition-web-research.timeout-seconds" -> ConfigurationValue.StringValue("45"),
-        "textus.ai.purposes.artscene-exhibition-web-research.max-concurrent" -> ConfigurationValue.StringValue("1"),
-        "textus.ai.purposes.invalid-web-analysis.base-purpose" -> ConfigurationValue.StringValue("web-analysis"),
-        "textus.ai.purposes.invalid-web-analysis.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
-        "textus.ai.purposes.invalid-web-analysis.timeout-seconds" -> ConfigurationValue.StringValue("120"),
-        "textus.ai.purposes.invalid-input-web-analysis.base-purpose" -> ConfigurationValue.StringValue("web-analysis"),
-        "textus.ai.purposes.invalid-input-web-analysis.max-input-tokens" -> ConfigurationValue.StringValue("101")
+        "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+        "textus.ai.execution-classes.deep-consideration.max-input-tokens" -> ConfigurationValue.StringValue("100"),
+        "textus.ai.execution-classes.deep-consideration.max-output-tokens" -> ConfigurationValue.StringValue("480"),
+        "textus.ai.execution-classes.deep-consideration.timeout-seconds" -> ConfigurationValue.StringValue("90"),
+        "textus.ai.execution-classes.deep-consideration.max-concurrent" -> ConfigurationValue.StringValue("2"),
+        "textus.ai.application-purposes.artscene-exhibition-web-research.purpose" -> ConfigurationValue.StringValue("web-analysis"),
+        "textus.ai.application-purposes.artscene-exhibition-web-research.max-input-tokens" -> ConfigurationValue.StringValue("50"),
+        "textus.ai.application-purposes.artscene-exhibition-web-research.max-output-tokens" -> ConfigurationValue.StringValue("240"),
+        "textus.ai.application-purposes.artscene-exhibition-web-research.timeout-seconds" -> ConfigurationValue.StringValue("45"),
+        "textus.ai.application-purposes.artscene-exhibition-web-research.max-concurrent" -> ConfigurationValue.StringValue("1"),
+        "textus.ai.application-purposes.invalid-web-analysis.purpose" -> ConfigurationValue.StringValue("web-analysis"),
+        "textus.ai.application-purposes.invalid-web-analysis.timeout-seconds" -> ConfigurationValue.StringValue("120"),
+        "textus.ai.application-purposes.invalid-input-web-analysis.purpose" -> ConfigurationValue.StringValue("web-analysis"),
+        "textus.ai.application-purposes.invalid-input-web-analysis.max-input-tokens" -> ConfigurationValue.StringValue("101")
       )
       val profiles = AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(
         Configuration(values),
@@ -1633,8 +554,7 @@ final class TextusAiRunnerSpec
         purposeRequired = true
       ))
 
-      Then("only the application policy that stays within the generic bound is admitted")
-      narrowed.toOption.map(_.requirement.tools.map(_.id)) shouldBe Some(Vector("web_search"))
+      Then("only the application policy that stays within the standard bound is admitted")
       narrowed.toOption.map(_.policy.maxInputTokens) shouldBe Some(Some(50))
       narrowed.toOption.map(_.policy.maxOutputTokens) shouldBe Some(Some(240))
       narrowed.toOption.map(_.policy.timeoutSeconds) shouldBe Some(Some(45L))
@@ -2095,24 +1015,25 @@ final class TextusAiRunnerSpec
     }
 
     "publish effective purpose policy facts in response metadata and the CNCF CallTree" in {
-      Given("a record purpose with bounded policy and caller-owned contract identities")
+      Given("a mapped record purpose with bounded policy and caller-owned contract identities")
       given ExecutionContext =
         ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
-            ConfigurationValue.StringValue("gemma"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.max-input-tokens" ->
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.execution-classes.standard-work.max-input-tokens" ->
             ConfigurationValue.StringValue("128"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.max-output-tokens" ->
+          "textus.ai.execution-classes.standard-work.max-output-tokens" ->
             ConfigurationValue.StringValue("240"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.timeout-seconds" ->
+          "textus.ai.execution-classes.standard-work.timeout-seconds" ->
             ConfigurationValue.StringValue("90"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.record-retry-limit" ->
+          "textus.ai.execution-classes.standard-work.record-retry-limit" ->
             ConfigurationValue.StringValue("2"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.output-schema-id" ->
+          "textus.ai.application-purposes.artscene-exhibition-extraction-from-source.purpose" ->
+            ConfigurationValue.StringValue("structured-extraction"),
+          "textus.ai.application-purposes.artscene-exhibition-extraction-from-source.output-schema-id" ->
             ConfigurationValue.StringValue("artscene.exhibitions.v1"),
-          "textus.ai.purposes.artscene-exhibition-extraction-from-source.prompt-contract-id" ->
+          "textus.ai.application-purposes.artscene-exhibition-extraction-from-source.prompt-contract-id" ->
             ConfigurationValue.StringValue("artscene.exhibition.extract.v1")
         )),
         ConfigurationTrace.empty
@@ -2143,7 +1064,7 @@ final class TextusAiRunnerSpec
       generated.metadata(AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS) shouldBe "240"
       generated.metadata(AiExecutionFacts.POLICY_MAX_INPUT_TOKENS) shouldBe "128"
       generated.metadata(AiExecutionFacts.POLICY_INPUT_BUDGET_BASIS) shouldBe AiInputTokenEstimator.basis
-      generated.metadata(AiExecutionFacts.INPUT_TOKENS_SOURCE) shouldBe "estimated"
+      generated.metadata(AiExecutionFacts.INPUT_TOKENS_SOURCE) shouldBe "reported"
       generated.metadata(AiExecutionFacts.POLICY_TIMEOUT_SECONDS) shouldBe "90"
       generated.metadata(AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT) shouldBe "2"
       generated.metadata(AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID) shouldBe "artscene.exhibitions.v1"
@@ -2159,7 +1080,7 @@ final class TextusAiRunnerSpec
       node.getString(AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT) shouldBe Some("2")
       node.getString(AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID) shouldBe Some("artscene.exhibitions.v1")
       node.getString(AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID) shouldBe Some("artscene.exhibition.extract.v1")
-      node.getString(s"response_metadata.${AiExecutionFacts.INPUT_TOKENS_SOURCE}") shouldBe Some("estimated")
+      node.getString(s"response_metadata.${AiExecutionFacts.INPUT_TOKENS_SOURCE}") shouldBe Some("reported")
       node.getString("prompt") shouldBe empty
       node.getString("response") shouldBe empty
     }

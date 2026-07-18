@@ -72,7 +72,10 @@ object CodexRuntimeConfig {
 }
 
 object CodexConfig {
-  def fromConfiguration(configuration: ResolvedConfiguration): Option[CodexRuntimeConfig] =
+  def fromConfiguration(
+    configuration: ResolvedConfiguration,
+    executionprofiles: Map[String, CodexExecutionProfile] = Map.empty
+  ): Option[CodexRuntimeConfig] =
     if (!_enabled(configuration))
       None
     else
@@ -87,7 +90,7 @@ object CodexConfig {
               .flatMap(_.toLongOption)
               .filter(_ > 0L)
               .getOrElse(65536L),
-            executionProfiles = _execution_profiles(configuration)
+            executionProfiles = executionprofiles
           )
         }
 
@@ -121,73 +124,6 @@ object CodexConfig {
       .map(_.normalize.toString)
       .filter(_.nonEmpty)
 
-  private def _execution_profiles(
-    configuration: ResolvedConfiguration
-  ): Map[String, CodexExecutionProfile] =
-    configuration.configuration.values.keys.iterator
-      .flatMap(_model_profile_name)
-      .toVector
-      .distinct
-      .sorted
-      .flatMap { name =>
-        val provider = _model_profile_string(configuration, name, "provider")
-        val model = _model_profile_string(configuration, name, "model")
-        val reasoning = _model_profile_string(configuration, name, "reasoning-level")
-          .orElse(_model_profile_string(configuration, name, "reasoningLevel"))
-          .flatMap(CodexReasoningLevel.parse)
-        val tools = _model_profile_string(configuration, name, "tools")
-          .map(AiTool.parseList)
-          .getOrElse(Vector.empty)
-          .toSet
-        Option.when(_is_codex(provider) && _safe_profile_name(name) && _safe_model(model)) {
-          name -> CodexExecutionProfile(name, model.get, reasoning, tools)
-        }
-      }
-      .toMap
-
-  private def _model_profile_name(key: String): Option[String] = {
-    val prefixes = Vector(
-      "textus.ai.model-profiles.",
-      "textus.ai.modelProfiles.",
-      "textus.ai.model-profile.",
-      "textus.runtime.ai.model-profiles.",
-      "cncf.ai.model-profiles.",
-      "cncf.runtime.ai.model-profiles."
-    )
-    prefixes.iterator.flatMap { prefix =>
-      Option.when(key.startsWith(prefix)) {
-        key.drop(prefix.length).takeWhile(_ != '.')
-      }
-    }.map(_.trim).find(_.nonEmpty)
-  }
-
-  private def _model_profile_string(
-    configuration: ResolvedConfiguration,
-    profile: String,
-    leaf: String
-  ): Option[String] =
-    Vector(
-      s"textus.ai.model-profiles.$profile.$leaf",
-      s"textus.ai.modelProfiles.$profile.$leaf",
-      s"textus.ai.model-profile.$profile.$leaf",
-      s"textus.runtime.ai.model-profiles.$profile.$leaf",
-      s"cncf.ai.model-profiles.$profile.$leaf",
-      s"cncf.runtime.ai.model-profiles.$profile.$leaf"
-    ).iterator
-      .flatMap(key => Try(RuntimeConfig.getString(configuration, key)).toOption.flatten)
-      .map(_.trim)
-      .find(_.nonEmpty)
-
-  private def _is_codex(provider: Option[String]): Boolean =
-    provider.exists { value =>
-      value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")
-    }
-
-  private def _safe_profile_name(value: String): Boolean =
-    value.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
-
-  private def _safe_model(value: Option[String]): Boolean =
-    value.exists(_.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
 }
 
 final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionContext) extends GenerateService {
@@ -242,7 +178,7 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
         }
       case None if tools.nonEmpty =>
         Consequence.configurationInvalid(
-          s"Codex tools require an admitted purpose model-profile: ${tools.toVector.map(_.id).sorted.mkString(",")}"
+          s"Codex tools require an admitted runtime-profile binding: ${tools.toVector.map(_.id).sorted.mkString(",")}"
         )
       case None =>
         Consequence.success(_ExecutionProfile("codex-cli", None, Set.empty))

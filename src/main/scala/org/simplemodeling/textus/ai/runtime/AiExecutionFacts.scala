@@ -130,10 +130,9 @@ private[textus] object AiExecutionFacts {
   val POLICY_MAX_CONCURRENT = "ai.policy.max_concurrent"
   val POLICY_OUTPUT_SCHEMA_ID = "ai.policy.output_schema_id"
   val POLICY_PROMPT_CONTRACT_ID = "ai.policy.prompt_contract_id"
-  val POLICY_MODEL_PROFILE = "ai.policy.model_profile"
+  val POLICY_RUNTIME_PROFILE = "ai.policy.runtime_profile"
+  val POLICY_EFFECTIVE_EXECUTION_CLASS = "ai.policy.effective_execution_class"
   val POLICY_REASONING_LEVEL = "ai.policy.reasoning_level"
-  val POLICY_GENERIC_PURPOSE = "ai.policy.generic_purpose"
-  val POLICY_LOGICAL_LEVEL = "ai.policy.logical_level"
 
   def normalize(
     selection: SpiSelection,

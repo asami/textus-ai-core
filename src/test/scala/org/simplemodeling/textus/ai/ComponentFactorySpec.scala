@@ -13,7 +13,7 @@ import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOf
 import org.goldenport.cncf.workarea.WorkAreaSpace
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ResolvedConfiguration}
 import org.goldenport.configuration.ConfigurationValue
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerRequirement}
 import org.goldenport.record.Record
 import org.simplemodeling.textus.ai.provider.codex.CodexRuntimeConfig
 import org.simplemodeling.textus.ai.runtime.TextusAiRunnerProvider
@@ -38,9 +38,10 @@ final class ComponentFactorySpec
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
-            ConfigurationValue.StringValue("google"),
-          "textus.ai.purposes.artscene-exhibition-web-research.max-concurrent" ->
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.application-purposes.artscene-exhibition-web-research.purpose" ->
+            ConfigurationValue.StringValue("web-analysis"),
+          "textus.ai.application-purposes.artscene-exhibition-web-research.max-concurrent" ->
             ConfigurationValue.StringValue("1")
         )),
         ConfigurationTrace.empty
@@ -114,6 +115,7 @@ final class ComponentFactorySpec
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("codex-cli"),
           "textus.ai.codex.enabled" -> ConfigurationValue.StringValue("true"),
           "textus.ai.codex.executable" -> ConfigurationValue.StringValue("/runtime/codex-cli")
         )),
@@ -166,17 +168,16 @@ final class ComponentFactorySpec
       component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
     }
 
-    "compile an admitted Codex purpose profile into fixed model, reasoning, and Web arguments" in {
-      Given("an enabled Codex runtime and one approved Web-research model profile")
+    "compile a Codex runtime-profile binding into fixed model, reasoning, and Web arguments" in {
+      Given("an enabled Codex runtime and a deep-consideration Web binding")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("codex-cli"),
           "textus.ai.codex.enabled" -> ConfigurationValue.StringValue("true"),
           "textus.ai.codex.executable" -> ConfigurationValue.StringValue("/runtime/codex-cli"),
-          "textus.ai.model-profiles.codex-artscene-research.provider" -> ConfigurationValue.StringValue("codex"),
-          "textus.ai.model-profiles.codex-artscene-research.model" -> ConfigurationValue.StringValue("gpt-5-codex"),
-          "textus.ai.model-profiles.codex-artscene-research.reasoning-level" -> ConfigurationValue.StringValue("high"),
-          "textus.ai.model-profiles.codex-artscene-research.tools" -> ConfigurationValue.StringValue("url_context,web_search")
+          "textus.ai.execution-classes.deep-consideration.reasoning-level" -> ConfigurationValue.StringValue("high"),
+          "textus.ai.execution-classes.deep-consideration.tools" -> ConfigurationValue.StringValue("url_context,web_search")
         )),
         ConfigurationTrace.empty
       )
@@ -190,9 +191,9 @@ final class ComponentFactorySpec
         None,
         summon[ExecutionContext].observability
       ))
-      val capability = ProcessCapabilityId.parseC("codex-cli-profile-codex-artscene-research-web").toOption.get
+      val capability = ProcessCapabilityId.parseC("codex-cli-profile-runtime-deep-consideration-web").toOption.get
 
-      When("the profile Web capability is resolved")
+      When("the runtime-profile Web capability is resolved")
       val result = ProcessExecutionAdmission.resolveC(
         component.scopeContext,
         ProcessExecutionRequest(capability, Vector("-"))
@@ -240,11 +241,13 @@ final class ComponentFactorySpec
         "#!/bin/sh\n" +
           "if [ -f schema.json ]; then marker=record; else marker=plain; fi\n" +
           "if [ -z \"$HOME\" ]; then home=empty; else home=set; fi\n" +
-          "printf '{\"title\":\"%s:%s:%s\"}' \"$marker\" \"$home\" \"$*\"\n"
+          "args=$(printf '%s' \"$*\" | tr -d '\"')\n" +
+          "printf '{\"title\":\"%s:%s:%s\"}' \"$marker\" \"$home\" \"$args\"\n"
       )
       executable.toFile.setExecutable(true)
       val configuration = ResolvedConfiguration(
         Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("codex-cli"),
           "textus.ai.codex.enabled" -> ConfigurationValue.StringValue("true"),
           "textus.ai.codex.executable" -> ConfigurationValue.StringValue(executable.toString)
         )),
@@ -278,21 +281,36 @@ final class ComponentFactorySpec
       When("plain, structured, and chat requests reach the component-owned local driver")
       val (generated, recorded, chatted) = try {
         (
-          runner.generate(AiGenerateRequest("plain prompt")),
+          runner.generate(AiGenerateRequest("plain prompt", requirement = AiRunnerRequirement(
+            purpose = Some("software-implementation"),
+            purposeRequired = true
+          ))),
           runner.generateRecord(AiRecordRequest(
             "record prompt",
-            Record.dataAuto("required" -> Vector("title"))
+            Record.dataAuto("required" -> Vector("title")),
+            requirement = AiRunnerRequirement(
+              purpose = Some("software-implementation"),
+              purposeRequired = true
+            )
           )),
-          runner.chat(AiChatRequest(Vector(AiMessage("user", "chat prompt"))))
+          runner.chat(AiChatRequest(
+            Vector(AiMessage("user", "chat prompt")),
+            requirement = AiRunnerRequirement(
+              purpose = Some("software-implementation"),
+              purposeRequired = true
+            )
+          ))
         )
       } finally {
         java.nio.file.Files.deleteIfExists(executable)
       }
 
       Then("the fixed command, empty environment, and bounded schema file are executed in provider-owned managed WorkAreas")
-      generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
-      recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
-      chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+      withClue(generated.toString) {
+        generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5-codex --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+      }
+      recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --model gpt-5-codex --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
+      chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5-codex --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
       callerscope.processExecutionDriverOption shouldBe None
       callerscope.processExecutionAdmissionOption shouldBe None
     }

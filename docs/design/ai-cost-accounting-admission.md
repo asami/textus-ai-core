@@ -21,7 +21,7 @@ textus.ai.execution-classes.<class>.max-cost-microunits
 textus.ai.execution-classes.<class>.max-reasoning-tokens
 ```
 
-A purpose or generic purpose may narrow `max-cost-microunits` and
+A mapped application purpose may narrow `max-cost-microunits` and
 `max-reasoning-tokens`, but may not replace the inherited schedule. The rate
 schedule name is the stable operator identity. All four rate fields are
 required and must be non-negative integers.

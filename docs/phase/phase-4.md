@@ -1,6 +1,6 @@
 # Phase 4 - Runtime Profiles and Application Purposes
 
-status=in-progress
+status=complete
 started_at=2026-07-18
 strategy=[Textus AI Development Strategy](../strategy/textus-ai-development-strategy.md)
 
@@ -48,12 +48,12 @@ runtime-owned configuration.
 
 | ID | Stage | Outcome | Status |
 | --- | --- | --- | --- |
-| RP-01 | Runtime profile catalog | Built-in `codex-cli` and `gemini` profiles define explicit defaults for all standard execution classes. | open |
-| SP-01 | Standard purpose catalog | Built-in standard purposes map to their default execution classes without project redefinition. | open |
-| AP-01 | Application-purpose resolver | Domain purpose mappings resolve through a standard purpose and enforce caller-selection and narrowing boundaries. | open |
-| CM-01 | Strict configuration migration | Legacy purpose/model-profile/level key families are rejected before provider execution. | open |
-| RB-01 | Runtime binding and facts | Component defaults, Codex capability compilation, and safe metadata use the selected runtime profile. | open |
-| ES-01 | Executable specification and closure | Profile defaults, override precedence, rejection behavior, provider bindings, and downstream contract are verified. | open |
+| RP-01 | Runtime profile catalog | Built-in `codex-cli` and `gemini` profiles define explicit defaults for all standard execution classes. | done |
+| SP-01 | Standard purpose catalog | Built-in standard purposes map to their default execution classes without project redefinition. | done |
+| AP-01 | Application-purpose resolver | Domain purpose mappings resolve through a standard purpose and enforce caller-selection and narrowing boundaries. | done |
+| CM-01 | Strict configuration migration | Legacy purpose/model-profile/level key families are rejected before provider execution. | done |
+| RB-01 | Runtime binding and facts | Component defaults, Codex capability compilation, and safe metadata use the selected runtime profile. | done |
+| ES-01 | Executable specification and closure | Profile defaults, override precedence, rejection behavior, provider bindings, and downstream contract are verified. | done |
 
 ## Exit Criteria
 
@@ -81,4 +81,5 @@ runtime-owned configuration.
 - [AI Execution Class Resolution](../spec/ai-execution-class-resolution.md)
 - [AI Runner Execution Facts](../design/ai-runner-execution-facts.md)
 - [Phase 3 Closure](phase-3-closure.md)
+- [Phase 4 Closure](phase-4-closure.md)
 - [Phase 4 Checklist](phase-4-checklist.md)

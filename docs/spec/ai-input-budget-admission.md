@@ -8,9 +8,10 @@ updated_at=2026-07-18
 
 - A positive execution-class `max-input-tokens` limit applies before a provider
   service is resolved or invoked.
-- The same configured class limit applies to direct class selection and a
-  purpose resolved through that class.
-- A purpose may narrow, but cannot broaden, its generic purpose's input limit.
+- The same configured class limit applies to every purpose resolved through
+  that class.
+- An application purpose may narrow, but cannot broaden, its standard purpose's
+  input limit.
 - Generate and record estimates are the UTF-8 byte length of the prompt.
 - Chat estimates include the normalized role/content text and sixteen envelope
   units per message.

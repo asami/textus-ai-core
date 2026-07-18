@@ -247,10 +247,10 @@ final class AiExecutionFactsSpec
       Given("two equivalent effective policy fact maps in different insertion orders")
       val first = Map(
         AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS -> "120",
-        AiExecutionFacts.POLICY_LOGICAL_LEVEL -> "standard-work"
+        AiExecutionFacts.POLICY_EFFECTIVE_EXECUTION_CLASS -> "standard-work"
       )
       val second = Map(
-        AiExecutionFacts.POLICY_LOGICAL_LEVEL -> "standard-work",
+        AiExecutionFacts.POLICY_EFFECTIVE_EXECUTION_CLASS -> "standard-work",
         AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS -> "120"
       )
 

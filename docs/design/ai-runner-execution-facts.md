@@ -66,21 +66,19 @@ executed.
 
 | Key | Meaning | Absence |
 | --- | --- | --- |
-| `ai.policy.model_profile` | Approved Codex model-profile selected by the effective purpose | No Codex purpose profile was selected |
+| `ai.policy.runtime_profile` | Selected Textus AI runtime profile | Direct low-level runtime request without profile resolution |
+| `ai.policy.effective_execution_class` | Runtime-owned execution class selected by the purpose | Direct low-level runtime request without profile resolution |
 | `ai.policy.reasoning_level` | Fixed Codex reasoning level compiled into the admitted capability | The profile did not configure reasoning |
-| `ai.policy.generic_purpose` | Generic purpose selected directly or inherited by an application purpose | No generic purpose policy applied |
-| `ai.policy.logical_level` | Logical level that selected the approved model-profile | No logical level policy applied |
 
 For Codex, these facts identify the profile policy rather than a caller-supplied
 CLI argument. `ai.execution.enabled_tools` records only the logical capability
 set, not URLs, search results, or provider transcripts.
 
-Purpose and execution-class policy are resolved before provider selection. A
-generic purpose can supply a configured execution-class default; an
-application purpose may name it with `base-purpose` only when its effective
-provider/model/reasoning policy is identical and its tools and execution bounds
-are no broader. The normalized execution class reflects the effective approved
-selector, not a provider or model identifier.
+Purpose policy is resolved before provider selection. An application purpose
+maps to one runtime-owned standard purpose through
+`application-purposes.<name>.purpose` and may only narrow its inherited bounds.
+The normalized execution class identifies the effective runtime class, not a
+provider or model identifier.
 
 ### Usage Facts
 
@@ -198,10 +196,11 @@ their wire response contains them. Gemma/Ollama exposes only the counts it
 reports. Textus AI maps the selected provider's provider-specific facts into
 the normalized namespace; it does not infer absent values.
 
-An approved Codex purpose model-profile is compiled into a finite managed
-process capability. The normalized policy facts expose its profile and fixed
-reasoning level, while `ai.execution.enabled_tools` exposes its admitted
-logical tools. Caller fields never select model, reasoning, or CLI arguments.
+An approved Codex runtime-profile execution is compiled into a finite managed
+process capability. The normalized policy facts expose its runtime profile,
+effective execution class, and fixed reasoning level, while
+`ai.execution.enabled_tools` exposes its admitted logical tools. Caller fields
+never select model, reasoning, or CLI arguments.
 
 Reserved normalized namespaces cannot be overwritten by provider metadata,
 while only explicitly allowlisted provider-specific metadata remains available

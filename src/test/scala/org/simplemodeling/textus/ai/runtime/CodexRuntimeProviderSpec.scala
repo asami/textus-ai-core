@@ -35,13 +35,10 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
         "textus.ai.codex.engine" -> "codex-cli"
       ))
       val enabled = _configuration(Map(
+        "textus.ai.profile" -> "codex-cli",
         "textus.ai.codex.enabled" -> "true",
         "textus.ai.codex.executable" -> "/runtime/codex-cli",
-        "textus.ai.codex.schema-maximum-bytes" -> "4096",
-        "textus.ai.model-profiles.codex-artscene-research.provider" -> "codex",
-        "textus.ai.model-profiles.codex-artscene-research.model" -> "gpt-5-codex",
-        "textus.ai.model-profiles.codex-artscene-research.reasoning-level" -> "high",
-        "textus.ai.model-profiles.codex-artscene-research.tools" -> "url_context,web_search"
+        "textus.ai.codex.schema-maximum-bytes" -> "4096"
       ))
       val unsafe = _configuration(Map(
         "textus.ai.codex.enabled" -> "true",
@@ -50,7 +47,8 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
 
       When("the Codex adapter configuration is resolved")
       val disabledconfig = CodexConfig.fromConfiguration(disabled)
-      val enabledconfig = CodexConfig.fromConfiguration(enabled)
+      val profiles = AiProfileConfig.fromConfiguration(Some(enabled))
+      val enabledconfig = CodexConfig.fromConfiguration(enabled, _codex_executions(profiles))
       val unsafeconfig = CodexConfig.fromConfiguration(unsafe)
       val legacy = CodexRuntimeConfig("local", "codex-cli", 4096L)
 
@@ -58,7 +56,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       disabledconfig shouldBe None
       enabledconfig.map(_.schemaMaximumBytes) shouldBe Some(4096L)
       enabledconfig.map(_.executable) shouldBe Some("/runtime/codex-cli")
-      enabledconfig.flatMap(_.executionProfiles.get("codex-artscene-research")).map(_.reasoningLevel) shouldBe Some(Some(CodexReasoningLevel.High))
+      enabledconfig.flatMap(_.executionProfiles.get("runtime-standard-consideration")).map(_.reasoningLevel) shouldBe Some(Some(CodexReasoningLevel.High))
       unsafeconfig shouldBe None
       legacy.schemaMaximumBytes shouldBe 4096L
     }
@@ -217,24 +215,14 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
     }
 
     "run a Web-research purpose through its fixed admitted Codex profile" in {
-      Given("a configured Codex purpose profile with model, reasoning, and both logical Web tools")
-      val profile = CodexExecutionProfile(
-        "codex-artscene-research",
-        "gpt-5-codex",
-        Some(CodexReasoningLevel.High),
-        Set(AiTool.UrlContext, AiTool.WebSearch)
-      )
+      val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
+        "textus.ai.profile" -> "codex-cli",
+        "textus.ai.execution-classes.deep-consideration.reasoning-level" -> "high",
+        "textus.ai.execution-classes.deep-consideration.tools" -> "url_context,web_search"
+      ))))
+      val profile = _codex_executions(profiles)("runtime-deep-consideration")
       val fixture = _fixture(_result("{\"title\":\"Web result\"}"), profile.webCapability)
       given ExecutionContext = _context(fixture)
-      val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
-        "textus.ai.purposes.artscene-exhibition-web-research.model-profile" -> "codex-artscene-research",
-        "textus.ai.model-profiles.codex-artscene-research.provider" -> "codex",
-        "textus.ai.model-profiles.codex-artscene-research.mode" -> "local",
-        "textus.ai.model-profiles.codex-artscene-research.engine" -> "codex-cli",
-        "textus.ai.model-profiles.codex-artscene-research.model" -> "gpt-5-codex",
-        "textus.ai.model-profiles.codex-artscene-research.reasoning-level" -> "high",
-        "textus.ai.model-profiles.codex-artscene-research.tools" -> "url_context,web_search"
-      ))))
 
       When("a caller names only the required purpose")
       val result = _runner(
@@ -244,14 +232,16 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
         "research the supplied official URL",
         _schema,
         requirement = AiRunnerRequirement(
-          purpose = Some("artscene-exhibition-web-research"),
+          purpose = Some("web-analysis"),
           purposeRequired = true
         )
       ))
 
       Then("the selected profile controls the model and Web capability without caller CLI input")
-      result.toOption.flatMap(_.record.getAny("title")) shouldBe Some("Web result")
-      result.toOption.flatMap(_.metadata.get(AiExecutionFacts.POLICY_MODEL_PROFILE)) shouldBe Some("codex-artscene-research")
+      withClue(result.toString) {
+        result.toOption.flatMap(_.record.getAny("title")) shouldBe Some("Web result")
+      }
+      result.toOption.flatMap(_.metadata.get(AiExecutionFacts.POLICY_RUNTIME_PROFILE)) shouldBe Some("codex-cli")
       result.toOption.flatMap(_.metadata.get(AiExecutionFacts.POLICY_REASONING_LEVEL)) shouldBe Some("high")
       result.toOption.flatMap(_.metadata.get(AiExecutionFacts.ENABLED_TOOLS)) shouldBe Some("url_context,web_search")
       fixture.profile.driver.executions.map(_.request.capability.print) shouldBe Vector(profile.webCapability)
@@ -259,14 +249,12 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
     }
 
     "reject a Codex URL-context purpose without the admitted Web-search capability" in {
-      Given("a Codex purpose profile that requests URL context but cannot grant the CLI Web capability")
+      Given("a Codex runtime profile that requests URL context without Web search")
       val fixture = _fixture(_result("{}"))
       given ExecutionContext = _context(fixture)
       val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
-        "textus.ai.purposes.artscene-exhibition-web-research.model-profile" -> "codex-url-only",
-        "textus.ai.model-profiles.codex-url-only.provider" -> "codex",
-        "textus.ai.model-profiles.codex-url-only.model" -> "gpt-5-codex",
-        "textus.ai.model-profiles.codex-url-only.tools" -> "url_context"
+        "textus.ai.profile" -> "codex-cli",
+        "textus.ai.execution-classes.deep-consideration.tools" -> "url_context"
       ))))
 
       When("the Web-research purpose is required")
@@ -274,7 +262,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
         AiGenerateRequest(
           "confidential URL",
           requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-web-research"),
+            purpose = Some("web-analysis"),
             purposeRequired = true
           )
         )
@@ -287,15 +275,12 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
     }
 
     "reject an unsupported Codex reasoning policy before process selection" in {
-      Given("a Web-research purpose profile with an unsupported Codex reasoning level")
+      Given("a Codex runtime profile with an unsupported reasoning level")
       val fixture = _fixture(_result("{}"))
       given ExecutionContext = _context(fixture)
       val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
-        "textus.ai.purposes.artscene-exhibition-web-research.model-profile" -> "codex-invalid-reasoning",
-        "textus.ai.model-profiles.codex-invalid-reasoning.provider" -> "codex",
-        "textus.ai.model-profiles.codex-invalid-reasoning.model" -> "gpt-5-codex",
-        "textus.ai.model-profiles.codex-invalid-reasoning.reasoning-level" -> "experimental",
-        "textus.ai.model-profiles.codex-invalid-reasoning.tools" -> "url_context,web_search"
+        "textus.ai.profile" -> "codex-cli",
+        "textus.ai.execution-classes.deep-consideration.reasoning-level" -> "experimental"
       ))))
 
       When("the caller requires that purpose")
@@ -303,7 +288,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
         AiGenerateRequest(
           "confidential Web research",
           requirement = AiRunnerRequirement(
-            purpose = Some("artscene-exhibition-web-research"),
+            purpose = Some("web-analysis"),
             purposeRequired = true
           )
         )
@@ -392,6 +377,18 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
   }
 
   private val _schema: Record = Record.dataAuto("required" -> Vector("title"))
+
+  private def _codex_executions(
+    profiles: AiProfileConfig
+  ): Map[String, CodexExecutionProfile] =
+    profiles.codexExecutionsC.toOption.getOrElse(Map.empty).map { case (name, execution) =>
+      name -> CodexExecutionProfile(
+        name,
+        execution.model,
+        execution.reasoningLevel.flatMap(CodexReasoningLevel.parse),
+        execution.tools.toSet
+      )
+    }
 
   private def _configuration(values: Map[String, String]): ResolvedConfiguration =
     ResolvedConfiguration(

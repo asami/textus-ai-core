@@ -13,10 +13,10 @@ effective execution class configures `max-input-tokens`. The policy key is:
 textus.ai.execution-classes.<execution-class>.max-input-tokens
 ```
 
-A purpose may set the same key under `textus.ai.purposes.<purpose>` or
-`textus.ai.generic-purposes.<purpose>` only to narrow the execution-class
-limit. Direct execution-class selection receives the class limit. A missing
-limit means no input-budget admission is applied.
+An application purpose may set `max-input-tokens` under
+`textus.ai.application-purposes.<purpose>` only to narrow the resolved
+execution-class limit. A missing limit means no input-budget admission is
+applied.
 
 ## Estimate Contract
 
@@ -41,7 +41,7 @@ EA-03 work and must not treat this estimate as price data.
 
 ## Admission and Failure
 
-Textus resolves purpose and execution class, calculates the estimate, and
+Textus resolves purpose and runtime execution class, calculates the estimate, and
 checks the effective policy before resolving a `GenerateService` or
 `ChatService`. If `estimate > max-input-tokens`, it returns a structured
 `operationIllegal` result identifying only the configured limit and estimate.
@@ -50,8 +50,8 @@ It does not invoke a provider, tool, fallback model, or alternate purpose.
 Invalid zero, negative, or non-numeric policy values are configuration failures
 before execution. Execution-class values are validated even when a purpose
 supplies a narrower value, so a malformed operator class policy cannot be
-hidden by an application override. Application purposes inherited from a
-generic purpose cannot broaden its input budget.
+hidden by an application override. Application purposes cannot broaden the
+standard purpose's input budget.
 
 ## Observability
 

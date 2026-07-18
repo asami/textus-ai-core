@@ -181,11 +181,10 @@ completed on 2026-07-18.
 
 - Phase 2: complete on 2026-07-18.
 - Phase 3: complete on 2026-07-18.
-- Latest phase closure: `docs/phase/phase-3-closure.md`
-- Current phase: Phase 4, Runtime Profiles and Application Purposes.
-- Current phase dashboard: `docs/phase/phase-4.md`
-- Current phase checklist: `docs/phase/phase-4-checklist.md`
-- Current next task: RP-01 runtime profile catalog and class-default matrix.
+- Phase 4: complete on 2026-07-18.
+- Latest phase closure: `docs/phase/phase-4-closure.md`
+- Current next task: define the next runtime expansion phase before adding a
+  runtime profile, workflow, or public operation.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
