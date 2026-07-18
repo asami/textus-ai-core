@@ -8,7 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 16, 2026
- * @version Jul. 16, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiExecutionFactsSpec
@@ -76,6 +76,32 @@ final class AiExecutionFactsSpec
       metadata(AiExecutionFacts.INPUT_TOKENS) shouldBe "41"
       metadata(AiExecutionFacts.OUTPUT_TOKENS) shouldBe "17"
       metadata(AiExecutionFacts.TOTAL_TOKENS) shouldBe "58"
+    }
+
+    "normalize bounded provider tool results into a provider-neutral summary" in {
+      Given("a Google response with safe tool counters and an unsafe raw tool value")
+      val selection = SpiSelection(provider = Some("google"))
+      val providerMetadata = Map(
+        "google.google_search_calls" -> "2",
+        "google.google_search_results" -> "5",
+        "google.url_context_calls" -> "1",
+        "google.url_citations" -> "4",
+        "google.raw_tool_result" -> "https://secret.example/path"
+      )
+
+      When("Textus AI normalizes provider metadata")
+      val metadata = AiExecutionFacts.normalize(
+        selection,
+        AiRunnerRequirement(tools = Vector(AiTool.WebSearch, AiTool.UrlContext)),
+        None,
+        providerMetadata
+      )
+
+      Then("only the safe numeric tool summary and allowlisted counters are retained")
+      metadata(AiExecutionFacts.TOOL_RESULT_SUMMARY) shouldBe
+        "google_search_calls=2;google_search_results=5;url_context_calls=1;url_citations=4"
+      metadata("google.google_search_calls") shouldBe "2"
+      metadata should not contain "google.raw_tool_result"
     }
 
     "omit malformed or negative provider usage values" in {

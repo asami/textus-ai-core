@@ -22,8 +22,8 @@ Phase: [Phase 2 - Purpose Policy Runtime](phase-2.md)
 
 - [x] Reject provider/tool incompatibility before invoking a provider.
 - [x] Reject required-purpose execution when no valid purpose profile resolves.
-- [ ] Record effective purpose, profile selection, provider, model, tools, and bounded facts in safe CallTree attributes.
-- [ ] Surface safe policy and tool-result summaries in response metadata where available.
+- [x] Record effective purpose, profile selection, provider, model, tools, and bounded facts in safe CallTree attributes.
+- [x] Surface safe policy and tool-result summaries in response metadata where available.
 
 ## PP-04 Bounded Execution
 

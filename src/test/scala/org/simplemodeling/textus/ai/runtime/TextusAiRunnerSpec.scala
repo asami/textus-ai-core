@@ -1385,6 +1385,68 @@ final class TextusAiRunnerSpec
       node.getString("model") shouldBe Some("remote")
     }
 
+    "publish effective purpose policy facts in response metadata and the CNCF CallTree" in {
+      Given("a record purpose with bounded policy and caller-owned contract identities")
+      given ExecutionContext =
+        ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
+            ConfigurationValue.StringValue("gemma"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.max-output-tokens" ->
+            ConfigurationValue.StringValue("240"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.timeout-seconds" ->
+            ConfigurationValue.StringValue("90"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.record-retry-limit" ->
+            ConfigurationValue.StringValue("2"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.output-schema-id" ->
+            ConfigurationValue.StringValue("artscene.exhibitions.v1"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.prompt-contract-id" ->
+            ConfigurationValue.StringValue("artscene.exhibition.extract.v1")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+      val requirement = AiRunnerRequirement(
+        purpose = Some("artscene-exhibition-extraction-from-source"),
+        purposeRequired = true
+      )
+      val identities = Vector(
+        Property("ai.output-schema-id", "artscene.exhibitions.v1", None),
+        Property("ai.prompt-contract-id", "artscene.exhibition.extract.v1", None)
+      )
+
+      When("the caller generates a matching structured record")
+      val generated = runner.generateRecord(
+        AiRecordRequest("strict-record", _artscene_record_schema, requirement = requirement, properties = identities)
+      ).toOption.get
+
+      Then("safe effective policy values are attributable without prompt or schema content")
+      generated.metadata(AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS) shouldBe "240"
+      generated.metadata(AiExecutionFacts.POLICY_TIMEOUT_SECONDS) shouldBe "90"
+      generated.metadata(AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT) shouldBe "2"
+      generated.metadata(AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID) shouldBe "artscene.exhibitions.v1"
+      generated.metadata(AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID) shouldBe "artscene.exhibition.extract.v1"
+      val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
+      val record = ObservabilityEngine.callTreeRecord(calltree)
+      val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
+      val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate-record")).value
+      node.getString(AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS) shouldBe Some("240")
+      node.getString(AiExecutionFacts.POLICY_TIMEOUT_SECONDS) shouldBe Some("90")
+      node.getString(AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT) shouldBe Some("2")
+      node.getString(AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID) shouldBe Some("artscene.exhibitions.v1")
+      node.getString(AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID) shouldBe Some("artscene.exhibition.extract.v1")
+      node.getString("prompt") shouldBe empty
+      node.getString("response") shouldBe empty
+    }
+
     "record structured generation failure facts without raw payloads" in {
       Given("an AI runner whose structured response does not satisfy the schema")
       given ExecutionContext =

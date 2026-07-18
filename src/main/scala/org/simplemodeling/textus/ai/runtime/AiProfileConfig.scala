@@ -173,6 +173,21 @@ private[textus] final case class AiProfileResolution(
     properties: Vector[org.goldenport.protocol.Property]
   ): Vector[org.goldenport.protocol.Property] =
     properties ++ policy.requestProperties
+
+  def executionMetadata(
+    maxTokens: Option[Int],
+    properties: Vector[org.goldenport.protocol.Property],
+    recordRetryLimit: Option[Int] = None
+  ): Map[String, String] =
+    Vector(
+      AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS -> maxTokens.map(_.toString),
+      AiExecutionFacts.POLICY_TIMEOUT_SECONDS -> AiRequestProperties.timeoutSeconds(properties).map(_.toString),
+      AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT -> recordRetryLimit.map(_.toString),
+      AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID -> policy.outputSchemaId,
+      AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID -> policy.promptContractId
+    ).collect {
+      case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim
+    }.toMap
 }
 
 private[textus] object AiPurposePolicy {

@@ -11,7 +11,7 @@ import org.goldenport.cncf.spi.ai.runner.AiRunnerRequirement
  * Provider-neutral execution metadata normalization for Textus AI responses.
  *
  * @since   Jul. 16, 2026
- * @version Jul. 17, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] object AiExecutionFacts {
@@ -22,6 +22,7 @@ private[textus] object AiExecutionFacts {
   val PURPOSE = "ai.execution.purpose"
   val LOCATION = "ai.execution.location"
   val TOOLS = "ai.execution.tools"
+  val TOOL_RESULT_SUMMARY = "ai.execution.tool_result_summary"
   val NORMALIZATION_MODE = "ai.execution.normalization_mode"
   val RESPONSE_ID = "ai.execution.response_id"
   val FINISH_REASON = "ai.execution.finish_reason"
@@ -31,13 +32,19 @@ private[textus] object AiExecutionFacts {
   val INPUT_DIGEST = "ai.execution.input_digest"
   val OUTPUT_DIGEST = "ai.execution.output_digest"
   val LIMITATION_CODES = "ai.limitation.codes"
+  val POLICY_MAX_OUTPUT_TOKENS = "ai.policy.max_output_tokens"
+  val POLICY_TIMEOUT_SECONDS = "ai.policy.timeout_seconds"
+  val POLICY_RECORD_RETRY_LIMIT = "ai.policy.record_retry_limit"
+  val POLICY_OUTPUT_SCHEMA_ID = "ai.policy.output_schema_id"
+  val POLICY_PROMPT_CONTRACT_ID = "ai.policy.prompt_contract_id"
 
   def normalize(
     selection: SpiSelection,
     requirement: AiRunnerRequirement,
     responsemodel: Option[String],
     providermetadata: Map[String, String],
-    normalizationmode: Option[String] = None
+    normalizationmode: Option[String] = None,
+    policymetadata: Map[String, String] = Map.empty
   ): Map[String, String] = {
     val values = Vector(
       PROVIDER -> selection.provider,
@@ -47,6 +54,7 @@ private[textus] object AiExecutionFacts {
       PURPOSE -> requirement.purpose,
       LOCATION -> _location(selection.mode),
       TOOLS -> _tools(requirement),
+      TOOL_RESULT_SUMMARY -> _tool_result_summary(selection, providermetadata),
       NORMALIZATION_MODE -> normalizationmode,
       RESPONSE_ID -> _provider_value(selection, providermetadata, "response_id"),
       FINISH_REASON -> _provider_value(selection, providermetadata, "finish_reason"),
@@ -54,7 +62,7 @@ private[textus] object AiExecutionFacts {
       OUTPUT_TOKENS -> _usage_value(selection, providermetadata, "usage.output_tokens"),
       TOTAL_TOKENS -> _usage_value(selection, providermetadata, "usage.total_tokens")
     )
-    _provider_metadata(providermetadata) ++ _values(values)
+    policymetadata ++ _provider_metadata(providermetadata) ++ _values(values)
   }
 
   def digest(value: String): String = {
@@ -90,7 +98,8 @@ private[textus] object AiExecutionFacts {
     }
 
   private def _is_normalized_key(key: String): Boolean =
-    key.startsWith("ai.execution.") ||
+      key.startsWith("ai.execution.") ||
+      key.startsWith("ai.policy.") ||
       key.startsWith("ai.usage.") ||
       key.startsWith("ai.limitation.")
 
@@ -130,6 +139,32 @@ private[textus] object AiExecutionFacts {
       .flatMap(_.toLongOption)
       .filter(_ >= 0)
       .map(_.toString)
+
+  private def _tool_result_summary(
+    selection: SpiSelection,
+    metadata: Map[String, String]
+  ): Option[String] = {
+    val provider = selection.provider.map(_.trim.toLowerCase(Locale.ROOT)).getOrElse("")
+    val labels = provider match {
+      case "google" => Vector(
+        "google_search_calls",
+        "google_search_results",
+        "url_context_calls",
+        "url_citations"
+      )
+      case "openai" => Vector("web_search_calls")
+      case _ => Vector.empty
+    }
+    labels.flatMap { label =>
+      metadata.get(s"$provider.$label")
+        .flatMap(_.trim.toLongOption)
+        .filter(_ >= 0)
+        .map(value => s"$label=$value")
+    }.mkString(";") match {
+      case "" => None
+      case value => Some(value)
+    }
+  }
 
   private def _values(
     values: Vector[(String, Option[String])]

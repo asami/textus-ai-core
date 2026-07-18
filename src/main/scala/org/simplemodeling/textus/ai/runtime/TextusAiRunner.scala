@@ -34,7 +34,9 @@ final class TextusAiRunner(
       val requirement = resolution.requirement
       val effective = _effective_selection(requirement)
       val properties = _request_properties(req.properties, resolution)
-      _with_generate_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
+      val maxtokens = resolution.maxTokens(req.maxTokens)
+      val policymetadata = resolution.executionMetadata(maxtokens, properties)
+      _with_generate_calltree(req, requirement, maxtokens, policymetadata) {
         for {
           _ <- resolution.policy.validateGenerate(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
@@ -43,11 +45,11 @@ final class TextusAiRunner(
             GenerateRequest(
               prompt = req.prompt,
               temperature = req.temperature,
-              maxTokens = resolution.maxTokens(req.maxTokens),
+              maxTokens = maxtokens,
               properties = properties
             )
           )
-        } yield _to_ai_generate_response(req, response, requirement)
+        } yield _to_ai_generate_response(req, response, requirement, policymetadata)
       }
     }
 
@@ -56,7 +58,10 @@ final class TextusAiRunner(
       val requirement = resolution.requirement
       val effective = _effective_selection(requirement)
       val properties = _request_properties(req.properties, resolution)
-      _with_record_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
+      val maxtokens = resolution.maxTokens(req.maxTokens)
+      val retries = _record_retry_limit(req, resolution)
+      val policymetadata = resolution.executionMetadata(maxtokens, properties, Some(retries))
+      _with_record_calltree(req, requirement, maxtokens, policymetadata) {
         for {
           _ <- resolution.policy.validateRecord(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
@@ -65,11 +70,11 @@ final class TextusAiRunner(
             service,
             req,
             resolution,
-            _record_retry_limit(req, resolution)
+            retries
           )
         } yield response
       } { response =>
-        _normalize_record_response(req, response, requirement)
+        _normalize_record_response(req, response, requirement, policymetadata)
       }
     }
 
@@ -78,7 +83,9 @@ final class TextusAiRunner(
       val requirement = resolution.requirement
       val effective = _effective_selection(requirement)
       val properties = _request_properties(req.properties, resolution)
-      _with_chat_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
+      val maxtokens = resolution.maxTokens(req.maxTokens)
+      val policymetadata = resolution.executionMetadata(maxtokens, properties)
+      _with_chat_calltree(req, requirement, maxtokens, policymetadata) {
         for {
           _ <- resolution.policy.validateChat(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
@@ -87,11 +94,11 @@ final class TextusAiRunner(
             ChatRequest(
               messages = req.messages.map(_to_textus_message),
               temperature = req.temperature,
-              maxTokens = resolution.maxTokens(req.maxTokens),
+              maxTokens = maxtokens,
               properties = properties
             )
           )
-        } yield _to_ai_chat_response(req, response, requirement)
+        } yield _to_ai_chat_response(req, response, requirement, policymetadata)
       }
     }
 
@@ -153,7 +160,8 @@ final class TextusAiRunner(
   private def _with_record_calltree(
     req: AiRecordRequest,
     requirement: AiRunnerRequirement,
-    maxtokens: Option[Int]
+    maxtokens: Option[Int],
+    policymetadata: Map[String, String]
   )(
     body: => Consequence[GenerateResponse]
   )(
@@ -163,7 +171,7 @@ final class TextusAiRunner(
     if (calltree.isEnabled) {
       calltree.enter(
         "provider:textus-ai-runner:generate-record",
-        _record_request_calltree_attributes(req, requirement, maxtokens)
+        _record_request_calltree_attributes(req, requirement, maxtokens, policymetadata)
       )
       try {
         val generated = body
@@ -204,7 +212,8 @@ final class TextusAiRunner(
   private def _with_generate_calltree(
     req: AiGenerateRequest,
     requirement: AiRunnerRequirement,
-    maxtokens: Option[Int]
+    maxtokens: Option[Int],
+    policymetadata: Map[String, String]
   )(
     body: => Consequence[AiGenerateResponse]
   )(using ctx: ExecutionContext): Consequence[AiGenerateResponse] = {
@@ -212,7 +221,7 @@ final class TextusAiRunner(
     if (calltree.isEnabled) {
       calltree.enter(
         "provider:textus-ai-runner:generate",
-        _generate_request_calltree_attributes(req, requirement, maxtokens)
+        _generate_request_calltree_attributes(req, requirement, maxtokens, policymetadata)
       )
       try {
         val result = body
@@ -242,7 +251,8 @@ final class TextusAiRunner(
   private def _with_chat_calltree(
     req: AiChatRequest,
     requirement: AiRunnerRequirement,
-    maxtokens: Option[Int]
+    maxtokens: Option[Int],
+    policymetadata: Map[String, String]
   )(
     body: => Consequence[AiChatResponse]
   )(using ctx: ExecutionContext): Consequence[AiChatResponse] = {
@@ -250,7 +260,7 @@ final class TextusAiRunner(
     if (calltree.isEnabled) {
       calltree.enter(
         "provider:textus-ai-runner:chat",
-        _chat_request_calltree_attributes(req, requirement, maxtokens)
+        _chat_request_calltree_attributes(req, requirement, maxtokens, policymetadata)
       )
       try {
         val result = body
@@ -280,12 +290,14 @@ final class TextusAiRunner(
   private def _generate_request_calltree_attributes(
     req: AiGenerateRequest,
     requirement: AiRunnerRequirement,
-    maxtokens: Option[Int]
+    maxtokens: Option[Int],
+    policymetadata: Map[String, String]
   ): Map[String, String] =
     _common_request_calltree_attributes(
       requirement,
       req.temperature,
       maxtokens,
+      policymetadata,
       req.trace.promptConfidentiality.label,
       req.trace.responseConfidentiality.label
     ) ++ Map(
@@ -297,13 +309,15 @@ final class TextusAiRunner(
   private def _chat_request_calltree_attributes(
     req: AiChatRequest,
     requirement: AiRunnerRequirement,
-    maxtokens: Option[Int]
+    maxtokens: Option[Int],
+    policymetadata: Map[String, String]
   ): Map[String, String] = {
     val prompttext = _chat_input(req)
     _common_request_calltree_attributes(
       requirement,
       req.temperature,
       maxtokens,
+      policymetadata,
       req.trace.promptConfidentiality.label,
       req.trace.responseConfidentiality.label
     ) ++ Map(
@@ -317,12 +331,14 @@ final class TextusAiRunner(
   private def _record_request_calltree_attributes(
     req: AiRecordRequest,
     requirement: AiRunnerRequirement,
-    maxtokens: Option[Int]
+    maxtokens: Option[Int],
+    policymetadata: Map[String, String]
   ): Map[String, String] =
     _common_request_calltree_attributes(
       requirement,
       req.temperature,
       maxtokens,
+      policymetadata,
       req.trace.promptConfidentiality.label,
       req.trace.responseConfidentiality.label
     ) ++ Map(
@@ -336,6 +352,7 @@ final class TextusAiRunner(
     requirement: AiRunnerRequirement,
     temperature: Option[Double],
     maxtokens: Option[Int],
+    policymetadata: Map[String, String],
     promptconfidentiality: String,
     responseconfidentiality: String
   ): Map[String, String] = {
@@ -352,7 +369,7 @@ final class TextusAiRunner(
       "max_tokens" -> maxtokens.map(_.toString).getOrElse(""),
       "prompt_confidentiality" -> promptconfidentiality,
       "response_confidentiality" -> responseconfidentiality
-    )
+    ) ++ policymetadata
   }
 
   private def _generate_response_calltree_attributes(
@@ -454,7 +471,8 @@ final class TextusAiRunner(
   private def _to_ai_generate_response(
     req: AiGenerateRequest,
     response: GenerateResponse,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    policymetadata: Map[String, String]
   ): AiGenerateResponse =
     AiGenerateResponse(
       response.text,
@@ -463,14 +481,16 @@ final class TextusAiRunner(
         _effective_selection(requirement),
         requirement,
         response.model,
-        response.metadata
+        response.metadata,
+        policymetadata = policymetadata
       ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text))
     )
 
   private def _to_ai_chat_response(
     req: AiChatRequest,
     response: ChatResponse,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    policymetadata: Map[String, String]
   ): AiChatResponse =
     AiChatResponse(
       _to_ai_message(response.message),
@@ -479,14 +499,16 @@ final class TextusAiRunner(
         _effective_selection(requirement),
         requirement,
         response.model,
-        response.metadata
+        response.metadata,
+        policymetadata = policymetadata
       ) ++ AiExecutionFacts.digestMetadata(_chat_input(req), response.message.content))
     )
 
   private def _normalize_record_response(
     req: AiRecordRequest,
     response: GenerateResponse,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    policymetadata: Map[String, String]
   ): Consequence[AiRecordResponse] =
     if (response.text.trim.isEmpty)
       Consequence.argumentInvalid("AI record response was empty.")
@@ -512,7 +534,8 @@ final class TextusAiRunner(
                       requirement,
                       response.model,
                       response.metadata,
-                      Some(candidate.mode)
+                      Some(candidate.mode),
+                      policymetadata
                     ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text))
                   )
                 )

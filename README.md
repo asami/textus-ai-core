@@ -233,6 +233,13 @@ provider-neutral prompt-contract model. Profile keys such as `prompt`,
 `system-instruction`, `source-restrictions`, and `output-constraints` fail
 explicitly instead of being applied or ignored.
 
+Successful AI responses and their CallTree entries publish safe effective policy
+facts under `ai.policy.*`: maximum output tokens, timeout, record retry limit,
+output-schema ID, and prompt-contract ID when configured. Tool-enabled Google
+and OpenAI responses also publish `ai.execution.tool_result_summary` with only
+provider-reported numeric counters. Neither surface contains raw prompts,
+schemas, URLs, provider payloads, or credentials.
+
 Request-level tools still win over profile tools. The runtime maps logical
 tools to provider-specific APIs:
 
