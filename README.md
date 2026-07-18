@@ -189,6 +189,28 @@ textus:
         tools: url_context, web_search
 ```
 
+Purpose profiles also supply bounded defaults for provider-neutral execution:
+
+```yaml
+textus:
+  ai:
+    purposes:
+      artscene-exhibition-web-research:
+        provider: google
+        model: gemini-3.5-flash
+        tools: url_context, web_search
+        max-output-tokens: 240
+        timeout-seconds: 90
+        record-retry-limit: 2
+```
+
+`max-output-tokens` must be positive, `timeout-seconds` must be positive, and
+`record-retry-limit` is an integer from `0` through `3`. Invalid values and a
+missing named `model-profile` fail as configuration errors before a provider is
+invoked. `AiGenerateRequest.maxTokens`, an `ai.timeout-seconds` request
+property, and an `ai.record.retry-limit` request property override the
+corresponding profile default.
+
 Request-level tools still win over profile tools. The runtime maps logical
 tools to provider-specific APIs:
 

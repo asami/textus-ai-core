@@ -514,6 +514,173 @@ final class TextusAiRunnerSpec
       result.toOption.get.model shouldBe Some("google")
     }
 
+    "apply bounded execution defaults from a purpose profile while preserving request overrides" in {
+      Given("an AI runner with output-token and timeout defaults for a purpose")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
+            ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-web-research.max-output-tokens" ->
+            ConfigurationValue.StringValue("240"),
+          "textus.ai.purposes.artscene-exhibition-web-research.timeout-seconds" ->
+            ConfigurationValue.StringValue("90")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+      val requirement = AiRunnerRequirement(purpose = Some("artscene-exhibition-web-research"))
+
+      When("a request uses the profile and another request supplies direct limits")
+      val profiled = runner.generate(
+        AiGenerateRequest("inspect-profile-policy", requirement = requirement)
+      )
+      val overridden = runner.generate(
+        AiGenerateRequest(
+          "inspect-profile-policy",
+          maxTokens = Some(12),
+          requirement = requirement,
+          properties = Vector(Property("ai.timeout-seconds", "17", None))
+        )
+      )
+
+      Then("the profile fills missing limits but never replaces a request limit")
+      profiled.toOption.get.text shouldBe "max:240;timeout:90"
+      overridden.toOption.get.text shouldBe "max:12;timeout:17"
+    }
+
+    "apply a purpose record retry default before record generation starts" in {
+      Given("a purpose profile with two record retries")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "empty-twice-then-strict-record"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
+            ConfigurationValue.StringValue("gemma"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.record-retry-limit" ->
+            ConfigurationValue.StringValue("2")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(mode = Some("remote"), engine = Some("http")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("structured generation initially receives two blank responses")
+      val result = runner.generateRecord(
+        AiRecordRequest(
+          prompt,
+          _artscene_record_schema,
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-extraction-from-source")
+          )
+        )
+      )
+
+      Then("the profile retry policy permits the third provider attempt")
+      result.toOption.get.record.getAny("exhibitions") should not be empty
+      _GenerateServiceState.count(prompt) shouldBe 3
+    }
+
+    "reject malformed purpose policy values before invoking a provider" in {
+      Given("a required purpose profile with an invalid output-token limit")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "invalid-purpose-policy"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
+            ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-managed-research.max-output-tokens" ->
+            ConfigurationValue.StringValue("zero")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(mode = Some("remote"), engine = Some("http")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("generation requires the malformed purpose profile")
+      val result = runner.generate(
+        AiGenerateRequest(
+          prompt,
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-managed-research"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("the policy failure is structured and no provider call occurs")
+      result shouldBe a[Consequence.Failure[_]]
+      result match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("Invalid AI purpose max-output-tokens")
+        case _ =>
+          fail("a malformed purpose policy must fail before execution")
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
+    "reject a purpose profile that references an unknown model profile" in {
+      Given("a required purpose profile with a missing model profile")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "missing-model-profile"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-managed-research.model-profile" ->
+            ConfigurationValue.StringValue("not-configured")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(mode = Some("remote"), engine = Some("http")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("generation requires that purpose")
+      val result = runner.generate(
+        AiGenerateRequest(
+          prompt,
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-managed-research"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("the missing model profile is a configuration failure without a provider call")
+      result shouldBe a[Consequence.Failure[_]]
+      result match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("AI model profile not configured")
+        case _ =>
+          fail("an unknown model profile must fail before execution")
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
     "prefer direct request model over a configured purpose profile" in {
       Given("an AI runner configured with a purpose model profile")
       given ExecutionContext = ExecutionContext.create()
@@ -1394,6 +1561,11 @@ final class TextusAiRunnerSpec
       _GenerateServiceState.record(req.prompt)
       if (req.prompt == "inspect-properties")
         Consequence.success(GenerateResponse(s"timeout:${_property(req, "ai.timeout-seconds").getOrElse("none")}", Some(name)))
+      else if (req.prompt == "inspect-profile-policy")
+        Consequence.success(GenerateResponse(
+          s"max:${req.maxTokens.map(_.toString).getOrElse("none")};timeout:${_property(req, "ai.timeout-seconds").getOrElse("none")}",
+          Some(name)
+        ))
       else if (req.prompt == "inspect-ai-selection")
         Consequence.success(GenerateResponse(
           s"purpose:${_property(req, "ai.purpose").getOrElse("none")};model:${_property(req, "ai.model").getOrElse("none")}",
@@ -1416,6 +1588,10 @@ final class TextusAiRunnerSpec
         Consequence.success(GenerateResponse("  ", Some(name)))
       else if (req.prompt == "empty-then-strict-record")
         Consequence.success(GenerateResponse(_record_json("Retried Record Exhibition"), Some(name)))
+      else if (req.prompt == "empty-twice-then-strict-record" && _GenerateServiceState.count(req.prompt) <= 2)
+        Consequence.success(GenerateResponse("  ", Some(name)))
+      else if (req.prompt == "empty-twice-then-strict-record")
+        Consequence.success(GenerateResponse(_record_json("Retried Twice Record Exhibition"), Some(name)))
       else if (req.prompt == "missing-record-field" || req.prompt == "missing-record-field-no-retry")
         Consequence.success(GenerateResponse("""{"exhibitions":[{"title":"Missing Date","confidence":51}]}""", Some(name)))
       else

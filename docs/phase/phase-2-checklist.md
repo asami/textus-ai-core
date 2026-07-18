@@ -11,9 +11,11 @@ Phase: [Phase 2 - Purpose Policy Runtime](phase-2.md)
 
 ## PP-02 Profile Policy Resolution
 
-- [ ] Resolve provider, mode, engine, model, and logical tools from a purpose profile.
-- [ ] Add bounded-policy configuration for maximum output tokens, timeout, retry, and concurrency.
-- [ ] Validate profile configuration and reject ambiguous or incompatible selections.
+- [x] Resolve provider, mode, engine, model, and logical tools from a purpose profile.
+- [x] Add profile defaults for maximum output tokens, timeout, and record retry.
+- [x] Validate named model profiles and bounded-policy values before provider binding.
+- [ ] Add concurrency policy resolution and its supported enforcement boundary.
+- [ ] Validate provider/model and logical-tool compatibility before provider binding.
 - [ ] Define validated structured-output and prompt-policy configuration boundaries.
 
 ## PP-03 Admission And Observability

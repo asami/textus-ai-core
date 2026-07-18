@@ -30,16 +30,17 @@ final class TextusAiRunner(
   profiles: AiProfileConfig = AiProfileConfig.empty
 ) extends AiRunner {
   def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] =
-    _effective_requirement(req.requirement).flatMap { requirement =>
-      _with_generate_calltree(req, requirement) {
+    _effective_resolution(req.requirement).flatMap { resolution =>
+      val requirement = resolution.requirement
+      _with_generate_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
           service <- provider.generateService(_effective_selection(requirement))
           response <- service.generate(
             GenerateRequest(
               prompt = req.prompt,
               temperature = req.temperature,
-              maxTokens = req.maxTokens,
-              properties = _request_properties(req.properties, requirement)
+              maxTokens = resolution.maxTokens(req.maxTokens),
+              properties = _request_properties(req.properties, resolution)
             )
           )
         } yield _to_ai_generate_response(req, response, requirement)
@@ -47,11 +48,17 @@ final class TextusAiRunner(
     }
 
   def generateRecord(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] =
-    _effective_requirement(req.requirement).flatMap { requirement =>
-      _with_record_calltree(req, requirement) {
+    _effective_resolution(req.requirement).flatMap { resolution =>
+      val requirement = resolution.requirement
+      _with_record_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
           service <- provider.generateService(_effective_selection(requirement))
-          response <- _generate_record_raw_with_retry(service, req, requirement, _record_retry_limit(req))
+          response <- _generate_record_raw_with_retry(
+            service,
+            req,
+            resolution,
+            _record_retry_limit(req, resolution)
+          )
         } yield response
       } { response =>
         _normalize_record_response(req, response, requirement)
@@ -59,16 +66,17 @@ final class TextusAiRunner(
     }
 
   def chat(req: AiChatRequest)(using ExecutionContext): Consequence[AiChatResponse] =
-    _effective_requirement(req.requirement).flatMap { requirement =>
-      _with_chat_calltree(req, requirement) {
+    _effective_resolution(req.requirement).flatMap { resolution =>
+      val requirement = resolution.requirement
+      _with_chat_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
           service <- provider.chatService(_effective_selection(requirement))
           response <- service.chat(
             ChatRequest(
               messages = req.messages.map(_to_textus_message),
               temperature = req.temperature,
-              maxTokens = req.maxTokens,
-              properties = _request_properties(req.properties, requirement)
+              maxTokens = resolution.maxTokens(req.maxTokens),
+              properties = _request_properties(req.properties, resolution)
             )
           )
         } yield _to_ai_chat_response(req, response, requirement)
@@ -78,15 +86,15 @@ final class TextusAiRunner(
   private def _generate_record_raw_with_retry(
     service: GenerateService,
     req: AiRecordRequest,
-    requirement: AiRunnerRequirement,
+    resolution: AiProfileResolution,
     remainingRetries: Int
   )(using ExecutionContext): Consequence[GenerateResponse] = {
     val generated = service.generate(
       GenerateRequest(
         prompt = req.prompt,
         temperature = req.temperature,
-        maxTokens = req.maxTokens,
-        properties = _request_properties(req.properties, requirement),
+        maxTokens = resolution.maxTokens(req.maxTokens),
+        properties = _request_properties(req.properties, resolution),
         recordSchema = Some(req.schema)
       )
     )
@@ -94,11 +102,11 @@ final class TextusAiRunner(
       case Consequence.Success(response) if response.text.trim.nonEmpty =>
         Consequence.success(response)
       case Consequence.Success(response) if remainingRetries > 0 && _is_record_retryable_empty_response(response) =>
-        _generate_record_raw_with_retry(service, req, requirement, remainingRetries - 1)
+        _generate_record_raw_with_retry(service, req, resolution, remainingRetries - 1)
       case Consequence.Success(response) =>
         Consequence.success(response)
       case Consequence.Failure(conclusion) if remainingRetries > 0 && _is_record_retryable_failure(conclusion) =>
-        _generate_record_raw_with_retry(service, req, requirement, remainingRetries - 1)
+        _generate_record_raw_with_retry(service, req, resolution, remainingRetries - 1)
       case Consequence.Failure(conclusion) =>
         Consequence.Failure(conclusion)
     }
@@ -120,17 +128,20 @@ final class TextusAiRunner(
   }
 
   private def _record_retry_limit(
-    req: AiRecordRequest
+    req: AiRecordRequest,
+    resolution: AiProfileResolution
   ): Int =
     req.properties.find(_.name == "ai.record.retry-limit")
       .flatMap(x => Option(x.value).map(_.toString.trim).filter(_.nonEmpty).flatMap(_.toIntOption))
+      .orElse(resolution.policy.recordRetryLimit)
       .getOrElse(1)
       .max(0)
       .min(3)
 
   private def _with_record_calltree(
     req: AiRecordRequest,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    maxtokens: Option[Int]
   )(
     body: => Consequence[GenerateResponse]
   )(
@@ -140,7 +151,7 @@ final class TextusAiRunner(
     if (calltree.isEnabled) {
       calltree.enter(
         "provider:textus-ai-runner:generate-record",
-        _record_request_calltree_attributes(req, requirement)
+        _record_request_calltree_attributes(req, requirement, maxtokens)
       )
       try {
         val generated = body
@@ -180,7 +191,8 @@ final class TextusAiRunner(
 
   private def _with_generate_calltree(
     req: AiGenerateRequest,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    maxtokens: Option[Int]
   )(
     body: => Consequence[AiGenerateResponse]
   )(using ctx: ExecutionContext): Consequence[AiGenerateResponse] = {
@@ -188,7 +200,7 @@ final class TextusAiRunner(
     if (calltree.isEnabled) {
       calltree.enter(
         "provider:textus-ai-runner:generate",
-        _generate_request_calltree_attributes(req, requirement)
+        _generate_request_calltree_attributes(req, requirement, maxtokens)
       )
       try {
         val result = body
@@ -217,7 +229,8 @@ final class TextusAiRunner(
 
   private def _with_chat_calltree(
     req: AiChatRequest,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    maxtokens: Option[Int]
   )(
     body: => Consequence[AiChatResponse]
   )(using ctx: ExecutionContext): Consequence[AiChatResponse] = {
@@ -225,7 +238,7 @@ final class TextusAiRunner(
     if (calltree.isEnabled) {
       calltree.enter(
         "provider:textus-ai-runner:chat",
-        _chat_request_calltree_attributes(req, requirement)
+        _chat_request_calltree_attributes(req, requirement, maxtokens)
       )
       try {
         val result = body
@@ -254,12 +267,13 @@ final class TextusAiRunner(
 
   private def _generate_request_calltree_attributes(
     req: AiGenerateRequest,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    maxtokens: Option[Int]
   ): Map[String, String] =
     _common_request_calltree_attributes(
       requirement,
       req.temperature,
-      req.maxTokens,
+      maxtokens,
       req.trace.promptConfidentiality.label,
       req.trace.responseConfidentiality.label
     ) ++ Map(
@@ -270,13 +284,14 @@ final class TextusAiRunner(
 
   private def _chat_request_calltree_attributes(
     req: AiChatRequest,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    maxtokens: Option[Int]
   ): Map[String, String] = {
     val prompttext = _chat_input(req)
     _common_request_calltree_attributes(
       requirement,
       req.temperature,
-      req.maxTokens,
+      maxtokens,
       req.trace.promptConfidentiality.label,
       req.trace.responseConfidentiality.label
     ) ++ Map(
@@ -289,12 +304,13 @@ final class TextusAiRunner(
 
   private def _record_request_calltree_attributes(
     req: AiRecordRequest,
-    requirement: AiRunnerRequirement
+    requirement: AiRunnerRequirement,
+    maxtokens: Option[Int]
   ): Map[String, String] =
     _common_request_calltree_attributes(
       requirement,
       req.temperature,
-      req.maxTokens,
+      maxtokens,
       req.trace.promptConfidentiality.label,
       req.trace.responseConfidentiality.label
     ) ++ Map(
@@ -401,22 +417,23 @@ final class TextusAiRunner(
       )
   }
 
-  private def _effective_requirement(
+  private def _effective_resolution(
     requirement: AiRunnerRequirement
-  ): Consequence[AiRunnerRequirement] =
+  ): Consequence[AiProfileResolution] =
     profiles.resolveRequired(requirement)
 
   private def _request_properties(
     properties: Vector[Property],
-    requirement: AiRunnerRequirement
+    resolution: AiProfileResolution
   ): Vector[Property] = {
+    val requirement = resolution.requirement
     val modelproperty = requirement.model.map(value => Property("ai.model", value, None))
     val purposeproperty = requirement.purpose.map(value => Property("ai.purpose", value, None))
     val toolsproperty =
       Option.when(requirement.tools.nonEmpty)(
         Property("ai.tools", requirement.tools.map(_.id).mkString(","), None)
       )
-    properties ++ modelproperty ++ purposeproperty ++ toolsproperty
+    resolution.requestProperties(properties) ++ modelproperty ++ purposeproperty ++ toolsproperty
   }
 
   private def _chat_input(req: AiChatRequest): String =

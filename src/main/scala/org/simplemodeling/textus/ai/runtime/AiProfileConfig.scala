@@ -22,6 +22,9 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.purposes.<purpose>.engine
  * - textus.ai.purposes.<purpose>.model
  * - textus.ai.purposes.<purpose>.tools
+ * - textus.ai.purposes.<purpose>.max-output-tokens
+ * - textus.ai.purposes.<purpose>.timeout-seconds
+ * - textus.ai.purposes.<purpose>.record-retry-limit
  * - textus.ai.model-profiles.<profile>.provider
  * - textus.ai.model-profiles.<profile>.mode
  * - textus.ai.model-profiles.<profile>.engine
@@ -59,7 +62,10 @@ private[textus] final case class AiPurposeProfile(
   quality: Option[String] = None,
   cost: Option[String] = None,
   latency: Option[String] = None,
-  tools: Vector[AiTool] = Vector.empty
+  tools: Vector[AiTool] = Vector.empty,
+  maxOutputTokens: Option[String] = None,
+  timeoutSeconds: Option[String] = None,
+  recordRetryLimit: Option[String] = None
 ) {
   def applyTo(
     requirement: AiRunnerRequirement,
@@ -74,26 +80,43 @@ private[textus] final case class AiPurposeProfile(
     )
 }
 
+private[textus] final case class AiPurposePolicy(
+  maxOutputTokens: Option[Int] = None,
+  timeoutSeconds: Option[Long] = None,
+  recordRetryLimit: Option[Int] = None
+) {
+  def requestProperties: Vector[org.goldenport.protocol.Property] =
+    timeoutSeconds.map(value => org.goldenport.protocol.Property("ai.timeout-seconds", value.toString, None)).toVector ++
+      recordRetryLimit.map(value => org.goldenport.protocol.Property("ai.record.retry-limit", value.toString, None)).toVector
+}
+
+private[textus] final case class AiProfileResolution(
+  requirement: AiRunnerRequirement,
+  policy: AiPurposePolicy = AiPurposePolicy.empty
+) {
+  def maxTokens(request: Option[Int]): Option[Int] =
+    request.orElse(policy.maxOutputTokens)
+
+  def requestProperties(
+    properties: Vector[org.goldenport.protocol.Property]
+  ): Vector[org.goldenport.protocol.Property] =
+    properties ++ policy.requestProperties
+}
+
+private[textus] object AiPurposePolicy {
+  val empty: AiPurposePolicy = AiPurposePolicy()
+}
+
 private[textus] final class AiProfileConfig(
   configuration: Option[ResolvedConfiguration]
 ) {
-  def resolve(
-    requirement: AiRunnerRequirement
-  ): AiRunnerRequirement =
-    requirement.purpose.map(resolvePurpose).getOrElse(None) match {
-      case Some(purposeprofile) =>
-        purposeprofile.applyTo(requirement, purposeprofile.modelProfile.flatMap(resolveModelProfile))
-      case None =>
-        requirement
-    }
-
   def resolveRequired(
     requirement: AiRunnerRequirement
-  ): Consequence[AiRunnerRequirement] =
+  ): Consequence[AiProfileResolution] =
     if (requirement.purposeRequired)
       _resolve_required_purpose(requirement)
     else
-      Consequence.success(resolve(requirement))
+      _resolve_optional_purpose(requirement)
 
   def resolvePurpose(
     purpose: String
@@ -115,6 +138,18 @@ private[textus] final class AiProfileConfig(
           _purpose_keys(normalized, "tools") ++
             _purpose_keys(normalized, "enabled-tools") ++
             _purpose_keys(normalized, "enabledTools")
+        ),
+        maxOutputTokens = _config_string(
+          _purpose_keys(normalized, "max-output-tokens") ++
+            _purpose_keys(normalized, "maxOutputTokens")
+        ),
+        timeoutSeconds = _config_string(
+          _purpose_keys(normalized, "timeout-seconds") ++
+            _purpose_keys(normalized, "timeoutSeconds")
+        ),
+        recordRetryLimit = _config_string(
+          _purpose_keys(normalized, "record-retry-limit") ++
+            _purpose_keys(normalized, "recordRetryLimit")
         )
       )
     }.filter(profile =>
@@ -127,7 +162,10 @@ private[textus] final class AiProfileConfig(
         profile.quality.nonEmpty ||
         profile.cost.nonEmpty ||
         profile.latency.nonEmpty ||
-        profile.tools.nonEmpty
+        profile.tools.nonEmpty ||
+        profile.maxOutputTokens.nonEmpty ||
+        profile.timeoutSeconds.nonEmpty ||
+        profile.recordRetryLimit.nonEmpty
     )
 
   def resolveModelProfile(
@@ -161,28 +199,112 @@ private[textus] final class AiProfileConfig(
 
   private def _resolve_required_purpose(
     requirement: AiRunnerRequirement
-  ): Consequence[AiRunnerRequirement] =
+  ): Consequence[AiProfileResolution] =
     requirement.purpose.map(_.trim).filter(_.nonEmpty) match {
       case Some(purpose) =>
         resolvePurpose(purpose) match {
           case Some(profile) =>
-            val modelprofile = profile.modelProfile.flatMap(resolveModelProfile)
-            val profileprovider = profile.provider.orElse(modelprofile.flatMap(_.provider))
-            profileprovider match {
-              case Some(_) =>
-                Consequence.success(
-                  profile.applyTo(requirement.copy(purpose = Some(purpose)), modelprofile)
-                )
-              case None =>
-                Consequence.configurationInvalid(
-                  s"AI purpose profile must select a provider: $purpose"
-                )
-            }
+            _resolve_profile(requirement.copy(purpose = Some(purpose)), profile, true)
           case None =>
             Consequence.configurationInvalid(s"AI purpose profile not configured: $purpose")
         }
       case None =>
         Consequence.configurationInvalid("AI purpose is required")
+    }
+
+  private def _resolve_optional_purpose(
+    requirement: AiRunnerRequirement
+  ): Consequence[AiProfileResolution] =
+    requirement.purpose.map(_.trim).filter(_.nonEmpty).flatMap(resolvePurpose) match {
+      case Some(profile) =>
+        _resolve_profile(requirement.copy(purpose = Some(profile.purpose)), profile, false)
+      case None =>
+        Consequence.success(AiProfileResolution(requirement))
+    }
+
+  private def _resolve_profile(
+    requirement: AiRunnerRequirement,
+    profile: AiPurposeProfile,
+    requiresprovider: Boolean
+  ): Consequence[AiProfileResolution] =
+    for {
+      modelprofile <- _resolve_model_profile(profile)
+      policy <- _purpose_policy(profile)
+      resolution <- {
+        val profileprovider = profile.provider.orElse(modelprofile.flatMap(_.provider))
+        if (requiresprovider && profileprovider.isEmpty)
+          Consequence.configurationInvalid(
+            s"AI purpose profile must select a provider: ${profile.purpose}"
+          )
+        else
+          Consequence.success(AiProfileResolution(profile.applyTo(requirement, modelprofile), policy))
+      }
+    } yield resolution
+
+  private def _resolve_model_profile(
+    profile: AiPurposeProfile
+  ): Consequence[Option[AiModelProfile]] =
+    profile.modelProfile match {
+      case Some(name) =>
+        resolveModelProfile(name) match {
+          case Some(modelprofile) => Consequence.success(Some(modelprofile))
+          case None => Consequence.configurationInvalid(s"AI model profile not configured: $name")
+        }
+      case None =>
+        Consequence.success(None)
+    }
+
+  private def _purpose_policy(
+    profile: AiPurposeProfile
+  ): Consequence[AiPurposePolicy] =
+    for {
+      maxtokens <- _positive_int(profile.maxOutputTokens, "max-output-tokens", profile.purpose)
+      timeoutseconds <- _positive_long(profile.timeoutSeconds, "timeout-seconds", profile.purpose)
+      retrylimit <- _bounded_int(profile.recordRetryLimit, "record-retry-limit", profile.purpose, 0, 3)
+    } yield AiPurposePolicy(maxtokens, timeoutseconds, retrylimit)
+
+  private def _positive_int(
+    value: Option[String],
+    label: String,
+    purpose: String
+  ): Consequence[Option[Int]] =
+    value match {
+      case Some(raw) =>
+        raw.toIntOption.filter(_ > 0) match {
+          case Some(parsed) => Consequence.success(Some(parsed))
+          case None => Consequence.configurationInvalid(s"Invalid AI purpose $label for $purpose")
+        }
+      case None => Consequence.success(None)
+    }
+
+  private def _positive_long(
+    value: Option[String],
+    label: String,
+    purpose: String
+  ): Consequence[Option[Long]] =
+    value match {
+      case Some(raw) =>
+        raw.toLongOption.filter(_ > 0) match {
+          case Some(parsed) => Consequence.success(Some(parsed))
+          case None => Consequence.configurationInvalid(s"Invalid AI purpose $label for $purpose")
+        }
+      case None => Consequence.success(None)
+    }
+
+  private def _bounded_int(
+    value: Option[String],
+    label: String,
+    purpose: String,
+    minimum: Int,
+    maximum: Int
+  ): Consequence[Option[Int]] =
+    value match {
+      case Some(raw) =>
+        raw.toIntOption.filter(value => value >= minimum && value <= maximum) match {
+          case Some(parsed) => Consequence.success(Some(parsed))
+          case None => Consequence.configurationInvalid(s"Invalid AI purpose $label for $purpose")
+        }
+      case None => Consequence.success(None)
     }
 
   private def _purpose_keys(
