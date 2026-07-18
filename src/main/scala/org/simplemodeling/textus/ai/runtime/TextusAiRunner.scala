@@ -21,7 +21,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul. 17, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -29,51 +29,51 @@ final class TextusAiRunner(
   selection: SpiSelection,
   profiles: AiProfileConfig = AiProfileConfig.empty
 ) extends AiRunner {
-  def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] = {
-    val requirement = _effective_requirement(req.requirement)
-    _with_generate_calltree(req, requirement) {
-      for {
-        service <- provider.generateService(_effective_selection(requirement))
-        response <- service.generate(
-          GenerateRequest(
-            prompt = req.prompt,
-            temperature = req.temperature,
-            maxTokens = req.maxTokens,
-            properties = _request_properties(req.properties, requirement)
+  def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] =
+    _effective_requirement(req.requirement).flatMap { requirement =>
+      _with_generate_calltree(req, requirement) {
+        for {
+          service <- provider.generateService(_effective_selection(requirement))
+          response <- service.generate(
+            GenerateRequest(
+              prompt = req.prompt,
+              temperature = req.temperature,
+              maxTokens = req.maxTokens,
+              properties = _request_properties(req.properties, requirement)
+            )
           )
-        )
-      } yield _to_ai_generate_response(req, response, requirement)
+        } yield _to_ai_generate_response(req, response, requirement)
+      }
     }
-  }
 
-  def generateRecord(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] = {
-    val requirement = _effective_requirement(req.requirement)
-    _with_record_calltree(req, requirement) {
-      for {
-        service <- provider.generateService(_effective_selection(requirement))
-        response <- _generate_record_raw_with_retry(service, req, requirement, _record_retry_limit(req))
-      } yield response
-    } { response =>
-      _normalize_record_response(req, response, requirement)
+  def generateRecord(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] =
+    _effective_requirement(req.requirement).flatMap { requirement =>
+      _with_record_calltree(req, requirement) {
+        for {
+          service <- provider.generateService(_effective_selection(requirement))
+          response <- _generate_record_raw_with_retry(service, req, requirement, _record_retry_limit(req))
+        } yield response
+      } { response =>
+        _normalize_record_response(req, response, requirement)
+      }
     }
-  }
 
-  def chat(req: AiChatRequest)(using ExecutionContext): Consequence[AiChatResponse] = {
-    val requirement = _effective_requirement(req.requirement)
-    _with_chat_calltree(req, requirement) {
-      for {
-        service <- provider.chatService(_effective_selection(requirement))
-        response <- service.chat(
-          ChatRequest(
-            messages = req.messages.map(_to_textus_message),
-            temperature = req.temperature,
-            maxTokens = req.maxTokens,
-            properties = _request_properties(req.properties, requirement)
+  def chat(req: AiChatRequest)(using ExecutionContext): Consequence[AiChatResponse] =
+    _effective_requirement(req.requirement).flatMap { requirement =>
+      _with_chat_calltree(req, requirement) {
+        for {
+          service <- provider.chatService(_effective_selection(requirement))
+          response <- service.chat(
+            ChatRequest(
+              messages = req.messages.map(_to_textus_message),
+              temperature = req.temperature,
+              maxTokens = req.maxTokens,
+              properties = _request_properties(req.properties, requirement)
+            )
           )
-        )
-      } yield _to_ai_chat_response(req, response, requirement)
+        } yield _to_ai_chat_response(req, response, requirement)
+      }
     }
-  }
 
   private def _generate_record_raw_with_retry(
     service: GenerateService,
@@ -403,8 +403,8 @@ final class TextusAiRunner(
 
   private def _effective_requirement(
     requirement: AiRunnerRequirement
-  ): AiRunnerRequirement =
-    profiles.resolve(requirement)
+  ): Consequence[AiRunnerRequirement] =
+    profiles.resolveRequired(requirement)
 
   private def _request_properties(
     properties: Vector[Property],

@@ -5,9 +5,9 @@ Phase: [Phase 2 - Purpose Policy Runtime](phase-2.md)
 
 ## PP-01 Strict Purpose Contract
 
-- [ ] Define the CNCF AI runner field or equivalent that requires purpose resolution.
-- [ ] Specify structured failure semantics for absent, malformed, and unresolved required purposes.
-- [ ] Verify that compatible non-required-purpose requests retain current behavior.
+- [x] Define the CNCF AI runner field or equivalent that requires purpose resolution.
+- [x] Specify structured failure semantics for absent, malformed, and unresolved required purposes.
+- [x] Verify that compatible non-required-purpose requests retain current behavior.
 
 ## PP-02 Profile Policy Resolution
 

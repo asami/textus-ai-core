@@ -1,6 +1,7 @@
 package org.simplemodeling.textus.ai.runtime
 
 import scala.util.Try
+import org.goldenport.Consequence
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.spi.ai.runner.{AiRunnerRequirement, AiTool}
 import org.goldenport.configuration.ResolvedConfiguration
@@ -31,7 +32,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.model-profiles.<profile>.latency
  *
  * @since   Jul.  4, 2026
- * @version Jul. 16, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] final case class AiModelProfile(
@@ -85,6 +86,14 @@ private[textus] final class AiProfileConfig(
       case None =>
         requirement
     }
+
+  def resolveRequired(
+    requirement: AiRunnerRequirement
+  ): Consequence[AiRunnerRequirement] =
+    if (requirement.purposeRequired)
+      _resolve_required_purpose(requirement)
+    else
+      Consequence.success(resolve(requirement))
 
   def resolvePurpose(
     purpose: String
@@ -149,6 +158,32 @@ private[textus] final class AiProfileConfig(
         profile.latency.nonEmpty ||
         profile.description.nonEmpty
     )
+
+  private def _resolve_required_purpose(
+    requirement: AiRunnerRequirement
+  ): Consequence[AiRunnerRequirement] =
+    requirement.purpose.map(_.trim).filter(_.nonEmpty) match {
+      case Some(purpose) =>
+        resolvePurpose(purpose) match {
+          case Some(profile) =>
+            val modelprofile = profile.modelProfile.flatMap(resolveModelProfile)
+            val profileprovider = profile.provider.orElse(modelprofile.flatMap(_.provider))
+            profileprovider match {
+              case Some(_) =>
+                Consequence.success(
+                  profile.applyTo(requirement.copy(purpose = Some(purpose)), modelprofile)
+                )
+              case None =>
+                Consequence.configurationInvalid(
+                  s"AI purpose profile must select a provider: $purpose"
+                )
+            }
+          case None =>
+            Consequence.configurationInvalid(s"AI purpose profile not configured: $purpose")
+        }
+      case None =>
+        Consequence.configurationInvalid("AI purpose is required")
+    }
 
   private def _purpose_keys(
     purpose: String,

@@ -53,7 +53,7 @@ that an ArtScene integration phase will consume.
 
 | ID | Stage | Outcome | Status |
 | --- | --- | --- | --- |
-| PP-01 | Strict purpose contract | CNCF exposes a provider-neutral way to require purpose resolution. | pending |
+| PP-01 | Strict purpose contract | CNCF exposes a provider-neutral way to require purpose resolution. | complete |
 | PP-02 | Profile policy resolution | Purpose profiles resolve the selected provider/model/tools and bounded policy, with configuration validation. | pending |
 | PP-03 | Admission and observability | Runtime rejects invalid selections before execution and records effective safe facts in CallTree/metadata. | pending |
 | PP-04 | Bounded execution | Supported maximum-output, timeout, retry, and concurrency policies are enforced consistently. | pending |

@@ -32,7 +32,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul. 17, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -386,6 +386,132 @@ final class TextusAiRunnerSpec
         case Consequence.Failure(conclusion) =>
           conclusion.display should include ("unavailable-provider")
         case _ => fail("an unavailable purpose provider must fail explicitly")
+    }
+
+    "reject an unresolved required purpose before any AI operation reaches a provider" in {
+      Given("an AI runner with no profile for a required purpose")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "required-purpose-profile-unconfigured"
+      _GenerateServiceState.reset(prompt)
+      val runner = new TextusAiRunnerProvider(_component())
+        .provide(
+          SpiContract("ai-runner", classOf[AiRunner]),
+          SpiSelection(mode = Some("remote"), engine = Some("http"))
+        )
+        .toOption
+        .get
+      val requirement = AiRunnerRequirement(
+        purpose = Some("artscene-exhibition-web-research"),
+        purposeRequired = true
+      )
+
+      When("generate, record generation, and chat request that purpose")
+      val generated = runner.generate(AiGenerateRequest(prompt, requirement = requirement))
+      val recorded = runner.generateRecord(AiRecordRequest(prompt, _artscene_record_schema, requirement = requirement))
+      val chatted = runner.chat(
+        AiChatRequest(Vector(AiMessage("user", prompt)), requirement = requirement)
+      )
+      val missing = runner.generate(
+        AiGenerateRequest(prompt, requirement = AiRunnerRequirement(purposeRequired = true))
+      )
+      val blank = runner.chat(
+        AiChatRequest(
+          Vector(AiMessage("user", prompt)),
+          requirement = AiRunnerRequirement(purpose = Some(" "), purposeRequired = true)
+        )
+      )
+
+      Then("each invalid purpose fails structurally without invoking the generate provider")
+      Vector(generated, recorded, chatted).foreach {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("AI purpose profile not configured")
+        case _ =>
+          fail("a required purpose without a profile must fail before execution")
+      }
+      Vector(missing, blank).foreach {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("AI purpose is required")
+        case _ =>
+          fail("a missing or blank required purpose must fail before execution")
+      }
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
+    "reject a required purpose profile that does not select a provider" in {
+      Given("an AI runner with a descriptive but providerless purpose profile")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "required-purpose-profile-providerless"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.role" ->
+            ConfigurationValue.StringValue("extractor")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(mode = Some("remote"), engine = Some("http")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("generation requires that purpose")
+      val result = runner.generate(
+        AiGenerateRequest(
+          prompt,
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-extraction-from-source"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("the default provider is not used")
+      result shouldBe a[Consequence.Failure[_]]
+      result match
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("AI purpose profile must select a provider")
+        case _ =>
+          fail("a providerless required purpose profile must fail before execution")
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
+    "resolve a configured required purpose through its selected provider" in {
+      Given("an AI runner with an ArtScene purpose profile that selects Google")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
+            ConfigurationValue.StringValue("google")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("generation requires the configured purpose")
+      val result = runner.generate(
+        AiGenerateRequest(
+          "required-purpose-profile-configured",
+          requirement = AiRunnerRequirement(
+            purpose = Some("artscene-exhibition-web-research"),
+            purposeRequired = true
+          )
+        )
+      )
+
+      Then("the configured provider executes instead of the component default")
+      result.toOption.get.text shouldBe "generated:google:required-purpose-profile-configured"
+      result.toOption.get.model shouldBe Some("google")
     }
 
     "prefer direct request model over a configured purpose profile" in {
