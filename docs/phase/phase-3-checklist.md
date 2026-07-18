@@ -6,10 +6,12 @@ phase=[Phase 3 - Execution Class and Accounting](phase-3.md)
 ## Stage EC-01 - Execution Class
 
 Stage Status:
-- Current status: OPEN
+- Current status: IN_PROGRESS
 - Owner: Textus AI maintainers
 - Update rule: Mark DONE only when the CNCF selector, Textus AI resolution,
   migration, and deterministic evidence are available.
+- Current step: CNCF provides `AiExecutionClass` and
+  `AiRunnerRequirement.executionClass`; Textus AI resolution remains open.
 
 - [ ] Define CNCF `AiExecutionClass` and
   `AiRunnerRequirement.executionClass` without exposing engine or model names.
