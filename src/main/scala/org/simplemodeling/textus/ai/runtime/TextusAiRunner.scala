@@ -1,10 +1,11 @@
 package org.simplemodeling.textus.ai.runtime
 
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import io.circe.Json
 import io.circe.parser.parse
 import org.goldenport.Consequence
-import org.goldenport.cncf.admission.ScopedConcurrencyAdmission
+import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.component.Component
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.spi.{SpiContract, SpiProvider, SpiSelection}
@@ -22,7 +23,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 19, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -212,12 +213,7 @@ final class TextusAiRunner(
   )(
     body: => Consequence[A]
   ): Consequence[A] =
-    resolution.policy.concurrencyScope match {
-      case Some(scope) =>
-        ScopedConcurrencyAdmission.withPermitC(provider.componentScope, scope)(body)
-      case None =>
-        body
-    }
+    provider.withConcurrencyAdmissionC(resolution.policy)(body)
 
   private def _with_record_calltree(
     req: AiRecordRequest,
@@ -864,9 +860,57 @@ final class TextusAiRunner(
 final class TextusAiRunnerProvider(
   component: Component,
   defaultselection: SpiSelection = SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-  profiles: AiProfileConfig = AiProfileConfig.empty
+  profiles: AiProfileConfig = AiProfileConfig.empty,
+  concurrencystate: AiConcurrencyAdmissionState = new AiConcurrencyAdmissionState()
 ) extends SpiProvider[AiRunner] {
+  private val _late_concurrency_admissions =
+    new ConcurrentHashMap[ConcurrencyScopeId, ScopedConcurrencyAdmission]()
+
   private[runtime] def componentScope = component.scopeContext
+
+  /*
+   * Application purpose registrations may be bound after the runtime component
+   * receives its scope. Preserve their declared limit instead of treating the
+   * missing bootstrap admission as a provider failure.
+   */
+  private[runtime] def withConcurrencyAdmissionC[A](
+    policy: AiPurposePolicy
+  )(
+    body: => Consequence[A]
+  ): Consequence[A] =
+    policy.concurrencyScope match {
+      case Some(scope) =>
+        component.scopeContext.scopedConcurrencyAdmissionOption match {
+          case Some(admission) if concurrencystate.isBootstrapScope(scope) =>
+            admission.withPermitC(scope)(body)
+          case _ => _with_late_concurrency_admission_c(scope, policy.maxConcurrent)(body)
+        }
+      case None => body
+    }
+
+  private def _with_late_concurrency_admission_c[A](
+    scope: ConcurrencyScopeId,
+    limit: Option[Int]
+  )(
+    body: => Consequence[A]
+  ): Consequence[A] =
+    limit match {
+      case Some(value) => _late_concurrency_admission_c(scope, value).flatMap(_.withPermitC(scope)(body))
+      case None => body
+    }
+
+  private def _late_concurrency_admission_c(
+    scope: ConcurrencyScopeId,
+    limit: Int
+  ): Consequence[ScopedConcurrencyAdmission] =
+    Option(_late_concurrency_admissions.get(scope)) match {
+      case Some(value) => Consequence.success(value)
+      case None =>
+        ScopedConcurrencyAdmission.createC(Vector(ConcurrencyGrant(scope, limit))).map { created =>
+          Option(_late_concurrency_admissions.putIfAbsent(scope, created)).getOrElse(created)
+        }
+    }
+
   def supports(
     contract: SpiContract[AiRunner],
     selection: SpiSelection
@@ -955,4 +999,14 @@ final class TextusAiRunnerProvider(
       case Consequence.Success(_) => true
       case Consequence.Failure(_) => false
     }
+}
+
+private[ai] final class AiConcurrencyAdmissionState {
+  @volatile private var _bootstrap_scopes: Set[ConcurrencyScopeId] = Set.empty
+
+  private[ai] def registerBootstrap(scopes: Set[ConcurrencyScopeId]): Unit =
+    _bootstrap_scopes = scopes
+
+  private[ai] def isBootstrapScope(scope: ConcurrencyScopeId): Boolean =
+    _bootstrap_scopes.contains(scope)
 }

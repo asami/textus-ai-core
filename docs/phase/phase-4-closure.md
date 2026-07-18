@@ -22,6 +22,7 @@ this closure adds the registration correction without reverting it.
 | Supplied profile matrices | `AiRuntimeProfileCatalog` and `AiRuntimeProfileSpec` resolve all four classes for `codex-cli` and `gemini`. |
 | Standard-purpose catalog | `AiRuntimeProfileCatalog.standardPurposes` maps the six shipped purposes to their runtime-owned classes. |
 | Registration contract | CNCF `AiRunnerApplicationPurposeRegistration` and its socket set collect application Port outputs during bootstrap. |
+| Late scope binding | `TextusAiRunnerSpec` verifies a purpose registered through its Port after the runtime scope is established is resolved from the live catalog and enforces its own concurrency admission. |
 | Application isolation | `AiRuntimeProfileSpec`, `ComponentFactorySpec`, and `TextusAiRunnerSpec` verify registration defaults, tuning, policy narrowing, and rejection of caller/application concrete selection. |
 | Strict migration | `AiProfileConfig` rejects canonical and alias legacy key families before provider execution. |
 | Runtime binding | `ComponentFactorySpec` and `CodexRuntimeProviderSpec` verify profile-derived defaults and managed Codex capability compilation. |
@@ -37,6 +38,9 @@ this closure adds the registration correction without reverting it.
 - CAR lint residual warnings are pre-existing direct ambient-environment access
   in Gemma/Google/OpenAI providers and an absent ABI baseline; they are outside
   this Phase 4 migration slice.
+- The Jul. 19 release follow-up strengthened executable evidence for the
+  bootstrap ordering boundary. It does not reopen Phase 4 or change the
+  application-purpose contract.
 
 ## Deferred Work
 

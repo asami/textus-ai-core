@@ -2,15 +2,18 @@ package org.simplemodeling.textus.ai.runtime
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 import cats.~>
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.DurationInt
 import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.component.{Component, ExtensionPoint, Port}
 import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext, ScopeContext, ScopeKind}
 import org.goldenport.cncf.http.HttpDriver
 import org.goldenport.cncf.observability.ObservabilityEngine
-import org.goldenport.cncf.spi.{SpiContract, SpiSelection}
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
+import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
 import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
 import org.goldenport.bag.Bag
@@ -33,7 +36,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 19, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -418,6 +421,163 @@ final class TextusAiRunnerSpec
         case _ => fail("an unknown application purpose must fail before execution")
       }
       _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
+    "admit a purpose registered through a Port after the runtime scope and enforce its concurrency limit" in {
+      Given("a runtime scope with no bootstrap application admission")
+      given ExecutionContext = ExecutionContext.create()
+      given scalacontext: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.execution-classes.standard-work.provider" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.execution-classes.standard-work.mode" -> ConfigurationValue.StringValue("local"),
+          "textus.ai.execution-classes.standard-work.engine" -> ConfigurationValue.StringValue("ollama"),
+          "textus.ai.execution-classes.standard-work.model" -> ConfigurationValue.StringValue("fixture")
+        )),
+        ConfigurationTrace.empty
+      )
+      val registrations = new AiRunnerApplicationPurposeRegistrationSocketSet {}
+      val profiles = AiProfileConfig.fromConfiguration(
+        Some(configuration),
+        AiApplicationPurposeCatalog.fromSocket(registrations)
+      )
+      val state = new AiConcurrencyAdmissionState()
+      val component = _component()
+      component.withScopeContext(ScopeContext(
+        ScopeKind.Component,
+        "textus-ai-late-concurrency-port-spec",
+        None,
+        summon[ExecutionContext].observability
+      ))
+      state.registerBootstrap(Set.empty)
+      val provider = new TextusAiRunnerProvider(
+        component,
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        profiles,
+        state
+      )
+      val runtime = component.withPort(
+        Component.Port
+          .of(provider)
+          .orElse(Component.Port.input(registrations))
+          .orElse(component.port)
+      )
+      val application = new Component() {}.withPort(Component.Port.of(
+        AiRunnerApplicationPurposeRegistration(Vector(AiRunnerApplicationPurpose(
+          "sanpomap-location-investigation",
+          "software-implementation",
+          AiRunnerApplicationPurposePolicy(maxConcurrent = Some(1))
+        )))
+      ))
+
+      When("the application registration is bound through its Port after the runtime scope exists")
+      SpiResolver.resolve(Vector(application, runtime)) shouldBe a[Consequence.Success[_]]
+      val runner = provider.provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))
+      ).toOption.get
+      val policy = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("sanpomap-location-investigation"),
+        purposeRequired = true
+      )).toOption.get.policy
+      val started = new CountDownLatch(1)
+      val release = new CountDownLatch(1)
+      val first = Future {
+        provider.withConcurrencyAdmissionC(policy) {
+          started.countDown()
+          release.await(2, TimeUnit.SECONDS)
+          Consequence.success("first")
+        }
+      }
+      started.await(1, TimeUnit.SECONDS) shouldBe true
+      val second = provider.withConcurrencyAdmissionC(policy)(Consequence.success("second"))
+      release.countDown()
+
+      Then("the late purpose is resolved from the Port and its one-request admission is enforced")
+      second shouldBe a[Consequence.Failure[_]]
+      Await.result(first, 2.seconds) shouldBe a[Consequence.Success[_]]
+      runner.generate(AiGenerateRequest(
+        "late-concurrency-registration",
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-location-investigation"),
+          purposeRequired = true
+        )
+      )) shouldBe a[Consequence.Success[_]]
+    }
+
+    "preserve a bootstrap admission while admitting a late-registered application purpose" in {
+      Given("a component scope with one bootstrap concurrency grant and a distinct late application purpose")
+      given ExecutionContext = ExecutionContext.create()
+      val bootstrapscope = ConcurrencyScopeId.parseC("bootstrap-web-analysis").toOption.get
+      val admission = ScopedConcurrencyAdmission.createC(Vector(ConcurrencyGrant(bootstrapscope, 1))).toOption.get
+      val state = new AiConcurrencyAdmissionState()
+      state.registerBootstrap(Set(bootstrapscope))
+      val scope = ScopeContext(
+        ScopeKind.Component,
+        "textus-ai-late-concurrency-spec",
+        None,
+        summon[ExecutionContext].observability,
+        scopedConcurrencyAdmissionOption = Some(admission)
+      )
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.execution-classes.standard-work.provider" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.execution-classes.standard-work.mode" -> ConfigurationValue.StringValue("local"),
+          "textus.ai.execution-classes.standard-work.engine" -> ConfigurationValue.StringValue("ollama"),
+          "textus.ai.execution-classes.standard-work.model" -> ConfigurationValue.StringValue("fixture")
+        )),
+        ConfigurationTrace.empty
+      )
+      val profiles = AiProfileConfig.fromConfiguration(
+        Some(configuration),
+        AiApplicationPurposeCatalog.fromRegistrations(Vector(
+          AiRunnerApplicationPurposeRegistration(Vector(
+            AiRunnerApplicationPurpose(
+              "bootstrap-web-analysis",
+              "software-implementation",
+              AiRunnerApplicationPurposePolicy(maxConcurrent = Some(1))
+            ),
+            AiRunnerApplicationPurpose(
+              "late-web-analysis",
+              "software-implementation",
+              AiRunnerApplicationPurposePolicy(maxConcurrent = Some(1))
+            )
+          ))
+        ))
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component().withScopeContext(scope),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        profiles,
+        state
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))
+      ).toOption.get
+      val lease = admission.acquireC(bootstrapscope).toOption
+
+      When("the bootstrap and late purposes run after the bootstrap scope is established")
+      val bootstrap = runner.generate(AiGenerateRequest(
+        "bootstrap-concurrency-registration",
+        requirement = AiRunnerRequirement(
+          purpose = Some("bootstrap-web-analysis"),
+          purposeRequired = true
+        )
+      ))
+      lease.foreach(_.release())
+      val late = runner.generate(AiGenerateRequest(
+        "late-concurrency-registration-with-bootstrap",
+        requirement = AiRunnerRequirement(
+          purpose = Some("late-web-analysis"),
+          purposeRequired = true
+        )
+      ))
+
+      Then("the bootstrap limit remains active and the late purpose receives its own admission")
+      bootstrap.isFaillure shouldBe true
+      late shouldBe a[Consequence.Success[_]]
     }
 
     "apply an application-purpose policy to a runtime profile without caller selection" in {

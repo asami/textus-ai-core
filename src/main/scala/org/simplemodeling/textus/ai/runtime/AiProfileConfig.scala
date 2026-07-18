@@ -21,7 +21,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.application-purposes.<application-purpose>.<policy>
  *
  * @since   Jul.  4, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 19, 2026
  * @author  ASAMI, Tomoharu
  */
 /**
@@ -1083,9 +1083,14 @@ private[textus] final class AiProfileConfig(
 
 
   def concurrencyAdmissionC: Consequence[Option[ScopedConcurrencyAdmission]] =
+    concurrencyAdmissionWithScopesC.map(_.map(_._1))
+
+  private[textus] def concurrencyAdmissionWithScopesC: Consequence[Option[(ScopedConcurrencyAdmission, Set[ConcurrencyScopeId])]] =
     _runtime_concurrency_grants_c.flatMap { grants =>
       if (grants.nonEmpty)
-        ScopedConcurrencyAdmission.createC(grants).map(Some(_))
+        ScopedConcurrencyAdmission.createC(grants).map { admission =>
+          Some(admission -> grants.map(_.scope).toSet)
+        }
       else
         Consequence.success(None)
     }

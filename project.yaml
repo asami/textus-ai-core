@@ -9,6 +9,8 @@ project:
     className: "TextusAi"
     displayName: "Textus AI Runtime"
     version: "0.2.1-SNAPSHOT"
+    config:
+      textus.server.default-port: "18001"
 
 publication:
   source_manifest:

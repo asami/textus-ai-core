@@ -183,6 +183,9 @@ completed on 2026-07-18.
 - Phase 3: complete on 2026-07-18.
 - Phase 4: reopened and reclosed on 2026-07-18 for the application-purpose
   registration correction.
+- Phase 4 release follow-up: on 2026-07-19, executable evidence confirmed
+  late application Port binding after runtime scope creation retains the
+  registered concurrency policy; the phase remains closed.
 - Latest phase closure: `docs/phase/phase-4-closure.md`
 - Current next task: define the next runtime expansion phase before adding a
   runtime profile, workflow, or public operation.

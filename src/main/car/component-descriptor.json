@@ -1,5 +1,8 @@
 {
   "name": "textus-ai-runtime",
   "version": "0.2.1-SNAPSHOT",
-  "component": "textus-ai-runtime"
+  "component": "textus-ai-runtime",
+  "config": {
+    "textus.server.default-port": "18001"
+  }
 }

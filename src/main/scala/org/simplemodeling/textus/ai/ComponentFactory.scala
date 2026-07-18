@@ -14,11 +14,11 @@ import org.simplemodeling.textus.ai.provider.gemma.GemmaConfig
 import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexExecutionBinding, CodexExecutionProfile, CodexReasoningLevel, CodexRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
-import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
+import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 19, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -35,12 +35,14 @@ class ComponentFactory extends TextusAiComponent.Factory:
     val codex = configuration.flatMap { value =>
       CodexConfig.fromConfiguration(value, ComponentFactory.codexExecutionProfiles(profiles))
     }
+    val concurrencystate = new AiConcurrencyAdmissionState()
     ComponentFactory.configureRuntimeSpi(
-      new TextusAiRuntimeComponent(codex, profiles),
+      new TextusAiRuntimeComponent(codex, profiles, concurrencystate),
       configuration,
       codex,
       registrations,
-      profiles
+      profiles,
+      concurrencystate
     )
 
   override protected def create_Core(
@@ -83,7 +85,14 @@ object ComponentFactory:
       configuration,
       AiApplicationPurposeCatalog.fromSocket(registrations)
     )
-    configureRuntimeSpi(component, configuration, codexconfig, registrations, profiles)
+    configureRuntimeSpi(
+      component,
+      configuration,
+      codexconfig,
+      registrations,
+      profiles,
+      new AiConcurrencyAdmissionState()
+    )
   }
 
   private[ai] def configureRuntimeSpi(
@@ -91,7 +100,8 @@ object ComponentFactory:
     configuration: Option[ResolvedConfiguration],
     codexconfig: Option[CodexRuntimeConfig],
     registrations: AiRunnerApplicationPurposeRegistrationSocketSet,
-    profiles: AiProfileConfig
+    profiles: AiProfileConfig,
+    concurrencystate: AiConcurrencyAdmissionState
   ): Component =
     val gemma = configuration.flatMap(GemmaConfig.fromConfiguration).getOrElse(GemmaConfig.fromEnvironment())
     val openai = configuration.flatMap(OpenAiConfig.fromConfiguration).orElse(OpenAiConfig.fromEnvironment())
@@ -104,7 +114,7 @@ object ComponentFactory:
     )
     val withgenerate = AiRuntimeGenerateBinding.register(component, Some(gemma), openai, google, codex)
     val withchat = AiRuntimeChatBinding.register(withgenerate, Some(gemma), openai, google, codex)
-    val runnerprovider = new TextusAiRunnerProvider(withchat, defaultselection, profiles)
+    val runnerprovider = new TextusAiRunnerProvider(withchat, defaultselection, profiles, concurrencystate)
     withchat.withPort(
       Component.Port
         .of(
@@ -128,7 +138,8 @@ object ComponentFactory:
 
 private final class TextusAiRuntimeComponent(
   codex: Option[CodexRuntimeConfig],
-  profiles: AiProfileConfig
+  profiles: AiProfileConfig,
+  concurrencystate: AiConcurrencyAdmissionState
 ) extends TextusAiComponent {
   private lazy val _codex_runtime: Option[(ProcessExecutionAdmission, ProcessExecutionDriver)] =
     codex.flatMap { config =>
@@ -137,8 +148,8 @@ private final class TextusAiRuntimeComponent(
       }
     }
 
-  private lazy val _concurrency: Option[ScopedConcurrencyAdmission] =
-    profiles.concurrencyAdmissionC.toOption.flatten
+  private lazy val _concurrency: Option[(ScopedConcurrencyAdmission, Set[org.goldenport.cncf.admission.ConcurrencyScopeId])] =
+    profiles.concurrencyAdmissionWithScopesC.toOption.flatten
 
   override def withScopeContext(parent: ScopeContext): Component = {
     val scope = (_codex_runtime, _concurrency) match {
@@ -155,9 +166,10 @@ private final class TextusAiRuntimeComponent(
           ),
           processExecutionDriverOption = codexruntime.map(_._2),
           processExecutionAdmissionOption = codexruntime.map(_._1),
-          scopedConcurrencyAdmissionOption = admission
+          scopedConcurrencyAdmissionOption = admission.map(_._1)
         )
     }
+    concurrencystate.registerBootstrap(_concurrency.map(_._2).getOrElse(Set.empty))
     super.withScopeContext(scope)
   }
 }
