@@ -291,6 +291,12 @@ selected. Generic purpose names are ordinary purpose values, so a caller may
 request `AiRunnerRequirement(purpose = Some("analysis"))` without
 provider fields.
 
+The current `generic-purposes` configuration is transitional: it binds logical
+levels and may also constrain tools beside the purpose name. The accepted
+design moves those operational choices into an operator-managed execution
+profile, while callers continue to select only `purpose`. See
+[`docs/design/ai-purpose-catalog.md`](docs/design/ai-purpose-catalog.md).
+
 Textus AI maps an effective output-token limit to Google `generateContent` and
 Interactions requests, OpenAI Chat Completions and Responses requests, and
 Gemma/Ollama `options.num_predict`. It rejects an effective output-token limit

@@ -8,44 +8,44 @@ updated_at=2026-07-18
 
 Textus AI defines a small standard catalog of generic purposes. A caller
 selects one of these purposes, or an application-specific purpose that
-explicitly inherits one. Textus AI resolves the selected purpose to a logical
-level, then to an operator-managed model profile, and finally to effective
-provider execution settings.
+explicitly inherits one. Textus AI resolves the selected purpose to an
+operator-managed execution profile. That profile resolves the logical level
+and effective provider execution settings.
 
-The catalog standardizes names and policy mapping; it does not ship a concrete
-provider binding. Each deployment configures the listed generic purposes, its
-logical levels, and approved model profiles. A requested standard purpose that
-is not configured fails structurally before provider execution.
+The catalog standardizes names and intended profile selection; it does not
+ship a concrete provider binding. Each deployment binds the listed generic
+purposes to approved profiles. A requested standard purpose that is not bound
+to a profile fails structurally before provider execution.
 
 The standard purpose vocabulary names user-visible AI intent. It must not name
 a provider, model, command-line tool, application, or domain workflow.
 
 ```text
 purpose
-  -> logical level
-  -> operator-managed model profile
+  -> operator-managed execution profile
+  -> logical level and model profile
   -> provider, mode, engine, model, reasoning, tools, and limits
 ```
 
 ## Standard Catalog
 
-| Purpose | Default logical level | Intent | Tool policy |
-| --- | --- | --- | --- |
-| `quick-response` | `simple-work` | Produce a bounded direct response from caller-supplied input. | No external tools. |
-| `structured-extraction` | `standard-work` | Extract or normalize caller-supplied material into a required structured result. | No external tools. |
-| `analysis` | `standard-deliberation` | Compare, explain, classify, or reason over caller-supplied material. | No external tools. |
-| `deep-analysis` | `deep-deliberation` | Perform higher-cost, deeper reasoning over caller-supplied material. | No external tools. |
-| `web-research` | `deep-deliberation` | Obtain and synthesize information through explicitly admitted external research tools. | `url_context` and `web_search` may be enabled by the operator profile. |
+| Purpose | Intended profile level | Intent |
+| --- | --- | --- |
+| `quick-response` | `simple-work` | Produce a bounded direct response from caller-supplied input. |
+| `structured-extraction` | `standard-work` | Extract or normalize caller-supplied material into a required structured result. |
+| `analysis` | `standard-deliberation` | Compare, explain, classify, or reason over caller-supplied material. |
+| `deep-analysis` | `deep-deliberation` | Perform higher-cost, deeper reasoning over caller-supplied material. |
+| `web-research` | `deep-deliberation` | Request an approved research-oriented execution profile. |
 
 The first four purposes cover every standard logical level. `web-research`
-shares `deep-deliberation` because external retrieval also requires explicit
-source, timeout, concurrency, and cost controls. It is a separate purpose
-because its admitted capabilities and observability requirements differ from
-local analysis.
+shares `deep-deliberation` because research-oriented execution usually needs
+stronger source, timeout, concurrency, and cost controls. It is separate from
+local analysis because its selected profile may admit external capabilities
+and requires a different observability policy.
 
-The default level is an approved policy baseline, not a caller choice. An
-operator can bind a level to a different provider/model profile without
-changing application code. A caller cannot replace the resolved level, model,
+The intended level is an approved policy baseline, not a caller choice. An
+operator can bind a purpose to a different approved profile without changing
+application code. A caller cannot replace the resolved level, model,
 reasoning setting, or tool set through provider-specific request fields.
 
 ## Application Purposes
@@ -64,7 +64,6 @@ textus:
         max-output-tokens: 240
       artscene-exhibition-web-research:
         base-purpose: web-research
-        tools: web_search
         max-output-tokens: 240
         max-concurrent: 1
 ```
@@ -100,55 +99,42 @@ meaning.
 not a separate generic purpose because it requires no capability beyond the
 standard structured-extraction boundary.
 
-## Managed Research
+## Workflow Separation
 
-Managed research is a Phase 3 workflow mode, not an additional standard
-generic purpose. An application purpose such as
-`artscene-exhibition-managed-research` inherits `web-research`; its configured
-workflow may later perform finite research, source comparison, and structured
-synthesis steps.
+Managed research is not an additional standard generic purpose. It is also not
+an approved Textus AI runtime workflow at this point. An application may use a
+purpose such as `artscene-exhibition-managed-research` when it needs to select
+an approved research profile, but the name does not grant a workflow.
 
-This distinction keeps the catalog stable: `web-research` defines the
-provider-neutral intent and capability boundary, while Phase 3 determines the
-bounded execution plan, input budget, and cost-accounting policy.
+If a runtime workflow is needed later, it requires a separate design covering
+its public contract, ownership, admission, lifecycle, budget scope, failure
+semantics, and executable specification. Application orchestration, evidence
+admission, source comparison, and domain fallback remain outside the current
+purpose/profile mechanism.
 
-## Configuration Baseline
+## Profile Ownership
 
-```yaml
-textus:
-  ai:
-    levels:
-      deep-deliberation: { model-profile: approved-deep }
-      standard-deliberation: { model-profile: approved-standard }
-      standard-work: { model-profile: approved-standard }
-      simple-work: { model-profile: approved-simple }
-    generic-purposes:
-      quick-response:
-        level: simple-work
-      structured-extraction:
-        level: standard-work
-      analysis:
-        level: standard-deliberation
-      deep-analysis:
-        level: deep-deliberation
-      web-research:
-        level: deep-deliberation
-        tools: url_context, web_search
-```
+An execution profile is operator-managed configuration. It binds a purpose to
+the approved logical level, provider, mode, engine, model, reasoning, tool
+capabilities, and execution bounds. A profile is not selected directly by an
+ordinary application caller.
 
-The model-profile bindings are deployment-specific. A production operator may
-select a local model, OpenAI, Google Gemini, or Codex CLI only when the selected
-profile and its admitted capabilities support the purpose policy.
+The current `generic-purposes` configuration is a transitional implementation:
+it still places level and some tool selection beside purpose names. It must be
+reconciled to this profile-binding design before the catalog is treated as a
+fully implemented runtime contract. This does not change current explicit
+failure behavior for an unconfigured purpose.
 
 ## Invariants
 
-- Every standard purpose resolves through one logical level and one approved
-  model profile before execution.
-- `web-research` is the only standard purpose that can admit external research
-  tools.
+- Every standard purpose resolves through one approved execution profile,
+  logical level, and model profile before execution.
+- External research tools are admitted only by the selected profile and runtime
+  capability; no purpose name grants a tool.
 - A standard purpose does not imply a provider, model, or provider-specific
-  tool wire format.
-- Application purposes may narrow inherited tools and execution limits but may
-  not broaden them or replace inherited provider/model/reasoning policy.
+  tool wire format or runtime workflow.
+- Application purposes may select only profiles approved by their assembly;
+  they may not broaden approved capabilities or replace profile policy through
+  request fields.
 - Missing, unsupported, or incompatible configured capabilities return a
   structured failure; they do not select a fallback purpose or provider.

@@ -104,22 +104,22 @@ Artifacts:
 - [Phase 2 Checklist](../phase/phase-2-checklist.md)
 - [ArtScene AI Fetch Purpose Contract Handoff](../journal/2026/07/2026-07-18-artscene-ai-fetch-purpose-contract-handoff.md)
 
-### Phase 3: Managed Research and Execution Accounting
+### Phase 3: Profile Binding and Execution Accounting
 
-Goal: execute purpose-selected research as a bounded runtime workflow and make
-input-token and cost decisions attributable without inventing unavailable
-provider facts.
+Goal: complete purpose/profile separation and make input-token and cost
+decisions attributable without inventing unavailable provider facts.
 
 Scope:
 
+- define purpose-to-profile binding so profiles, not callers, select logical
+  level, provider/model, admitted capabilities, and execution bounds;
 - define stable provider-neutral execution facts for usage, estimation,
   accounting identity, and limitations;
-- enforce purpose-policy input-token budgets before execution;
+- enforce profile-policy input-token budgets before execution;
 - support operator-owned rate schedules, explicit cost admission, and measured
   accounting where provider usage permits it; and
-- orchestrate finite managed-research, source-comparison, and structured
-  synthesis steps through resolved purpose policy and admitted CNCF
-  capabilities.
+- record the decision boundary for any future runtime workflow without
+  implementing application orchestration in this phase.
 
 Non-goals:
 
@@ -128,7 +128,8 @@ Non-goals:
 - fabricated usage, price, quota, or monetary-cost values;
 - implicit provider/model/tool or application fetch-method fallback; and
 - application evidence policy, source authority, or final domain-result
-  acceptance.
+  acceptance; and
+- managed-research or other multi-step runtime workflow implementation.
 
 Artifacts:
 
@@ -147,10 +148,10 @@ completed on 2026-07-18.
 ## Process Status
 
 - Phase 2: complete on 2026-07-18.
-- Current phase: Phase 3, Managed Research and Execution Accounting.
+- Current phase: Phase 3, Profile Binding and Execution Accounting.
 - Current phase dashboard: `docs/phase/phase-3.md`
 - Current phase checklist: `docs/phase/phase-3-checklist.md`
-- Current next task: MR-01 execution-fact contract consolidation.
+- Current next task: PB-01 purpose-to-profile binding.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
