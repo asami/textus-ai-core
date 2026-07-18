@@ -131,6 +131,7 @@ identifiers. It is absent when no limitation applies. Initial identifiers are:
 - `cancellation_not_propagated`
 - `concurrency_not_enforced`
 - `output_limit_not_verified`
+- `reasoning_limit_not_verified`
 
 The value identifies a missing measurement or execution boundary. It must not
 contain provider error bodies, credentials, account data, URLs, prompt text, or
@@ -141,7 +142,10 @@ Current Textus AI runner responses always record
 propagate a caller cancellation signal. `concurrency_not_enforced` is omitted
 when a purpose configures and acquires CNCF scoped concurrency admission.
 `output_limit_not_verified` is added when an effective output-token limit is
-sent to a provider that omits its output-token measurement. Record generation
+sent to a provider that omits its output-token measurement.
+`reasoning_limit_not_verified` is added under the equivalent condition for an
+effective reasoning-token limit. A provider-reported output or reasoning value
+above its configured limit is rejected after provider execution. Record generation
 retries only empty responses and explicit timeout-like failures, at most three
 times, using `ai.record.retry-limit` (default `1`).
 
@@ -156,8 +160,11 @@ EA-01.
 
 Neither response metadata nor CallTree records may contain raw evidence, prompt
 text, response text, authorization headers, credentials, account identity,
-price or currency amount, provider error bodies, provider-specific metadata, or
-arbitrary request metadata.
+rate values, price or currency amount, provider error bodies,
+provider-specific metadata, or arbitrary request metadata. Phase 3 EA-03
+permits the CallTree-only `ai.accounting.cost_microunits` schedule-relative
+operator quantity with its basis and opaque schedule identity; it is not a
+currency or provider-billing assertion.
 
 `input_digest` and `output_digest` are permitted only when the digest is
 calculated over the bounded payload and uses the declared `sha256:<hex>` form.

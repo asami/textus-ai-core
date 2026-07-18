@@ -884,6 +884,175 @@ final class TextusAiRunnerSpec
       _GenerateServiceState.count(prompt) shouldBe 0
     }
 
+    "account provider-reported usage through an operator rate schedule without exposing cost in the response" in {
+      Given("a cost-bounded execution class and a Google provider that reports usage")
+      given ExecutionContext =
+        ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.execution-classes.standard-work.model-profile" -> ConfigurationValue.StringValue("google-standard"),
+          "textus.ai.execution-classes.standard-work.max-cost-microunits" -> ConfigurationValue.StringValue("100"),
+          "textus.ai.execution-classes.standard-work.rate-schedule" -> ConfigurationValue.StringValue("test-rates"),
+          "textus.ai.model-profiles.google-standard.provider" -> ConfigurationValue.StringValue("google"),
+          "textus.ai.model-profiles.google-standard.mode" -> ConfigurationValue.StringValue("remote"),
+          "textus.ai.model-profiles.google-standard.engine" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.model-profiles.google-standard.model" -> ConfigurationValue.StringValue("gemini-test"),
+          "textus.ai.purposes.costed-work.execution-class" -> ConfigurationValue.StringValue("standard-work"),
+          "textus.ai.purposes.costed-work.max-output-tokens" -> ConfigurationValue.StringValue("10"),
+          "textus.ai.rate-schedules.test-rates.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1000000"),
+          "textus.ai.rate-schedules.test-rates.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.test-rates.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("2000000"),
+          "textus.ai.rate-schedules.test-rates.reasoning-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("google"), mode = Some("remote"), engine = Some("gemini")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("the bounded purpose generates a response")
+      val generated = runner.generate(AiGenerateRequest(
+        "execution-facts",
+        requirement = AiRunnerRequirement(purpose = Some("costed-work"), purposeRequired = true)
+      )).toOption.get
+
+      Then("response metadata retains policy identity but CallTree alone contains the operator accounting result")
+      generated.metadata(AiExecutionFacts.POLICY_MAX_COST_MICROUNITS) shouldBe "100"
+      generated.metadata should not contain AiExecutionFacts.RATE_SCHEDULE_ID
+      generated.metadata should not contain AiExecutionFacts.COST_MICROUNITS
+      generated.metadata(AiExecutionFacts.LIMITATION_CODES) should not include "rate_schedule_unavailable"
+      val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
+      val record = ObservabilityEngine.callTreeRecord(calltree)
+      val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
+      val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate")).value
+      node.getString(s"response_metadata.${AiExecutionFacts.RATE_SCHEDULE_ID}") shouldBe Some("test-rates")
+      node.getString(s"response_metadata.${AiExecutionFacts.COST_MICROUNITS}") shouldBe Some("29")
+      node.getString(s"response_metadata.${AiExecutionFacts.COST_BASIS}") shouldBe Some(AiCostAccounting.measuredBasis)
+      node.getString("prompt") shouldBe empty
+    }
+
+    "reject a cost budget before provider execution and reject missing cost bounds structurally" in {
+      Given("two execution-class cost policies with an over-budget or incomplete accounting prerequisite")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "cost"
+      _GenerateServiceState.reset(prompt)
+      def _runner_(maxcost: String, includeoutputlimit: Boolean): AiRunner = {
+        val output = if (includeoutputlimit)
+          Map("textus.ai.purposes.costed-work.max-output-tokens" -> ConfigurationValue.StringValue("10"))
+        else Map.empty[String, ConfigurationValue]
+        val values = Map(
+          "textus.ai.execution-classes.standard-work.model-profile" -> ConfigurationValue.StringValue("google-standard"),
+          "textus.ai.execution-classes.standard-work.max-cost-microunits" -> ConfigurationValue.StringValue(maxcost),
+          "textus.ai.execution-classes.standard-work.rate-schedule" -> ConfigurationValue.StringValue("test-rates"),
+          "textus.ai.model-profiles.google-standard.provider" -> ConfigurationValue.StringValue("google"),
+          "textus.ai.model-profiles.google-standard.mode" -> ConfigurationValue.StringValue("remote"),
+          "textus.ai.model-profiles.google-standard.engine" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.purposes.costed-work.execution-class" -> ConfigurationValue.StringValue("standard-work"),
+          "textus.ai.rate-schedules.test-rates.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1000000"),
+          "textus.ai.rate-schedules.test-rates.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.test-rates.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("2000000"),
+          "textus.ai.rate-schedules.test-rates.reasoning-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0")
+        ) ++ output
+        new TextusAiRunnerProvider(
+          _component(),
+          SpiSelection(provider = Some("google"), mode = Some("remote"), engine = Some("gemini")),
+          AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(Configuration(values), ConfigurationTrace.empty)))
+        ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.get
+      }
+      val requirement = AiRunnerRequirement(purpose = Some("costed-work"), purposeRequired = true)
+
+      When("one request exceeds its configured upper bound and another has no output bound")
+      val overbudget = _runner_("20", true).generate(AiGenerateRequest(prompt, requirement = requirement))
+      val missingbound = _runner_("100", false).generate(AiGenerateRequest(prompt, requirement = requirement))
+
+      Then("both failures occur before the provider can execute or select a fallback")
+      overbudget.toString should include ("AI cost budget exceeded: limit=20 estimated=24")
+      missingbound.toString should include ("AI cost budget requires max-output-tokens")
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
+    "retain a configured cost upper bound as an explicit estimate when provider usage is unavailable" in {
+      Given("a cost-bounded local execution class whose provider reports no usage")
+      given ExecutionContext =
+        ExecutionContext.withFrameworkCallTreeEnabled(ExecutionContext.create(), enabled = true)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.execution-classes.simple-work.model-profile" -> ConfigurationValue.StringValue("gemma-simple"),
+          "textus.ai.execution-classes.simple-work.max-cost-microunits" -> ConfigurationValue.StringValue("20"),
+          "textus.ai.execution-classes.simple-work.rate-schedule" -> ConfigurationValue.StringValue("test-rates"),
+          "textus.ai.model-profiles.gemma-simple.provider" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.model-profiles.gemma-simple.mode" -> ConfigurationValue.StringValue("local"),
+          "textus.ai.model-profiles.gemma-simple.engine" -> ConfigurationValue.StringValue("ollama"),
+          "textus.ai.purposes.costed-local.execution-class" -> ConfigurationValue.StringValue("simple-work"),
+          "textus.ai.rate-schedules.test-rates.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1000000"),
+          "textus.ai.rate-schedules.test-rates.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.test-rates.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.test-rates.reasoning-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.get
+
+      When("the local provider completes without normalized reported usage")
+      val generated = runner.generate(AiGenerateRequest(
+        "costed",
+        requirement = AiRunnerRequirement(purpose = Some("costed-local"), purposeRequired = true)
+      )).toOption.get
+
+      Then("the response records the limitation and CallTree records the schedule-relative upper bound")
+      generated.metadata(AiExecutionFacts.LIMITATION_CODES) should include ("cost_estimated")
+      val calltree = summon[ExecutionContext].observability.callTreeContext.build().value
+      val record = ObservabilityEngine.callTreeRecord(calltree)
+      val nodes = record.asMap("calltree").asInstanceOf[Seq[Record]]
+      val node = nodes.find(_.getString("label").contains("provider:textus-ai-runner:generate")).value
+      node.getString(s"response_metadata.${AiExecutionFacts.COST_MICROUNITS}") shouldBe Some("6")
+      node.getString(s"response_metadata.${AiExecutionFacts.COST_BASIS}") shouldBe Some(AiCostAccounting.admissionBasis)
+    }
+
+    "reject an incomplete operator rate schedule before provider execution" in {
+      Given("a cost-bounded execution class with one missing schedule rate")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "incomplete-rate-schedule"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.execution-classes.standard-work.model-profile" -> ConfigurationValue.StringValue("google-standard"),
+          "textus.ai.execution-classes.standard-work.max-cost-microunits" -> ConfigurationValue.StringValue("100"),
+          "textus.ai.execution-classes.standard-work.rate-schedule" -> ConfigurationValue.StringValue("incomplete-rates"),
+          "textus.ai.model-profiles.google-standard.provider" -> ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.incomplete-costed.execution-class" -> ConfigurationValue.StringValue("standard-work"),
+          "textus.ai.rate-schedules.incomplete-rates.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1"),
+          "textus.ai.rate-schedules.incomplete-rates.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.incomplete-rates.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("1")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("google"), mode = Some("remote"), engine = Some("gemini")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.get
+
+      When("the purpose resolves its operator schedule")
+      val result = runner.generate(AiGenerateRequest(
+        prompt,
+        requirement = AiRunnerRequirement(purpose = Some("incomplete-costed"), purposeRequired = true)
+      ))
+
+      Then("configuration fails before the selected Google provider runs")
+      result.toString should include ("Invalid AI rate schedule reasoning-microunits-per-million-tokens")
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
     "reject malformed purpose concurrency before invoking a provider" in {
       Given("a required purpose profile with an invalid concurrency limit")
       given ExecutionContext = ExecutionContext.create()

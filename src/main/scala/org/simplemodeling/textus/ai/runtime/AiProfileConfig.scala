@@ -26,6 +26,9 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.purposes.<purpose>.tools
  * - textus.ai.purposes.<purpose>.max-input-tokens
  * - textus.ai.purposes.<purpose>.max-output-tokens
+ * - textus.ai.purposes.<purpose>.max-reasoning-tokens
+ * - textus.ai.purposes.<purpose>.max-cost-microunits
+ * - textus.ai.purposes.<purpose>.rate-schedule
  * - textus.ai.purposes.<purpose>.timeout-seconds
  * - textus.ai.purposes.<purpose>.record-retry-limit
  * - textus.ai.purposes.<purpose>.max-concurrent
@@ -43,6 +46,13 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.model-profiles.<profile>.latency
  * - textus.ai.execution-classes.<execution-class>.model-profile
  * - textus.ai.execution-classes.<execution-class>.max-input-tokens
+ * - textus.ai.execution-classes.<execution-class>.max-reasoning-tokens
+ * - textus.ai.execution-classes.<execution-class>.max-cost-microunits
+ * - textus.ai.execution-classes.<execution-class>.rate-schedule
+ * - textus.ai.rate-schedules.<schedule>.input-microunits-per-million-tokens
+ * - textus.ai.rate-schedules.<schedule>.cached-input-microunits-per-million-tokens
+ * - textus.ai.rate-schedules.<schedule>.output-microunits-per-million-tokens
+ * - textus.ai.rate-schedules.<schedule>.reasoning-microunits-per-million-tokens
  * - textus.ai.generic-purposes.<purpose>.execution-class
  * - textus.ai.levels.<level>.model-profile (migration fallback)
  * - textus.ai.generic-purposes.<purpose>.level (migration fallback)
@@ -88,6 +98,9 @@ private[textus] final case class AiPurposeProfile(
   tools: Vector[AiTool] = Vector.empty,
   maxInputTokens: Option[String] = None,
   maxOutputTokens: Option[String] = None,
+  maxReasoningTokens: Option[String] = None,
+  maxCostMicrounits: Option[String] = None,
+  rateSchedule: Option[String] = None,
   timeoutSeconds: Option[String] = None,
   recordRetryLimit: Option[String] = None,
   maxConcurrent: Option[String] = None,
@@ -115,6 +128,9 @@ private[textus] final case class AiPurposeProfile(
 private[textus] final case class AiPurposePolicy(
   maxInputTokens: Option[Int] = None,
   maxOutputTokens: Option[Int] = None,
+  maxReasoningTokens: Option[Int] = None,
+  maxCostMicrounits: Option[Long] = None,
+  rateSchedule: Option[String] = None,
   timeoutSeconds: Option[Long] = None,
   recordRetryLimit: Option[Int] = None,
   maxConcurrent: Option[Int] = None,
@@ -129,6 +145,19 @@ private[textus] final case class AiPurposePolicy(
           "ai.input-budget",
           s"AI input budget exceeded: limit=$limit estimated=${estimate.tokens} basis=${AiInputTokenEstimator.basis}"
         )
+      case _ =>
+        Consequence.unit
+    }
+
+  def validateCostBudget(admission: Option[AiCostAdmission]): Consequence[Unit] =
+    (maxCostMicrounits, admission) match {
+      case (Some(limit), Some(estimate)) if estimate.upperBoundMicrounits > limit =>
+        Consequence.operationIllegal(
+          "ai.cost-budget",
+          s"AI cost budget exceeded: limit=$limit estimated=${estimate.upperBoundMicrounits} basis=${AiCostAccounting.admissionBasis}"
+        )
+      case (Some(_), None) =>
+        Consequence.configurationInvalid("AI cost budget has no admissible rate schedule estimate")
       case _ =>
         Consequence.unit
     }
@@ -207,6 +236,7 @@ private[textus] final case class AiProfileResolution(
   requirement: AiRunnerRequirement,
   policy: AiPurposePolicy = AiPurposePolicy.empty,
   modelProfile: Option[AiModelProfile] = None,
+  rateSchedule: Option[AiRateSchedule] = None,
   genericPurpose: Option[String] = None,
   logicalLevel: Option[String] = None
 ) {
@@ -230,6 +260,50 @@ private[textus] final case class AiProfileResolution(
   def reasoningLevel: Option[String] =
     modelProfile.flatMap(_.reasoningLevel)
 
+  def costAdmissionC(
+    input: AiInputTokenEstimate,
+    maxOutputTokens: Option[Int]
+  ): Consequence[Option[AiCostAdmission]] =
+    (policy.maxCostMicrounits, rateSchedule) match {
+      case (None, _) => Consequence.success(None)
+      case (Some(_), Some(schedule)) =>
+        for {
+          output <- _cost_bound_c(maxOutputTokens, schedule.outputMicrounitsPerMillion, "max-output-tokens")
+          reasoning <- _cost_bound_c(policy.maxReasoningTokens, schedule.reasoningMicrounitsPerMillion, "max-reasoning-tokens")
+          admission <- AiCostAccounting.admissionC(schedule, input, output, reasoning)
+        } yield Some(admission)
+      case (Some(_), None) =>
+        Consequence.configurationInvalid("AI cost budget requires an operator rate schedule")
+    }
+
+  def accountingFacts(
+    metadata: Map[String, String],
+    admission: Option[AiCostAdmission]
+  ): AiAccountingFacts =
+    rateSchedule match {
+      case Some(schedule) =>
+        _reported_cost_c(schedule, metadata) match {
+          case Consequence.Success(cost) => AiAccountingFacts(
+            rateScheduleId = Some(schedule.id),
+            costMicrounits = Some(cost),
+            costBasis = Some(AiCostAccounting.measuredBasis)
+          )
+          case Consequence.Failure(_) => admission match {
+            case Some(estimate) => AiAccountingFacts(
+              rateScheduleId = Some(schedule.id),
+              costMicrounits = Some(estimate.upperBoundMicrounits),
+              costBasis = Some(AiCostAccounting.admissionBasis),
+              limitations = Vector("cost_estimated")
+            )
+            case None => AiAccountingFacts(
+              rateScheduleId = Some(schedule.id),
+              limitations = Vector("cost_unavailable")
+            )
+          }
+        }
+      case None => AiAccountingFacts.empty
+    }
+
   def executionMetadata(
     maxTokens: Option[Int],
     properties: Vector[org.goldenport.protocol.Property],
@@ -240,6 +314,8 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.POLICY_MAX_INPUT_TOKENS -> policy.maxInputTokens.map(_.toString),
       AiExecutionFacts.POLICY_INPUT_BUDGET_BASIS -> Option.when(policy.maxInputTokens.nonEmpty)(AiInputTokenEstimator.basis),
       AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS -> maxTokens.map(_.toString),
+      AiExecutionFacts.POLICY_MAX_REASONING_TOKENS -> policy.maxReasoningTokens.map(_.toString),
+      AiExecutionFacts.POLICY_MAX_COST_MICROUNITS -> policy.maxCostMicrounits.map(_.toString),
       AiExecutionFacts.POLICY_TIMEOUT_SECONDS -> AiRequestProperties.timeoutSeconds(properties).map(_.toString),
       AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT -> recordRetryLimit.map(_.toString),
       AiExecutionFacts.POLICY_MAX_CONCURRENT -> policy.maxConcurrent.map(_.toString),
@@ -277,6 +353,44 @@ private[textus] final case class AiProfileResolution(
 
   private def _is_openai(value: String): Boolean =
     value.trim.equalsIgnoreCase("openai")
+
+  private def _required_cost_bound(value: Option[Int], label: String): Consequence[Int] =
+    value match {
+      case Some(bound) => Consequence.success(bound)
+      case None => Consequence.configurationInvalid(s"AI cost budget requires $label")
+    }
+
+  private def _cost_bound_c(
+    value: Option[Int],
+    rate: Long,
+    label: String
+  ): Consequence[Int] =
+    if (rate == 0) Consequence.success(0)
+    else _required_cost_bound(value, label)
+
+  private def _reported_cost_c(
+    schedule: AiRateSchedule,
+    metadata: Map[String, String]
+  ): Consequence[Long] =
+    for {
+      input <- _reported_usage_c(metadata, AiExecutionFacts.INPUT_TOKENS, schedule.inputMicrounitsPerMillion > 0 || schedule.cachedInputMicrounitsPerMillion > 0)
+      cached <- _reported_usage_c(metadata, AiExecutionFacts.CACHED_INPUT_TOKENS, schedule.cachedInputMicrounitsPerMillion > 0)
+      output <- _reported_usage_c(metadata, AiExecutionFacts.OUTPUT_TOKENS, schedule.outputMicrounitsPerMillion > 0)
+      reasoning <- _reported_usage_c(metadata, AiExecutionFacts.REASONING_TOKENS, schedule.reasoningMicrounitsPerMillion > 0)
+      cost <- AiCostAccounting.measuredC(schedule, input, cached, output, reasoning)
+    } yield cost
+
+  private def _reported_usage_c(
+    metadata: Map[String, String],
+    key: String,
+    required: Boolean
+  ): Consequence[Long] =
+    metadata.get(key).flatMap(_.toLongOption).filter(_ >= 0) match {
+      case Some(value) if metadata.get(s"${key}_source").contains(AiUsageSource.Reported.id) =>
+        Consequence.success(value)
+      case None if !required => Consequence.success(0L)
+      case _ => Consequence.configurationInvalid(s"AI provider did not report required usage: $key")
+    }
 }
 
 private[textus] object AiPurposePolicy {
@@ -331,6 +445,18 @@ private[textus] final class AiProfileConfig(
           _purpose_keys(normalized, "max-output-tokens") ++
             _purpose_keys(normalized, "maxOutputTokens")
         ),
+        maxReasoningTokens = _config_string(
+          _purpose_keys(normalized, "max-reasoning-tokens") ++
+            _purpose_keys(normalized, "maxReasoningTokens")
+        ),
+        maxCostMicrounits = _config_string(
+          _purpose_keys(normalized, "max-cost-microunits") ++
+            _purpose_keys(normalized, "maxCostMicrounits")
+        ),
+        rateSchedule = _config_string(
+          _purpose_keys(normalized, "rate-schedule") ++
+            _purpose_keys(normalized, "rateSchedule")
+        ),
         timeoutSeconds = _config_string(
           _purpose_keys(normalized, "timeout-seconds") ++
             _purpose_keys(normalized, "timeoutSeconds")
@@ -370,6 +496,9 @@ private[textus] final class AiProfileConfig(
         profile.tools.nonEmpty ||
         profile.maxInputTokens.nonEmpty ||
         profile.maxOutputTokens.nonEmpty ||
+        profile.maxReasoningTokens.nonEmpty ||
+        profile.maxCostMicrounits.nonEmpty ||
+        profile.rateSchedule.nonEmpty ||
         profile.timeoutSeconds.nonEmpty ||
         profile.recordRetryLimit.nonEmpty ||
         profile.maxConcurrent.nonEmpty ||
@@ -405,6 +534,9 @@ private[textus] final class AiProfileConfig(
             _generic_purpose_keys(normalized, "maxInputTokens")
         ),
         maxOutputTokens = _config_string(_generic_purpose_keys(normalized, "max-output-tokens") ++ _generic_purpose_keys(normalized, "maxOutputTokens")),
+        maxReasoningTokens = _config_string(_generic_purpose_keys(normalized, "max-reasoning-tokens") ++ _generic_purpose_keys(normalized, "maxReasoningTokens")),
+        maxCostMicrounits = _config_string(_generic_purpose_keys(normalized, "max-cost-microunits") ++ _generic_purpose_keys(normalized, "maxCostMicrounits")),
+        rateSchedule = _config_string(_generic_purpose_keys(normalized, "rate-schedule") ++ _generic_purpose_keys(normalized, "rateSchedule")),
         timeoutSeconds = _config_string(_generic_purpose_keys(normalized, "timeout-seconds") ++ _generic_purpose_keys(normalized, "timeoutSeconds")),
         recordRetryLimit = _config_string(_generic_purpose_keys(normalized, "record-retry-limit") ++ _generic_purpose_keys(normalized, "recordRetryLimit")),
         maxConcurrent = _config_string(_generic_purpose_keys(normalized, "max-concurrent") ++ _generic_purpose_keys(normalized, "maxConcurrent")),
@@ -422,6 +554,9 @@ private[textus] final class AiProfileConfig(
         profile.tools.nonEmpty ||
         profile.maxInputTokens.nonEmpty ||
         profile.maxOutputTokens.nonEmpty ||
+        profile.maxReasoningTokens.nonEmpty ||
+        profile.maxCostMicrounits.nonEmpty ||
+        profile.rateSchedule.nonEmpty ||
         profile.timeoutSeconds.nonEmpty ||
         profile.recordRetryLimit.nonEmpty ||
         profile.maxConcurrent.nonEmpty ||
@@ -606,6 +741,18 @@ private[textus] final class AiProfileConfig(
         case Some(executionclass) => _execution_class_max_input_tokens_c(executionclass)
         case None => Consequence.success(None)
       }
+      classmaxreasoning <- effective match {
+        case Some(executionclass) => _execution_class_max_reasoning_tokens_c(executionclass)
+        case None => Consequence.success(None)
+      }
+      classmaxcost <- effective match {
+        case Some(executionclass) => _execution_class_max_cost_microunits_c(executionclass)
+        case None => Consequence.success(None)
+      }
+      classrateschedule <- effective match {
+        case Some(executionclass) => _execution_class_rate_schedule_c(executionclass)
+        case None => Consequence.success(None)
+      }
       materialized <- effective match {
         case Some(executionclass) =>
           _execution_class_model_profile(executionclass).flatMap {
@@ -614,7 +761,10 @@ private[textus] final class AiProfileConfig(
                 executionClass = Some(executionclass.id),
                 level = None,
                 modelProfile = Some(modelprofile),
-                maxInputTokens = profile.maxInputTokens.orElse(classmaxinput)
+                maxInputTokens = profile.maxInputTokens.orElse(classmaxinput),
+                maxReasoningTokens = profile.maxReasoningTokens.orElse(classmaxreasoning),
+                maxCostMicrounits = profile.maxCostMicrounits.orElse(classmaxcost),
+                rateSchedule = profile.rateSchedule.orElse(classrateschedule)
               ))
             case Some(_) =>
               Consequence.configurationInvalid(
@@ -719,6 +869,53 @@ private[textus] final class AiProfileConfig(
     }
   }
 
+  private def _execution_class_max_reasoning_tokens_c(
+    executionclass: AiExecutionClass
+  ): Consequence[Option[String]] =
+    _execution_class_positive_int_c(executionclass, "max-reasoning-tokens")
+
+  private def _execution_class_max_cost_microunits_c(
+    executionclass: AiExecutionClass
+  ): Consequence[Option[String]] = {
+    val value = _config_string(_execution_class_keys(executionclass.id, "max-cost-microunits") ++
+      _execution_class_keys(executionclass.id, "maxCostMicrounits"))
+    value match {
+      case Some(raw) if raw.toLongOption.exists(_ > 0) => Consequence.success(value)
+      case Some(_) => Consequence.configurationInvalid(
+        s"Invalid AI execution-class max-cost-microunits: ${executionclass.id}"
+      )
+      case None => Consequence.success(None)
+    }
+  }
+
+  private def _execution_class_rate_schedule_c(
+    executionclass: AiExecutionClass
+  ): Consequence[Option[String]] = {
+    val value = _config_string(_execution_class_keys(executionclass.id, "rate-schedule") ++
+      _execution_class_keys(executionclass.id, "rateSchedule"))
+    value match {
+      case Some(raw) if raw.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}") => Consequence.success(value)
+      case Some(_) => Consequence.configurationInvalid(
+        s"Invalid AI execution-class rate-schedule: ${executionclass.id}"
+      )
+      case None => Consequence.success(None)
+    }
+  }
+
+  private def _execution_class_positive_int_c(
+    executionclass: AiExecutionClass,
+    label: String
+  ): Consequence[Option[String]] = {
+    val value = _config_string(_execution_class_keys(executionclass.id, label))
+    value match {
+      case Some(raw) if raw.toIntOption.exists(_ > 0) => Consequence.success(value)
+      case Some(_) => Consequence.configurationInvalid(
+        s"Invalid AI execution-class $label: ${executionclass.id}"
+      )
+      case None => Consequence.success(None)
+    }
+  }
+
   private def _inherit_purpose(
     base: AiPurposeProfile,
     application: AiPurposeProfile
@@ -739,6 +936,9 @@ private[textus] final class AiProfileConfig(
       tools = if (application.tools.nonEmpty) application.tools else base.tools,
       maxInputTokens = application.maxInputTokens.orElse(base.maxInputTokens),
       maxOutputTokens = application.maxOutputTokens.orElse(base.maxOutputTokens),
+      maxReasoningTokens = application.maxReasoningTokens.orElse(base.maxReasoningTokens),
+      maxCostMicrounits = application.maxCostMicrounits.orElse(base.maxCostMicrounits),
+      rateSchedule = application.rateSchedule.orElse(base.rateSchedule),
       timeoutSeconds = application.timeoutSeconds.orElse(base.timeoutSeconds),
       recordRetryLimit = application.recordRetryLimit.orElse(base.recordRetryLimit),
       maxConcurrent = application.maxConcurrent.orElse(base.maxConcurrent),
@@ -757,6 +957,8 @@ private[textus] final class AiProfileConfig(
       materialized <- _materialize_execution_class(requirement, profile)
       modelprofile <- _resolve_model_profile(materialized)
       policy <- _purpose_policy(materialized)
+      rateschedule <- _rate_schedule_c(policy.rateSchedule)
+      _ <- _validate_cost_policy(policy, rateschedule)
       resolution <- {
         val profileprovider = materialized.provider.orElse(modelprofile.flatMap(_.provider))
         val effective = materialized.applyTo(requirement, modelprofile)
@@ -770,12 +972,45 @@ private[textus] final class AiProfileConfig(
               effective,
               policy,
               modelprofile,
+              rateschedule,
               origin.flatMap(_.genericPurpose),
               origin.flatMap(_.logicalLevel)
             )
           }
       }
     } yield resolution
+
+  private def _rate_schedule_c(
+    id: Option[String]
+  ): Consequence[Option[AiRateSchedule]] =
+    id match {
+      case Some(value) => _resolve_rate_schedule_c(value).map(Some(_))
+      case None => Consequence.success(None)
+    }
+
+  private def _resolve_rate_schedule_c(id: String): Consequence[AiRateSchedule] =
+    for {
+      input <- _rate_value_c(id, "input-microunits-per-million-tokens")
+      cached <- _rate_value_c(id, "cached-input-microunits-per-million-tokens")
+      output <- _rate_value_c(id, "output-microunits-per-million-tokens")
+      reasoning <- _rate_value_c(id, "reasoning-microunits-per-million-tokens")
+    } yield AiRateSchedule(id, input, cached, output, reasoning)
+
+  private def _rate_value_c(id: String, leaf: String): Consequence[Long] =
+    _config_string(_rate_schedule_keys(id, leaf)) match {
+      case Some(raw) if raw.toLongOption.exists(_ >= 0) => Consequence.success(raw.toLong)
+      case _ => Consequence.configurationInvalid(s"Invalid AI rate schedule $leaf: $id")
+    }
+
+  private def _validate_cost_policy(
+    policy: AiPurposePolicy,
+    schedule: Option[AiRateSchedule]
+  ): Consequence[Unit] =
+    (policy.maxCostMicrounits, schedule) match {
+      case (Some(_), None) =>
+        Consequence.configurationInvalid("AI cost budget requires an operator rate schedule")
+      case _ => Consequence.unit
+    }
 
   private def _validate_narrowing(
     base: AiProfileResolution,
@@ -815,8 +1050,11 @@ private[textus] final class AiProfileConfig(
     base: AiPurposePolicy,
     application: AiPurposePolicy
   ): Boolean =
-    _at_most(application.maxInputTokens, base.maxInputTokens) &&
+      _at_most(application.maxInputTokens, base.maxInputTokens) &&
       _at_most(application.maxOutputTokens, base.maxOutputTokens) &&
+      _at_most(application.maxReasoningTokens, base.maxReasoningTokens) &&
+      _at_most(application.maxCostMicrounits, base.maxCostMicrounits) &&
+      _same_or_added(application.rateSchedule, base.rateSchedule) &&
       _at_most(application.timeoutSeconds, base.timeoutSeconds) &&
       _at_most(application.recordRetryLimit, base.recordRetryLimit) &&
       _at_most(application.maxConcurrent, base.maxConcurrent) &&
@@ -902,6 +1140,9 @@ private[textus] final class AiProfileConfig(
     for {
       maxinputtokens <- _positive_int(profile.maxInputTokens, "max-input-tokens", profile.purpose)
       maxtokens <- _positive_int(profile.maxOutputTokens, "max-output-tokens", profile.purpose)
+      maxreasoningtokens <- _positive_int(profile.maxReasoningTokens, "max-reasoning-tokens", profile.purpose)
+      maxcostmicrounits <- _positive_long(profile.maxCostMicrounits, "max-cost-microunits", profile.purpose)
+      rateschedule <- _policy_id(profile.rateSchedule, "rate-schedule", profile.purpose)
       timeoutseconds <- _positive_long(profile.timeoutSeconds, "timeout-seconds", profile.purpose)
       retrylimit <- _bounded_int(profile.recordRetryLimit, "record-retry-limit", profile.purpose, 0, 3)
       maxconcurrent <- _positive_int(profile.maxConcurrent, "max-concurrent", profile.purpose)
@@ -912,6 +1153,9 @@ private[textus] final class AiProfileConfig(
     } yield AiPurposePolicy(
       maxInputTokens = maxinputtokens,
       maxOutputTokens = maxtokens,
+      maxReasoningTokens = maxreasoningtokens,
+      maxCostMicrounits = maxcostmicrounits,
+      rateSchedule = rateschedule,
       timeoutSeconds = timeoutseconds,
       recordRetryLimit = retrylimit,
       maxConcurrent = maxconcurrent,
@@ -1066,6 +1310,18 @@ private[textus] final class AiProfileConfig(
       s"textus.runtime.ai.model-profiles.$profile.$leaf",
       s"cncf.ai.model-profiles.$profile.$leaf",
       s"cncf.runtime.ai.model-profiles.$profile.$leaf"
+    )
+
+  private def _rate_schedule_keys(
+    schedule: String,
+    leaf: String
+  ): Vector[String] =
+    Vector(
+      s"textus.ai.rate-schedules.$schedule.$leaf",
+      s"textus.ai.rateSchedules.$schedule.$leaf",
+      s"textus.runtime.ai.rate-schedules.$schedule.$leaf",
+      s"cncf.ai.rate-schedules.$schedule.$leaf",
+      s"cncf.runtime.ai.rate-schedules.$schedule.$leaf"
     )
 
   private def _config_string(

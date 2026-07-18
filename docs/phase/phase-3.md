@@ -56,7 +56,7 @@ multi-step workflow.
 | EC-01 | Execution class | CNCF exposes `executionClass`; Textus AI resolves it with purpose to approved operator configuration. | done |
 | EA-01 | Execution facts | Stable provider-neutral usage, estimate, accounting, and limitation facts have defined ownership and safe publication. | done |
 | EA-02 | Input-budget admission | Execution-class policy validates and enforces bounded input-token admission before provider execution. | done |
-| EA-03 | Cost accounting and admission | Execution-class policy can apply an operator-owned rate schedule and reject over-budget or unaccountable execution explicitly. | open |
+| EA-03 | Cost accounting and admission | Execution-class policy can apply an operator-owned rate schedule and reject over-budget or unaccountable execution explicitly. | done |
 | WB-01 | Workflow boundary | A separate decision records whether future runtime workflow support is needed and what contract it would require. | open |
 | ES-01 | Executable specification | Deterministic specifications, operator documentation, and review evidence close the phase. | open |
 
@@ -89,5 +89,6 @@ multi-step workflow.
 - [Execution Class Selector Audit](../notes/execution-class-selector-audit.md)
 - [Execution Class Terminology Handoff](../journal/2026/07/2026-07-18-execution-class-terminology-handoff.md)
 - [AI Input-Budget Admission](../design/ai-input-budget-admission.md)
+- [AI Cost Accounting and Admission](../design/ai-cost-accounting-admission.md)
 - [ArtScene AI Fetch Purpose Contract Handoff](../journal/2026/07/2026-07-18-artscene-ai-fetch-purpose-contract-handoff.md)
 - [Phase 3 Checklist](phase-3-checklist.md)

@@ -50,6 +50,8 @@ private[textus] final case class AiAccountingFacts(
   policySnapshotId: Option[String] = None,
   rateScheduleId: Option[String] = None,
   providerRequestId: Option[String] = None,
+  costMicrounits: Option[Long] = None,
+  costBasis: Option[String] = None,
   limitations: Vector[String] = Vector.empty
 ) {
   def responseMetadata: Map[String, String] =
@@ -64,9 +66,13 @@ private[textus] final case class AiAccountingFacts(
     }.toMap
 
   def calltreeMetadata: Map[String, String] =
-    responseMetadata ++ rateScheduleId.map { value =>
-      AiExecutionFacts.RATE_SCHEDULE_ID -> value.trim
-    }.filter(_._2.nonEmpty)
+    responseMetadata ++ Vector(
+      AiExecutionFacts.RATE_SCHEDULE_ID -> rateScheduleId,
+      AiExecutionFacts.COST_MICROUNITS -> costMicrounits.map(_.toString),
+      AiExecutionFacts.COST_BASIS -> costBasis
+    ).collect {
+      case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim
+    }.toMap
 }
 
 private[textus] object AiAccountingFacts {
@@ -112,9 +118,13 @@ private[textus] object AiExecutionFacts {
   val POLICY_SNAPSHOT_ID = "ai.accounting.policy_snapshot_id"
   val RATE_SCHEDULE_ID = "ai.accounting.rate_schedule_id"
   val PROVIDER_REQUEST_ID = "ai.accounting.provider_request_id"
+  val COST_MICROUNITS = "ai.accounting.cost_microunits"
+  val COST_BASIS = "ai.accounting.cost_basis"
   val POLICY_MAX_OUTPUT_TOKENS = "ai.policy.max_output_tokens"
   val POLICY_MAX_INPUT_TOKENS = "ai.policy.max_input_tokens"
   val POLICY_INPUT_BUDGET_BASIS = "ai.policy.input_budget_basis"
+  val POLICY_MAX_COST_MICROUNITS = "ai.policy.max_cost_microunits"
+  val POLICY_MAX_REASONING_TOKENS = "ai.policy.max_reasoning_tokens"
   val POLICY_TIMEOUT_SECONDS = "ai.policy.timeout_seconds"
   val POLICY_RECORD_RETRY_LIMIT = "ai.policy.record_retry_limit"
   val POLICY_MAX_CONCURRENT = "ai.policy.max_concurrent"
@@ -184,19 +194,27 @@ private[textus] object AiExecutionFacts {
         s"response_metadata.$key" -> value.trim
     }
 
-  def lifecycleLimitations(metadata: Map[String, String]): Map[String, String] = {
+  def lifecycleLimitations(
+    metadata: Map[String, String],
+    accountingfacts: AiAccountingFacts = AiAccountingFacts.empty
+  ): Map[String, String] = {
     val existing = metadata.get(LIMITATION_CODES).toVector.flatMap(_.split(","))
     val concurrency = Option.when(!metadata.contains(POLICY_MAX_CONCURRENT))("concurrency_not_enforced").toVector
     val outputverification = Option.when(
       metadata.contains(POLICY_MAX_OUTPUT_TOKENS) && !metadata.contains(OUTPUT_TOKENS)
     )("output_limit_not_verified").toVector
+    val reasoningverification = Option.when(
+      metadata.contains(POLICY_MAX_REASONING_TOKENS) && !metadata.contains(REASONING_TOKENS)
+    )("reasoning_limit_not_verified").toVector
     val usage = Option.when(!_has_usage(metadata))("usage_unavailable").toVector
-    val pricing = Option.when(!metadata.contains(RATE_SCHEDULE_ID))("rate_schedule_unavailable").toVector
+    val pricing = Option.when(
+      !metadata.contains(RATE_SCHEDULE_ID) && accountingfacts.rateScheduleId.isEmpty
+    )("rate_schedule_unavailable").toVector
     val estimatedinput = Option.when(metadata.get(INPUT_TOKENS_SOURCE).contains(AiUsageSource.Estimated.id))(
       "input_token_estimated"
     ).toVector
     val codes = (existing ++ Vector("cancellation_not_propagated") ++ concurrency ++
-      outputverification ++ usage ++ pricing ++ estimatedinput)
+      outputverification ++ reasoningverification ++ usage ++ pricing ++ estimatedinput)
       .map(_.trim.toLowerCase(Locale.ROOT))
       .filter(_.nonEmpty)
       .distinct
@@ -216,6 +234,26 @@ private[textus] object AiExecutionFacts {
             org.goldenport.Consequence.operationIllegal(
               _provider_name(selection),
               s"AI provider output tokens exceeded maximum: limit=$limit actual=$actual"
+            )
+          case _ =>
+            org.goldenport.Consequence.unit
+        }
+      case None =>
+        org.goldenport.Consequence.unit
+    }
+
+  def validateMaxReasoningTokens(
+    selection: SpiSelection,
+    maximum: Option[Int],
+    metadata: Map[String, String]
+  ): org.goldenport.Consequence[Unit] =
+    maximum match {
+      case Some(limit) =>
+        _reasoning_token_count(selection, metadata) match {
+          case Some(actual) if actual > limit =>
+            org.goldenport.Consequence.operationIllegal(
+              _provider_name(selection),
+              s"AI provider reasoning tokens exceeded maximum: limit=$limit actual=$actual"
             )
           case _ =>
             org.goldenport.Consequence.unit
@@ -274,6 +312,14 @@ private[textus] object AiExecutionFacts {
     metadata: Map[String, String]
   ): Option[Int] =
     metadata.get(s"${_provider_name(selection)}.usage.output_tokens")
+      .flatMap(_.trim.toIntOption)
+      .filter(_ >= 0)
+
+  private def _reasoning_token_count(
+    selection: SpiSelection,
+    metadata: Map[String, String]
+  ): Option[Int] =
+    _usage_value(selection, metadata, "usage.reasoning_tokens")
       .flatMap(_.trim.toIntOption)
       .filter(_ >= 0)
 

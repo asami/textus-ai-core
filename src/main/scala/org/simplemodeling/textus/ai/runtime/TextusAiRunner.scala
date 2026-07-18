@@ -41,6 +41,8 @@ final class TextusAiRunner(
       _with_generate_calltree(req, requirement, maxtokens, policymetadata) {
         for {
           _ <- resolution.policy.validateInputBudget(inputestimate)
+          costadmission <- resolution.costAdmissionC(inputestimate, maxtokens)
+          _ <- resolution.policy.validateCostBudget(costadmission)
           _ <- resolution.policy.validateGenerate(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           response <- _with_concurrency_admission_c(resolution) {
@@ -55,9 +57,14 @@ final class TextusAiRunner(
                 )
               )
               _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
+              _ <- AiExecutionFacts.validateMaxReasoningTokens(
+                effective,
+                resolution.policy.maxReasoningTokens,
+                response.metadata
+              )
             } yield response
           }
-        } yield _to_ai_generate_response(req, response, requirement, policymetadata, inputestimate)
+        } yield _to_ai_generate_response(req, response, requirement, policymetadata, inputestimate, resolution, costadmission)
       }
     }
 
@@ -75,9 +82,12 @@ final class TextusAiRunner(
         Some(retries),
         Some(inputestimate)
       )
+      val costadmission = resolution.costAdmissionC(inputestimate, maxtokens)
       _with_record_calltree(req, requirement, maxtokens, policymetadata) {
         for {
           _ <- resolution.policy.validateInputBudget(inputestimate)
+          admission <- costadmission
+          _ <- resolution.policy.validateCostBudget(admission)
           _ <- resolution.policy.validateRecord(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           response <- _with_concurrency_admission_c(resolution) {
@@ -91,9 +101,16 @@ final class TextusAiRunner(
             }
           }
           _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
+          _ <- AiExecutionFacts.validateMaxReasoningTokens(
+            effective,
+            resolution.policy.maxReasoningTokens,
+            response.metadata
+          )
         } yield response
       } { response =>
-        _normalize_record_response(req, response, requirement, policymetadata, inputestimate)
+        costadmission.flatMap { admission =>
+          _normalize_record_response(req, response, requirement, policymetadata, inputestimate, resolution, admission)
+        }
       }
     }
 
@@ -108,6 +125,8 @@ final class TextusAiRunner(
       _with_chat_calltree(req, requirement, maxtokens, policymetadata) {
         for {
           _ <- resolution.policy.validateInputBudget(inputestimate)
+          costadmission <- resolution.costAdmissionC(inputestimate, maxtokens)
+          _ <- resolution.policy.validateCostBudget(costadmission)
           _ <- resolution.policy.validateChat(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           response <- _with_concurrency_admission_c(resolution) {
@@ -122,9 +141,14 @@ final class TextusAiRunner(
                 )
               )
               _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
+              _ <- AiExecutionFacts.validateMaxReasoningTokens(
+                effective,
+                resolution.policy.maxReasoningTokens,
+                response.metadata
+              )
             } yield response
           }
-        } yield _to_ai_chat_response(req, response, requirement, policymetadata, inputestimate)
+        } yield _to_ai_chat_response(req, response, requirement, policymetadata, inputestimate, resolution, costadmission)
       }
     }
 
@@ -203,7 +227,7 @@ final class TextusAiRunner(
   )(
     body: => Consequence[GenerateResponse]
   )(
-    normalize: GenerateResponse => Consequence[AiRecordResponse]
+    normalize: GenerateResponse => Consequence[_Accounted[AiRecordResponse]]
   )(using ctx: ExecutionContext): Consequence[AiRecordResponse] = {
     val calltree = ctx.observability.callTreeContext
     if (calltree.isEnabled) {
@@ -217,16 +241,17 @@ final class TextusAiRunner(
           case Consequence.Success(rawresponse) =>
             val result = normalize(rawresponse)
             result match {
-              case Consequence.Success(response) =>
-                calltree.leave(_record_response_calltree_attributes(req, rawresponse, response))
+              case Consequence.Success(accounted) =>
+                calltree.leave(_record_response_calltree_attributes(req, rawresponse, accounted.response, accounted.accounting))
+                Consequence.success(accounted.response)
               case Consequence.Failure(conclusion) =>
                 calltree.leave(
                   _record_failure_calltree_attributes(req, rawresponse) ++ Map(
                     "status" -> conclusion.status.webCode.code.toString
                   )
                 )
+                Consequence.Failure(conclusion)
             }
-            result
           case Consequence.Failure(conclusion) =>
             calltree.leave(Map(
               "outcome" -> "failure",
@@ -243,7 +268,7 @@ final class TextusAiRunner(
           throw e
       }
     } else {
-      body.flatMap(normalize)
+      body.flatMap(normalize).map(_.response)
     }
   }
 
@@ -253,7 +278,7 @@ final class TextusAiRunner(
     maxtokens: Option[Int],
     policymetadata: Map[String, String]
   )(
-    body: => Consequence[AiGenerateResponse]
+    body: => Consequence[_Accounted[AiGenerateResponse]]
   )(using ctx: ExecutionContext): Consequence[AiGenerateResponse] = {
     val calltree = ctx.observability.callTreeContext
     if (calltree.isEnabled) {
@@ -264,15 +289,16 @@ final class TextusAiRunner(
       try {
         val result = body
         result match {
-          case Consequence.Success(response) =>
-            calltree.leave(_generate_response_calltree_attributes(req, response))
+          case Consequence.Success(accounted) =>
+            calltree.leave(_generate_response_calltree_attributes(req, accounted.response, accounted.accounting))
+            Consequence.success(accounted.response)
           case Consequence.Failure(conclusion) =>
             calltree.leave(Map(
             "outcome" -> "failure",
             "status" -> conclusion.status.webCode.code.toString
             ))
+            Consequence.Failure(conclusion)
         }
-        result
       } catch {
         case e: Throwable =>
           calltree.leave(Map(
@@ -282,7 +308,7 @@ final class TextusAiRunner(
           throw e
       }
     } else {
-      body
+      body.map(_.response)
     }
   }
 
@@ -292,7 +318,7 @@ final class TextusAiRunner(
     maxtokens: Option[Int],
     policymetadata: Map[String, String]
   )(
-    body: => Consequence[AiChatResponse]
+    body: => Consequence[_Accounted[AiChatResponse]]
   )(using ctx: ExecutionContext): Consequence[AiChatResponse] = {
     val calltree = ctx.observability.callTreeContext
     if (calltree.isEnabled) {
@@ -303,15 +329,16 @@ final class TextusAiRunner(
       try {
         val result = body
         result match {
-          case Consequence.Success(response) =>
-            calltree.leave(_chat_response_calltree_attributes(req, response))
+          case Consequence.Success(accounted) =>
+            calltree.leave(_chat_response_calltree_attributes(req, accounted.response, accounted.accounting))
+            Consequence.success(accounted.response)
           case Consequence.Failure(conclusion) =>
             calltree.leave(Map(
             "outcome" -> "failure",
             "status" -> conclusion.status.webCode.code.toString
             ))
+            Consequence.Failure(conclusion)
         }
-        result
       } catch {
         case e: Throwable =>
           calltree.leave(Map(
@@ -321,7 +348,7 @@ final class TextusAiRunner(
           throw e
       }
     } else {
-      body
+      body.map(_.response)
     }
   }
 
@@ -412,18 +439,20 @@ final class TextusAiRunner(
 
   private def _generate_response_calltree_attributes(
     req: AiGenerateRequest,
-    response: AiGenerateResponse
+    response: AiGenerateResponse,
+    accounting: AiAccountingFacts
   ): Map[String, String] =
     Map(
       "outcome" -> "success",
       "model" -> response.model.getOrElse(""),
       "output_chars" -> response.text.length.toString,
       "output_digest" -> AiExecutionFacts.digest(response.text)
-    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata)
+    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata, accounting)
 
   private def _chat_response_calltree_attributes(
     req: AiChatRequest,
-    response: AiChatResponse
+    response: AiChatResponse,
+    accounting: AiAccountingFacts
   ): Map[String, String] = {
     val responsetext = response.message.content
     Map(
@@ -431,13 +460,14 @@ final class TextusAiRunner(
       "model" -> response.model.getOrElse(""),
       "output_chars" -> responsetext.length.toString,
       "output_digest" -> AiExecutionFacts.digest(responsetext)
-    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata)
+    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata, accounting)
   }
 
   private def _record_response_calltree_attributes(
     req: AiRecordRequest,
     rawresponse: GenerateResponse,
-    response: AiRecordResponse
+    response: AiRecordResponse,
+    accounting: AiAccountingFacts
   ): Map[String, String] =
     Map(
       "outcome" -> "success",
@@ -445,7 +475,7 @@ final class TextusAiRunner(
       "normalization_mode" -> response.metadata.getOrElse(AiExecutionFacts.NORMALIZATION_MODE, ""),
       "output_chars" -> rawresponse.text.length.toString,
       "output_digest" -> AiExecutionFacts.digest(rawresponse.text)
-    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata)
+    ) ++ AiExecutionFacts.calltreeMetadata(response.metadata, accounting)
 
   private def _record_failure_calltree_attributes(
     req: AiRecordRequest,
@@ -520,48 +550,60 @@ final class TextusAiRunner(
     response: GenerateResponse,
     requirement: AiRunnerRequirement,
     policymetadata: Map[String, String],
-    inputestimate: AiInputTokenEstimate
-  ): AiGenerateResponse =
-    AiGenerateResponse(
-      response.text,
-      _effective_model(response.model),
-      AiExecutionFacts.lifecycleLimitations(AiExecutionFacts.normalize(
+    inputestimate: AiInputTokenEstimate,
+    resolution: AiProfileResolution,
+    costadmission: Option[AiCostAdmission]
+  ): _Accounted[AiGenerateResponse] = {
+    val metadata = AiExecutionFacts.normalize(
         _effective_selection(requirement),
         requirement,
         response.model,
         response.metadata,
         policymetadata = policymetadata,
         estimatedusage = inputestimate.usageFacts
-      ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text))
-    )
+      ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text)
+    val accounting = resolution.accountingFacts(metadata, costadmission)
+    _Accounted(AiGenerateResponse(
+      response.text,
+      _effective_model(response.model),
+      AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting)
+    ), accounting)
+  }
 
   private def _to_ai_chat_response(
     req: AiChatRequest,
     response: ChatResponse,
     requirement: AiRunnerRequirement,
     policymetadata: Map[String, String],
-    inputestimate: AiInputTokenEstimate
-  ): AiChatResponse =
-    AiChatResponse(
-      _to_ai_message(response.message),
-      _effective_model(response.model),
-      AiExecutionFacts.lifecycleLimitations(AiExecutionFacts.normalize(
+    inputestimate: AiInputTokenEstimate,
+    resolution: AiProfileResolution,
+    costadmission: Option[AiCostAdmission]
+  ): _Accounted[AiChatResponse] = {
+    val metadata = AiExecutionFacts.normalize(
         _effective_selection(requirement),
         requirement,
         response.model,
         response.metadata,
         policymetadata = policymetadata,
         estimatedusage = inputestimate.usageFacts
-      ) ++ AiExecutionFacts.digestMetadata(_chat_input(req), response.message.content))
-    )
+      ) ++ AiExecutionFacts.digestMetadata(_chat_input(req), response.message.content)
+    val accounting = resolution.accountingFacts(metadata, costadmission)
+    _Accounted(AiChatResponse(
+      _to_ai_message(response.message),
+      _effective_model(response.model),
+      AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting)
+    ), accounting)
+  }
 
   private def _normalize_record_response(
     req: AiRecordRequest,
     response: GenerateResponse,
     requirement: AiRunnerRequirement,
     policymetadata: Map[String, String],
-    inputestimate: AiInputTokenEstimate
-  ): Consequence[AiRecordResponse] =
+    inputestimate: AiInputTokenEstimate,
+    resolution: AiProfileResolution,
+    costadmission: Option[AiCostAdmission]
+  ): Consequence[_Accounted[AiRecordResponse]] =
     if (response.text.trim.isEmpty)
       Consequence.argumentInvalid("AI record response was empty.")
     else
@@ -577,21 +619,24 @@ final class TextusAiRunner(
             val record = _json_to_record(json)
             _validate_schema(record, req.schema) match {
               case Right(()) =>
-                Consequence.success(
+                val metadata = AiExecutionFacts.normalize(
+                  _effective_selection(requirement),
+                  requirement,
+                  response.model,
+                  response.metadata,
+                  Some(candidate.mode),
+                  policymetadata,
+                  estimatedusage = inputestimate.usageFacts
+                ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text)
+                val accounting = resolution.accountingFacts(metadata, costadmission)
+                Consequence.success(_Accounted(
                   AiRecordResponse(
                     record,
                     _effective_model(response.model),
-                    AiExecutionFacts.lifecycleLimitations(AiExecutionFacts.normalize(
-                      _effective_selection(requirement),
-                      requirement,
-                      response.model,
-                      response.metadata,
-                      Some(candidate.mode),
-                      policymetadata,
-                      estimatedusage = inputestimate.usageFacts
-                    ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text))
-                  )
-                )
+                    AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting)
+                  ),
+                  accounting
+                ))
               case Left(message) =>
                 Consequence.argumentInvalid(s"AI record schema mismatch: $message")
             }
@@ -606,6 +651,11 @@ final class TextusAiRunner(
     mode: String,
     text: String,
     json: Option[Json] = None
+  )
+
+  private final case class _Accounted[A](
+    response: A,
+    accounting: AiAccountingFacts
   )
 
   private def _record_candidates(text: String): Vector[_RecordCandidate] =

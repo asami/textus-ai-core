@@ -53,17 +53,17 @@ Stage Status:
 ## Stage EA-03 - Cost Accounting and Admission
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark DONE only when all budget decisions can be attributed to
   configured rate data and observed or documented estimated usage.
 
-- [ ] Define operator-owned rate schedule configuration and stable identity.
-- [ ] Add execution-class policy cost budgets and pre-execution admission
+- [x] Define operator-owned rate schedule configuration and stable identity.
+- [x] Add execution-class policy cost budgets and pre-execution admission
   semantics.
-- [ ] Account for actual provider usage when it is reported; retain explicit
+- [x] Account for actual provider usage when it is reported; retain explicit
   unknown or estimate limitations otherwise.
-- [ ] Reject missing accounting prerequisites and over-budget execution
+- [x] Reject missing accounting prerequisites and over-budget execution
   structurally, without implicit fallback.
 
 ## Stage WB-01 - Workflow Boundary

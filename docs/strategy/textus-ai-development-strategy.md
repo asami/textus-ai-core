@@ -152,8 +152,8 @@ completed on 2026-07-18.
 - Current phase: Phase 3, Execution Class and Accounting.
 - Current phase dashboard: `docs/phase/phase-3.md`
 - Current phase checklist: `docs/phase/phase-3-checklist.md`
-- Current next task: EA-03 cost accounting and admission using configured
-  rate schedules and EA-01 source-qualified usage facts.
+- Current next task: WB-01 workflow-boundary decision and ES-01 Phase 3
+  closure evidence.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

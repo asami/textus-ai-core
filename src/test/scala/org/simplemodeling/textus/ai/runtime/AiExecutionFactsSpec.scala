@@ -188,6 +188,34 @@ final class AiExecutionFactsSpec
         "cancellation_not_propagated,concurrency_not_enforced,output_limit_not_verified,rate_schedule_unavailable,usage_unavailable"
     }
 
+    "reject provider reasoning usage above the configured maximum" in {
+      Given("a Google response with provider-reported reasoning usage")
+      val selection = SpiSelection(provider = Some("google"))
+
+      When("the provider reports reasoning usage above the effective policy")
+      val result = AiExecutionFacts.validateMaxReasoningTokens(
+        selection,
+        Some(3),
+        Map("google.usage.reasoning_tokens" -> "4")
+      )
+
+      Then("the completed provider response is rejected structurally")
+      result.isFaillure shouldBe true
+      result.toString should include ("reasoning tokens exceeded maximum: limit=3 actual=4")
+    }
+
+    "record an unverified reasoning limit when a bounded response omits reasoning usage" in {
+      Given("a bounded policy response without a reasoning-token measurement")
+      val metadata = Map(AiExecutionFacts.POLICY_MAX_REASONING_TOKENS -> "120")
+
+      When("Textus AI adds lifecycle limitations")
+      val normalized = AiExecutionFacts.lifecycleLimitations(metadata)
+
+      Then("the response does not claim an independently verified reasoning maximum")
+      normalized(AiExecutionFacts.LIMITATION_CODES) shouldBe
+        "cancellation_not_propagated,concurrency_not_enforced,rate_schedule_unavailable,reasoning_limit_not_verified,usage_unavailable"
+    }
+
     "keep a rate schedule identifier CallTree-only while publishing safe accounting identities" in {
       Given("opaque policy and rate identities supplied by accounting policy")
       val accounting = AiAccountingFacts(
