@@ -115,12 +115,11 @@ completed on 2026-07-18.
 
 ## Process Status
 
-- Current phase: Phase 2, Purpose Policy Runtime.
-- Current phase dashboard: `docs/phase/phase-2.md`
-- Current phase checklist: `docs/phase/phase-2-checklist.md`
-- Current next task: PP-07 generic purpose and logical-level policy. PP-06
-  now compiles approved Codex purpose model profiles into finite managed-process
-  capabilities for fixed model, reasoning, and Web-search settings.
+- Phase 2: complete on 2026-07-18.
+- Completed phase dashboard: `docs/phase/phase-2.md`
+- Completed phase checklist: `docs/phase/phase-2-checklist.md`
+- Next phase: Phase 3 managed-research orchestration, input-token budgeting,
+  and cost admission/accounting.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
