@@ -7,6 +7,72 @@ import java.security.MessageDigest
 import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.spi.ai.runner.AiRunnerRequirement
 
+private[textus] enum AiUsageSource(val id: String) {
+  case Reported extends AiUsageSource("reported")
+  case Estimated extends AiUsageSource("estimated")
+}
+
+private[textus] final case class AiUsageFact(value: Long, source: AiUsageSource) {
+  require(value >= 0, "AI usage values must be non-negative")
+}
+
+private[textus] final case class AiUsageFacts(
+  inputTokens: Option[AiUsageFact] = None,
+  cachedInputTokens: Option[AiUsageFact] = None,
+  outputTokens: Option[AiUsageFact] = None,
+  reasoningTokens: Option[AiUsageFact] = None,
+  totalTokens: Option[AiUsageFact] = None
+) {
+  def hasValues: Boolean = Vector(
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    reasoningTokens,
+    totalTokens
+  ).flatten.nonEmpty
+
+  // Provider-reported values take precedence over an admission estimate.
+  def withFallback(fallback: AiUsageFacts): AiUsageFacts =
+    AiUsageFacts(
+      inputTokens.orElse(fallback.inputTokens),
+      cachedInputTokens.orElse(fallback.cachedInputTokens),
+      outputTokens.orElse(fallback.outputTokens),
+      reasoningTokens.orElse(fallback.reasoningTokens),
+      totalTokens.orElse(fallback.totalTokens)
+    )
+}
+
+private[textus] object AiUsageFacts {
+  val empty: AiUsageFacts = AiUsageFacts()
+}
+
+private[textus] final case class AiAccountingFacts(
+  policySnapshotId: Option[String] = None,
+  rateScheduleId: Option[String] = None,
+  providerRequestId: Option[String] = None,
+  limitations: Vector[String] = Vector.empty
+) {
+  def responseMetadata: Map[String, String] =
+    Vector(
+      AiExecutionFacts.POLICY_SNAPSHOT_ID -> policySnapshotId,
+      AiExecutionFacts.PROVIDER_REQUEST_ID -> providerRequestId,
+      AiExecutionFacts.LIMITATION_CODES -> Option.when(limitations.nonEmpty)(
+        limitations.map(_.trim.toLowerCase(Locale.ROOT)).filter(_.nonEmpty).distinct.sorted.mkString(",")
+      )
+    ).collect {
+      case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim
+    }.toMap
+
+  def calltreeMetadata: Map[String, String] =
+    responseMetadata ++ rateScheduleId.map { value =>
+      AiExecutionFacts.RATE_SCHEDULE_ID -> value.trim
+    }.filter(_._2.nonEmpty)
+}
+
+private[textus] object AiAccountingFacts {
+  val empty: AiAccountingFacts = AiAccountingFacts()
+}
+
 /*
  * Provider-neutral execution metadata normalization for Textus AI responses.
  *
@@ -29,11 +95,21 @@ private[textus] object AiExecutionFacts {
   val RESPONSE_ID = "ai.execution.response_id"
   val FINISH_REASON = "ai.execution.finish_reason"
   val INPUT_TOKENS = "ai.usage.input_tokens"
+  val INPUT_TOKENS_SOURCE = "ai.usage.input_tokens_source"
+  val CACHED_INPUT_TOKENS = "ai.usage.cached_input_tokens"
+  val CACHED_INPUT_TOKENS_SOURCE = "ai.usage.cached_input_tokens_source"
   val OUTPUT_TOKENS = "ai.usage.output_tokens"
+  val OUTPUT_TOKENS_SOURCE = "ai.usage.output_tokens_source"
+  val REASONING_TOKENS = "ai.usage.reasoning_tokens"
+  val REASONING_TOKENS_SOURCE = "ai.usage.reasoning_tokens_source"
   val TOTAL_TOKENS = "ai.usage.total_tokens"
+  val TOTAL_TOKENS_SOURCE = "ai.usage.total_tokens_source"
   val INPUT_DIGEST = "ai.execution.input_digest"
   val OUTPUT_DIGEST = "ai.execution.output_digest"
   val LIMITATION_CODES = "ai.limitation.codes"
+  val POLICY_SNAPSHOT_ID = "ai.accounting.policy_snapshot_id"
+  val RATE_SCHEDULE_ID = "ai.accounting.rate_schedule_id"
+  val PROVIDER_REQUEST_ID = "ai.accounting.provider_request_id"
   val POLICY_MAX_OUTPUT_TOKENS = "ai.policy.max_output_tokens"
   val POLICY_TIMEOUT_SECONDS = "ai.policy.timeout_seconds"
   val POLICY_RECORD_RETRY_LIMIT = "ai.policy.record_retry_limit"
@@ -51,8 +127,11 @@ private[textus] object AiExecutionFacts {
     responsemodel: Option[String],
     providermetadata: Map[String, String],
     normalizationmode: Option[String] = None,
-    policymetadata: Map[String, String] = Map.empty
+    policymetadata: Map[String, String] = Map.empty,
+    estimatedusage: AiUsageFacts = AiUsageFacts.empty,
+    accountingfacts: AiAccountingFacts = AiAccountingFacts.empty
   ): Map[String, String] = {
+    val usage = _provider_usage(selection, providermetadata).withFallback(estimatedusage)
     val values = Vector(
       PROVIDER -> selection.provider,
       MODE -> selection.mode,
@@ -66,11 +145,21 @@ private[textus] object AiExecutionFacts {
       NORMALIZATION_MODE -> normalizationmode,
       RESPONSE_ID -> _provider_value(selection, providermetadata, "response_id"),
       FINISH_REASON -> _provider_value(selection, providermetadata, "finish_reason"),
-      INPUT_TOKENS -> _usage_value(selection, providermetadata, "usage.input_tokens"),
-      OUTPUT_TOKENS -> _usage_value(selection, providermetadata, "usage.output_tokens"),
-      TOTAL_TOKENS -> _usage_value(selection, providermetadata, "usage.total_tokens")
+      PROVIDER_REQUEST_ID -> accountingfacts.providerRequestId.orElse(
+        _provider_value(selection, providermetadata, "request_id")
+      )
     )
-    policymetadata ++ _provider_metadata(providermetadata) ++ _values(values)
+    policymetadata ++ accountingfacts.responseMetadata ++ _provider_metadata(providermetadata) ++
+      _usage_metadata(usage) ++ _values(values)
+  }
+
+  def policySnapshotId(metadata: Map[String, String]): Option[String] = {
+    val facts = metadata.toVector
+      .filter { case (key, value) =>
+        (key.startsWith("ai.policy.") || key == ENABLED_TOOLS) && value.trim.nonEmpty
+      }
+      .sortBy(_._1)
+    Option.when(facts.nonEmpty)(digest(facts.map { case (key, value) => s"$key=$value" }.mkString("\n")))
   }
 
   def digest(value: String): String = {
@@ -82,8 +171,11 @@ private[textus] object AiExecutionFacts {
   def digestMetadata(input: String, output: String): Map[String, String] =
     Map(INPUT_DIGEST -> digest(input), OUTPUT_DIGEST -> digest(output))
 
-  def calltreeMetadata(metadata: Map[String, String]): Map[String, String] =
-    metadata.collect {
+  def calltreeMetadata(
+    metadata: Map[String, String],
+    accountingfacts: AiAccountingFacts = AiAccountingFacts.empty
+  ): Map[String, String] =
+    (metadata ++ accountingfacts.calltreeMetadata).collect {
       case (key, value) if _is_normalized_key(key) && value.trim.nonEmpty =>
         s"response_metadata.$key" -> value.trim
     }
@@ -94,7 +186,10 @@ private[textus] object AiExecutionFacts {
     val outputverification = Option.when(
       metadata.contains(POLICY_MAX_OUTPUT_TOKENS) && !metadata.contains(OUTPUT_TOKENS)
     )("output_limit_not_verified").toVector
-    val codes = (existing ++ Vector("cancellation_not_propagated") ++ concurrency ++ outputverification)
+    val usage = Option.when(!_has_usage(metadata))("usage_unavailable").toVector
+    val pricing = Option.when(!metadata.contains(RATE_SCHEDULE_ID))("rate_schedule_unavailable").toVector
+    val codes = (existing ++ Vector("cancellation_not_propagated") ++ concurrency ++
+      outputverification ++ usage ++ pricing)
       .map(_.trim.toLowerCase(Locale.ROOT))
       .filter(_.nonEmpty)
       .distinct
@@ -133,16 +228,21 @@ private[textus] object AiExecutionFacts {
       key.startsWith("ai.execution.") ||
       key.startsWith("ai.policy.") ||
       key.startsWith("ai.usage.") ||
+      key.startsWith("ai.accounting.") ||
       key.startsWith("ai.limitation.")
 
   private def _is_safe_provider_key(key: String): Boolean =
     key match {
       case "google.response_id" | "google.finish_reason" |
           "google.usage.input_tokens" | "google.usage.output_tokens" | "google.usage.total_tokens" |
+          "google.usage.cached_input_tokens" | "google.usage.reasoning_tokens" |
+          "google.request_id" |
           "google.google_search_calls" | "google.google_search_results" |
           "google.url_context_calls" | "google.url_citations" => true
       case "openai.response_id" | "openai.finish_reason" |
           "openai.usage.input_tokens" | "openai.usage.output_tokens" | "openai.usage.total_tokens" |
+          "openai.usage.cached_input_tokens" | "openai.usage.reasoning_tokens" |
+          "openai.request_id" |
           "openai.web_search_calls" => true
       case "gemma.finish_reason" |
           "gemma.usage.input_tokens" | "gemma.usage.output_tokens" | "gemma.usage.total_tokens" => true
@@ -189,6 +289,50 @@ private[textus] object AiExecutionFacts {
       .flatMap(_.toLongOption)
       .filter(_ >= 0)
       .map(_.toString)
+
+  private def _provider_usage(
+    selection: SpiSelection,
+    metadata: Map[String, String]
+  ): AiUsageFacts =
+    AiUsageFacts(
+      inputTokens = _usage_fact(selection, metadata, "usage.input_tokens"),
+      cachedInputTokens = _usage_fact(selection, metadata, "usage.cached_input_tokens"),
+      outputTokens = _usage_fact(selection, metadata, "usage.output_tokens"),
+      reasoningTokens = _usage_fact(selection, metadata, "usage.reasoning_tokens"),
+      totalTokens = _usage_fact(selection, metadata, "usage.total_tokens")
+    )
+
+  private def _usage_fact(
+    selection: SpiSelection,
+    metadata: Map[String, String],
+    suffix: String
+  ): Option[AiUsageFact] =
+    _usage_value(selection, metadata, suffix).flatMap(_.toLongOption).map { value =>
+      AiUsageFact(value, AiUsageSource.Reported)
+    }
+
+  private def _usage_metadata(usage: AiUsageFacts): Map[String, String] =
+    Vector(
+      INPUT_TOKENS -> usage.inputTokens,
+      CACHED_INPUT_TOKENS -> usage.cachedInputTokens,
+      OUTPUT_TOKENS -> usage.outputTokens,
+      REASONING_TOKENS -> usage.reasoningTokens,
+      TOTAL_TOKENS -> usage.totalTokens
+    ).flatMap { case (key, fact) =>
+      fact.toVector.flatMap(value => Vector(
+        key -> value.value.toString,
+        s"${key}_source" -> value.source.id
+      ))
+    }.toMap
+
+  private def _has_usage(metadata: Map[String, String]): Boolean =
+    Vector(
+      INPUT_TOKENS,
+      CACHED_INPUT_TOKENS,
+      OUTPUT_TOKENS,
+      REASONING_TOKENS,
+      TOTAL_TOKENS
+    ).exists(metadata.contains)
 
   private def _tool_result_summary(
     selection: SpiSelection,

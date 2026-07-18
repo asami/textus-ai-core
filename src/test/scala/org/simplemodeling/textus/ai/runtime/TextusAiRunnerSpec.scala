@@ -204,11 +204,14 @@ final class TextusAiRunnerSpec
         metadata(AiExecutionFacts.RESPONSE_ID) shouldBe "response-google"
         metadata(AiExecutionFacts.FINISH_REASON) shouldBe "stop"
         metadata(AiExecutionFacts.INPUT_TOKENS) shouldBe "13"
+        metadata(AiExecutionFacts.INPUT_TOKENS_SOURCE) shouldBe "reported"
         metadata(AiExecutionFacts.OUTPUT_TOKENS) shouldBe "8"
+        metadata(AiExecutionFacts.OUTPUT_TOKENS_SOURCE) shouldBe "reported"
         metadata(AiExecutionFacts.TOTAL_TOKENS) shouldBe "21"
+        metadata(AiExecutionFacts.TOTAL_TOKENS_SOURCE) shouldBe "reported"
         metadata(AiExecutionFacts.OUTPUT_DIGEST) should startWith ("sha256:")
         metadata(AiExecutionFacts.LIMITATION_CODES) shouldBe
-          "cancellation_not_propagated,concurrency_not_enforced"
+          "cancellation_not_propagated,concurrency_not_enforced,rate_schedule_unavailable"
       }
       generated.metadata(AiExecutionFacts.INPUT_DIGEST) shouldBe AiExecutionFacts.digest("execution-facts")
       chatted.metadata(AiExecutionFacts.INPUT_DIGEST) shouldBe AiExecutionFacts.digest("user: execution facts")
@@ -1552,7 +1555,7 @@ final class TextusAiRunnerSpec
     "preserve provider response facts for plain provider endpoints" in {
       Given("plain Google OpenAI and Gemma provider responses")
       val googleDriver = new _FakeHttpDriver(
-        """{"responseId":"google_plain","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"google answer"}]}}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":7,"totalTokenCount":18}}"""
+        """{"responseId":"google_plain","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"google answer"}]}}],"usageMetadata":{"promptTokenCount":11,"cachedContentTokenCount":3,"candidatesTokenCount":7,"thoughtsTokenCount":2,"totalTokenCount":18}}"""
       )
       val googleContext = _context(googleDriver)
       val google = new GoogleGenerateService(
@@ -1565,7 +1568,7 @@ final class TextusAiRunnerSpec
       ).generate(GenerateRequest("plain")).toOption.get
 
       val openAiDriver = new _FakeHttpDriver(
-        """{"id":"chatcmpl_plain","choices":[{"finish_reason":"stop","message":{"content":"openai answer"}}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}"""
+        """{"id":"chatcmpl_plain","choices":[{"finish_reason":"stop","message":{"content":"openai answer"}}],"usage":{"prompt_tokens":12,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens":6,"completion_tokens_details":{"reasoning_tokens":2},"total_tokens":18}}"""
       )
       val openAiContext = _context(openAiDriver)
       val openai = new OpenAiGenerateService(
@@ -1592,9 +1595,13 @@ final class TextusAiRunnerSpec
       google.metadata("google.response_id") shouldBe "google_plain"
       google.metadata("google.finish_reason") shouldBe "STOP"
       google.metadata("google.usage.total_tokens") shouldBe "18"
+      google.metadata("google.usage.cached_input_tokens") shouldBe "3"
+      google.metadata("google.usage.reasoning_tokens") shouldBe "2"
       openai.metadata("openai.response_id") shouldBe "chatcmpl_plain"
       openai.metadata("openai.finish_reason") shouldBe "stop"
       openai.metadata("openai.usage.input_tokens") shouldBe "12"
+      openai.metadata("openai.usage.cached_input_tokens") shouldBe "4"
+      openai.metadata("openai.usage.reasoning_tokens") shouldBe "2"
       gemma.metadata("gemma.finish_reason") shouldBe "stop"
       gemma.metadata("gemma.usage.output_tokens") shouldBe "5"
       gemma.metadata("gemma.usage.total_tokens") shouldBe "14"

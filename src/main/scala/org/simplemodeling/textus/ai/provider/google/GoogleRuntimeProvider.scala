@@ -246,6 +246,14 @@ private object GoogleJson:
         List("usage", "outputTokens"),
         List("usage", "total_output_tokens")
       )),
+      "google.usage.cached_input_tokens" -> _long_at_paths(json.hcursor, Vector(
+        List("usageMetadata", "cachedContentTokenCount"),
+        List("usage", "cachedInputTokens")
+      )),
+      "google.usage.reasoning_tokens" -> _long_at_paths(json.hcursor, Vector(
+        List("usageMetadata", "thoughtsTokenCount"),
+        List("usage", "reasoningTokens")
+      )),
       "google.usage.total_tokens" -> _long_at_paths(json.hcursor, Vector(
         List("usageMetadata", "totalTokenCount"),
         List("usage", "totalTokens"),

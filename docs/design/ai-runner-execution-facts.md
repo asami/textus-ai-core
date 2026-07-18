@@ -7,7 +7,7 @@ updated_at=2026-07-18
 ## Decision
 
 Textus AI uses a stable, provider-neutral metadata namespace for AI execution
-facts in Phase 1. The existing `AiGenerateResponse`, `AiRecordResponse`, and
+facts in Phase 3. The existing `AiGenerateResponse`, `AiRecordResponse`, and
 `AiChatResponse` metadata maps remain the transport surface.
 
 Typed CNCF `AiRunner` response fields are deferred. A typed representation is
@@ -30,8 +30,8 @@ facts into typed SPI fields without changing the meaning of the namespace keys.
 
 ## Namespace
 
-All normalized facts use the `ai.execution.*`, `ai.policy.*`, `ai.usage.*`, or
-`ai.limitation.*` namespaces.
+All normalized facts use the `ai.execution.*`, `ai.policy.*`, `ai.usage.*`,
+`ai.accounting.*`, or `ai.limitation.*` namespaces.
 
 ### Execution Facts
 
@@ -44,7 +44,6 @@ All normalized facts use the `ai.execution.*`, `ai.policy.*`, `ai.usage.*`, or
 | `ai.execution.purpose` | Effective caller purpose | No purpose was supplied |
 | `ai.execution.execution_class` | Effective logical execution class | No execution class was selected |
 | `ai.execution.location` | `local` or `remote` execution location | Cannot classify safely |
-| `ai.execution.request_id` | Safe provider request identity | Provider did not expose one safely |
 | `ai.execution.response_id` | Safe provider response identity | Provider did not expose one safely |
 | `ai.execution.started_at` | ISO-8601 request start instant | Runtime did not measure it |
 | `ai.execution.completed_at` | ISO-8601 completion instant | Runtime did not measure it |
@@ -85,19 +84,36 @@ selector, not a provider or model identifier.
 
 ### Usage Facts
 
-| Key | Meaning |
-| --- | --- |
-| `ai.usage.input_tokens` | Provider-reported input tokens |
-| `ai.usage.cached_input_tokens` | Provider-reported cached input tokens |
-| `ai.usage.output_tokens` | Provider-reported output tokens |
-| `ai.usage.reasoning_tokens` | Provider-reported reasoning tokens |
-| `ai.usage.total_tokens` | Provider-reported total tokens |
-| `ai.usage.request_count` | Number of provider requests made |
+| Value key | Source key | Meaning |
+| --- | --- | --- |
+| `ai.usage.input_tokens` | `ai.usage.input_tokens_source` | Input tokens |
+| `ai.usage.cached_input_tokens` | `ai.usage.cached_input_tokens_source` | Cached portion of input tokens |
+| `ai.usage.output_tokens` | `ai.usage.output_tokens_source` | Output tokens |
+| `ai.usage.reasoning_tokens` | `ai.usage.reasoning_tokens_source` | Reasoning-token portion reported by a provider |
+| `ai.usage.total_tokens` | `ai.usage.total_tokens_source` | Total tokens |
 
-Usage values are decimal non-negative integers. An unavailable value is omitted;
-it is never represented as `0`, `null`, or a guessed estimate. Textus AI does
-not emit monetary cost because price and billing adjustments are application
-policy, not provider-neutral execution facts.
+Usage values are decimal non-negative integers. A source is either `reported`
+when the selected provider supplied the value, or `estimated` when a later
+Textus admission policy explicitly supplied it. A provider-reported value wins
+over an estimate for the same field. A value and its source are omitted
+together when unavailable; they are never represented as `0`, `null`, or a
+guess. `0` is valid only when a provider or estimator explicitly reports zero.
+
+Textus AI does not emit monetary cost because price and billing adjustments are
+operator policy, not provider-neutral execution facts.
+
+### Accounting Facts
+
+| Key | Meaning | Absence |
+| --- | --- | --- |
+| `ai.accounting.policy_snapshot_id` | SHA-256 identity of the effective Textus policy facts | No effective policy facts |
+| `ai.accounting.rate_schedule_id` | Operator-owned pricing schedule identity | Pricing is not configured or not applied |
+| `ai.accounting.provider_request_id` | Safe provider request identifier | Adapter did not expose one safely |
+
+`policy_snapshot_id` is an opaque identity, not a serialized configuration.
+`rate_schedule_id` never contains a provider account, price, currency amount,
+or billing adjustment. A provider response identifier remains
+`ai.execution.response_id`; it must not be relabelled as a request identifier.
 
 ### Limitations
 
@@ -107,6 +123,7 @@ identifiers. It is absent when no limitation applies. Initial identifiers are:
 - `input_digest_unavailable`
 - `output_digest_unavailable`
 - `usage_unavailable`
+- `rate_schedule_unavailable`
 - `provider_identity_unavailable`
 - `cancellation_not_propagated`
 - `concurrency_not_enforced`
@@ -127,11 +144,16 @@ times, using `ai.record.retry-limit` (default `1`).
 
 ## Confidentiality Boundary
 
-Response metadata may contain only normalized execution facts and explicitly
-allowlisted provider-specific facts. Ordinary CallTree records may contain only
-normalized facts and bounded counts or sizes. They must not contain raw
-evidence, prompt text, response text, authorization headers, credentials,
-account identity, provider error bodies, provider-specific metadata, or
+Response metadata may contain normalized execution, policy, usage, limitation,
+and opaque accounting identities, plus explicitly allowlisted provider-specific
+facts. Ordinary CallTree records may additionally contain the same normalized
+facts and bounded counts or sizes. A configured rate schedule identity is
+CallTree-only when rate accounting is introduced in EA-03; it is not emitted by
+EA-01.
+
+Neither response metadata nor CallTree records may contain raw evidence, prompt
+text, response text, authorization headers, credentials, account identity,
+price or currency amount, provider error bodies, provider-specific metadata, or
 arbitrary request metadata.
 
 `input_digest` and `output_digest` are permitted only when the digest is
@@ -149,18 +171,22 @@ application may depend on their provider-neutral meaning.
 `ai.limitation.*`, or `ai.policy.*` value.
 - A provider adapter may supply a raw provider-specific fact, but only Textus
   AI maps it to a normalized key.
-- Values are omitted when unknown rather than synthesized.
+- Values are omitted when unknown rather than synthesized. When no usage field
+  is available, `usage_unavailable` records that accounting cannot treat the
+  absence as zero. When no rate schedule is applied,
+  `rate_schedule_unavailable` records that no price can be derived.
 - Comma-separated collections are lower-case, de-duplicated, and sorted.
 
 ## Current Implementation
 
 Textus AI currently normalizes effective provider, mode, engine, reported
 model, purpose, local/remote location, logical tools, response identity, finish
-reason, input/output/total tokens, and record normalization mode for
-`generate`, `chat`, and `generateRecord` responses. Google/Gemini, OpenAI, and
-Gemma/Ollama adapters extract only wire fields they actually received. Textus
-AI maps the selected provider's provider-specific facts into the normalized
-namespace; it does not infer absent values.
+reason, reported input/cached-input/output/reasoning/total tokens, and record
+normalization mode for `generate`, `chat`, and `generateRecord` responses.
+Google/Gemini and OpenAI extract cached-input and reasoning values only when
+their wire response contains them. Gemma/Ollama exposes only the counts it
+reports. Textus AI maps the selected provider's provider-specific facts into
+the normalized namespace; it does not infer absent values.
 
 An approved Codex purpose model-profile is compiled into a finite managed
 process capability. The normalized policy facts expose its profile and fixed
@@ -182,7 +208,10 @@ does not select another provider or model implicitly.
 
 ## Deferred Work
 
-- Normalize request identity and timing.
+- Add provider request identity extraction where a binding can expose a safe
+  request header or equivalent wire field.
+- Add policy-owned estimates in EA-02 and rate schedule identity/application in
+  EA-03.
 - Move cancellation propagation and concurrency enforcement to CNCF Job
   execution when the SPI gains those lifecycle controls.
 - Evaluate promotion of proven fields into typed CNCF `AiRunner` response data.

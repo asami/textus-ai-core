@@ -219,8 +219,8 @@ private[textus] final case class AiProfileResolution(
     maxTokens: Option[Int],
     properties: Vector[org.goldenport.protocol.Property],
     recordRetryLimit: Option[Int] = None
-  ): Map[String, String] =
-    Vector(
+  ): Map[String, String] = {
+    val policyfacts = Vector(
       AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS -> maxTokens.map(_.toString),
       AiExecutionFacts.POLICY_TIMEOUT_SECONDS -> AiRequestProperties.timeoutSeconds(properties).map(_.toString),
       AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT -> recordRetryLimit.map(_.toString),
@@ -237,6 +237,10 @@ private[textus] final case class AiProfileResolution(
     ).collect {
       case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim
     }.toMap
+    policyfacts ++ AiExecutionFacts.policySnapshotId(policyfacts).map { value =>
+      AiExecutionFacts.POLICY_SNAPSHOT_ID -> value
+    }
+  }
 
   private def _codex_execution_profile_property: Vector[org.goldenport.protocol.Property] =
     codexExecutionProfile.map { value =>

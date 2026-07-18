@@ -20,6 +20,7 @@ This repository follows the document lifecycle defined by `ai/directive/core`.
 - `docs/notes/ai-component-dev-environment.md` records implementation-oriented TextusAi setup notes
 - `docs/notes/car-review-ai-runtime-design.md` explores the bounded AI runtime design for CAR Review
 - `docs/spec/ai-execution-class-resolution.md` records execution-class selection and migration behavior
+- `docs/spec/ai-execution-facts.md` records source-qualified usage and safe accounting metadata behavior
 - `docs/spec/mock-ai-executable-spec.md` records the deterministic mock AI executable specification
 
 ## Rules

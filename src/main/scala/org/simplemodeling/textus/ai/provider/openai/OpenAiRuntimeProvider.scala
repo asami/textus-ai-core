@@ -238,6 +238,14 @@ private object OpenAiJson:
         List("usage", "output_tokens"),
         List("usage", "completion_tokens")
       )),
+      "openai.usage.cached_input_tokens" -> _long_at_paths(json.hcursor, Vector(
+        List("usage", "input_tokens_details", "cached_tokens"),
+        List("usage", "prompt_tokens_details", "cached_tokens")
+      )),
+      "openai.usage.reasoning_tokens" -> _long_at_paths(json.hcursor, Vector(
+        List("usage", "output_tokens_details", "reasoning_tokens"),
+        List("usage", "completion_tokens_details", "reasoning_tokens")
+      )),
       "openai.usage.total_tokens" -> _long_at_paths(json.hcursor, Vector(List("usage", "total_tokens")))
     ))
 

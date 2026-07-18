@@ -23,17 +23,17 @@ Stage Status:
 ## Stage EA-01 - Execution Facts
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark DONE only when the representation, ownership, safe
   publication policy, and deterministic evidence are available.
 
-- [ ] Define provider-neutral facts for estimated and measured input, output,
+- [x] Define provider-neutral facts for estimated and measured input, output,
   cached-input, and reasoning usage, including unavailable-value semantics.
-- [ ] Define safe execution and accounting identities: policy snapshot, rate
+- [x] Define safe execution and accounting identities: policy snapshot, rate
   schedule identity, provider request identity, and accounting limitation.
-- [ ] Specify response-metadata, CallTree-only, and prohibited fact placement.
-- [ ] Add deterministic fixtures for reported, estimated, and unavailable facts.
+- [x] Specify response-metadata, CallTree-only, and prohibited fact placement.
+- [x] Add deterministic fixtures for reported, estimated, and unavailable facts.
 
 ## Stage EA-02 - Input-Budget Admission
 

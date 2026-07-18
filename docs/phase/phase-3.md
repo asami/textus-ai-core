@@ -54,7 +54,7 @@ multi-step workflow.
 | ID | Stage | Outcome | Status |
 | --- | --- | --- | --- |
 | EC-01 | Execution class | CNCF exposes `executionClass`; Textus AI resolves it with purpose to approved operator configuration. | done |
-| EA-01 | Execution facts | Stable provider-neutral usage, estimate, accounting, and limitation facts have defined ownership and safe publication. | open |
+| EA-01 | Execution facts | Stable provider-neutral usage, estimate, accounting, and limitation facts have defined ownership and safe publication. | done |
 | EA-02 | Input-budget admission | Execution-class policy validates and enforces bounded input-token admission before provider execution. | open |
 | EA-03 | Cost accounting and admission | Execution-class policy can apply an operator-owned rate schedule and reject over-budget or unaccountable execution explicitly. | open |
 | WB-01 | Workflow boundary | A separate decision records whether future runtime workflow support is needed and what contract it would require. | open |
