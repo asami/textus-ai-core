@@ -91,6 +91,8 @@ selector, not a provider or model identifier.
 | `ai.usage.output_tokens` | `ai.usage.output_tokens_source` | Output tokens |
 | `ai.usage.reasoning_tokens` | `ai.usage.reasoning_tokens_source` | Reasoning-token portion reported by a provider |
 | `ai.usage.total_tokens` | `ai.usage.total_tokens_source` | Total tokens |
+| `ai.usage.input_payload_bytes` | N/A | UTF-8 byte size charged by a configured input admission estimate |
+| `ai.usage.input_envelope_tokens` | N/A | Fixed message-framing units charged by a configured input admission estimate |
 
 Usage values are decimal non-negative integers. A source is either `reported`
 when the selected provider supplied the value, or `estimated` when a later
@@ -124,6 +126,7 @@ identifiers. It is absent when no limitation applies. Initial identifiers are:
 - `output_digest_unavailable`
 - `usage_unavailable`
 - `rate_schedule_unavailable`
+- `input_token_estimated`
 - `provider_identity_unavailable`
 - `cancellation_not_propagated`
 - `concurrency_not_enforced`

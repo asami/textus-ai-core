@@ -104,6 +104,8 @@ private[textus] object AiExecutionFacts {
   val REASONING_TOKENS_SOURCE = "ai.usage.reasoning_tokens_source"
   val TOTAL_TOKENS = "ai.usage.total_tokens"
   val TOTAL_TOKENS_SOURCE = "ai.usage.total_tokens_source"
+  val INPUT_PAYLOAD_BYTES = "ai.usage.input_payload_bytes"
+  val INPUT_ENVELOPE_TOKENS = "ai.usage.input_envelope_tokens"
   val INPUT_DIGEST = "ai.execution.input_digest"
   val OUTPUT_DIGEST = "ai.execution.output_digest"
   val LIMITATION_CODES = "ai.limitation.codes"
@@ -111,6 +113,8 @@ private[textus] object AiExecutionFacts {
   val RATE_SCHEDULE_ID = "ai.accounting.rate_schedule_id"
   val PROVIDER_REQUEST_ID = "ai.accounting.provider_request_id"
   val POLICY_MAX_OUTPUT_TOKENS = "ai.policy.max_output_tokens"
+  val POLICY_MAX_INPUT_TOKENS = "ai.policy.max_input_tokens"
+  val POLICY_INPUT_BUDGET_BASIS = "ai.policy.input_budget_basis"
   val POLICY_TIMEOUT_SECONDS = "ai.policy.timeout_seconds"
   val POLICY_RECORD_RETRY_LIMIT = "ai.policy.record_retry_limit"
   val POLICY_MAX_CONCURRENT = "ai.policy.max_concurrent"
@@ -188,8 +192,11 @@ private[textus] object AiExecutionFacts {
     )("output_limit_not_verified").toVector
     val usage = Option.when(!_has_usage(metadata))("usage_unavailable").toVector
     val pricing = Option.when(!metadata.contains(RATE_SCHEDULE_ID))("rate_schedule_unavailable").toVector
+    val estimatedinput = Option.when(metadata.get(INPUT_TOKENS_SOURCE).contains(AiUsageSource.Estimated.id))(
+      "input_token_estimated"
+    ).toVector
     val codes = (existing ++ Vector("cancellation_not_propagated") ++ concurrency ++
-      outputverification ++ usage ++ pricing)
+      outputverification ++ usage ++ pricing ++ estimatedinput)
       .map(_.trim.toLowerCase(Locale.ROOT))
       .filter(_.nonEmpty)
       .distinct

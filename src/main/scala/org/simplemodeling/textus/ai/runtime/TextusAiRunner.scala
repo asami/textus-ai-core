@@ -36,9 +36,11 @@ final class TextusAiRunner(
       val effective = _effective_selection(requirement)
       val properties = _request_properties(req.properties, resolution)
       val maxtokens = resolution.maxTokens(req.maxTokens)
-      val policymetadata = resolution.executionMetadata(maxtokens, properties)
+      val inputestimate = AiInputTokenEstimator.generate(req.prompt)
+      val policymetadata = resolution.executionMetadata(maxtokens, properties, inputEstimate = Some(inputestimate))
       _with_generate_calltree(req, requirement, maxtokens, policymetadata) {
         for {
+          _ <- resolution.policy.validateInputBudget(inputestimate)
           _ <- resolution.policy.validateGenerate(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           response <- _with_concurrency_admission_c(resolution) {
@@ -55,7 +57,7 @@ final class TextusAiRunner(
               _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
             } yield response
           }
-        } yield _to_ai_generate_response(req, response, requirement, policymetadata)
+        } yield _to_ai_generate_response(req, response, requirement, policymetadata, inputestimate)
       }
     }
 
@@ -66,9 +68,16 @@ final class TextusAiRunner(
       val properties = _request_properties(req.properties, resolution)
       val maxtokens = resolution.maxTokens(req.maxTokens)
       val retries = _record_retry_limit(req, resolution)
-      val policymetadata = resolution.executionMetadata(maxtokens, properties, Some(retries))
+      val inputestimate = AiInputTokenEstimator.record(req.prompt)
+      val policymetadata = resolution.executionMetadata(
+        maxtokens,
+        properties,
+        Some(retries),
+        Some(inputestimate)
+      )
       _with_record_calltree(req, requirement, maxtokens, policymetadata) {
         for {
+          _ <- resolution.policy.validateInputBudget(inputestimate)
           _ <- resolution.policy.validateRecord(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           response <- _with_concurrency_admission_c(resolution) {
@@ -84,7 +93,7 @@ final class TextusAiRunner(
           _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
         } yield response
       } { response =>
-        _normalize_record_response(req, response, requirement, policymetadata)
+        _normalize_record_response(req, response, requirement, policymetadata, inputestimate)
       }
     }
 
@@ -94,9 +103,11 @@ final class TextusAiRunner(
       val effective = _effective_selection(requirement)
       val properties = _request_properties(req.properties, resolution)
       val maxtokens = resolution.maxTokens(req.maxTokens)
-      val policymetadata = resolution.executionMetadata(maxtokens, properties)
+      val inputestimate = AiInputTokenEstimator.chat(_chat_input(req), req.messages.length)
+      val policymetadata = resolution.executionMetadata(maxtokens, properties, inputEstimate = Some(inputestimate))
       _with_chat_calltree(req, requirement, maxtokens, policymetadata) {
         for {
+          _ <- resolution.policy.validateInputBudget(inputestimate)
           _ <- resolution.policy.validateChat(properties)
           _ <- AiProviderAdmission.validate(effective, properties)
           response <- _with_concurrency_admission_c(resolution) {
@@ -113,7 +124,7 @@ final class TextusAiRunner(
               _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
             } yield response
           }
-        } yield _to_ai_chat_response(req, response, requirement, policymetadata)
+        } yield _to_ai_chat_response(req, response, requirement, policymetadata, inputestimate)
       }
     }
 
@@ -508,7 +519,8 @@ final class TextusAiRunner(
     req: AiGenerateRequest,
     response: GenerateResponse,
     requirement: AiRunnerRequirement,
-    policymetadata: Map[String, String]
+    policymetadata: Map[String, String],
+    inputestimate: AiInputTokenEstimate
   ): AiGenerateResponse =
     AiGenerateResponse(
       response.text,
@@ -518,7 +530,8 @@ final class TextusAiRunner(
         requirement,
         response.model,
         response.metadata,
-        policymetadata = policymetadata
+        policymetadata = policymetadata,
+        estimatedusage = inputestimate.usageFacts
       ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text))
     )
 
@@ -526,7 +539,8 @@ final class TextusAiRunner(
     req: AiChatRequest,
     response: ChatResponse,
     requirement: AiRunnerRequirement,
-    policymetadata: Map[String, String]
+    policymetadata: Map[String, String],
+    inputestimate: AiInputTokenEstimate
   ): AiChatResponse =
     AiChatResponse(
       _to_ai_message(response.message),
@@ -536,7 +550,8 @@ final class TextusAiRunner(
         requirement,
         response.model,
         response.metadata,
-        policymetadata = policymetadata
+        policymetadata = policymetadata,
+        estimatedusage = inputestimate.usageFacts
       ) ++ AiExecutionFacts.digestMetadata(_chat_input(req), response.message.content))
     )
 
@@ -544,7 +559,8 @@ final class TextusAiRunner(
     req: AiRecordRequest,
     response: GenerateResponse,
     requirement: AiRunnerRequirement,
-    policymetadata: Map[String, String]
+    policymetadata: Map[String, String],
+    inputestimate: AiInputTokenEstimate
   ): Consequence[AiRecordResponse] =
     if (response.text.trim.isEmpty)
       Consequence.argumentInvalid("AI record response was empty.")
@@ -571,7 +587,8 @@ final class TextusAiRunner(
                       response.model,
                       response.metadata,
                       Some(candidate.mode),
-                      policymetadata
+                      policymetadata,
+                      estimatedusage = inputestimate.usageFacts
                     ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text))
                   )
                 )

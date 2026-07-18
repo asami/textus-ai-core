@@ -24,6 +24,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.purposes.<purpose>.engine
  * - textus.ai.purposes.<purpose>.model
  * - textus.ai.purposes.<purpose>.tools
+ * - textus.ai.purposes.<purpose>.max-input-tokens
  * - textus.ai.purposes.<purpose>.max-output-tokens
  * - textus.ai.purposes.<purpose>.timeout-seconds
  * - textus.ai.purposes.<purpose>.record-retry-limit
@@ -41,6 +42,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.model-profiles.<profile>.cost
  * - textus.ai.model-profiles.<profile>.latency
  * - textus.ai.execution-classes.<execution-class>.model-profile
+ * - textus.ai.execution-classes.<execution-class>.max-input-tokens
  * - textus.ai.generic-purposes.<purpose>.execution-class
  * - textus.ai.levels.<level>.model-profile (migration fallback)
  * - textus.ai.generic-purposes.<purpose>.level (migration fallback)
@@ -84,6 +86,7 @@ private[textus] final case class AiPurposeProfile(
   cost: Option[String] = None,
   latency: Option[String] = None,
   tools: Vector[AiTool] = Vector.empty,
+  maxInputTokens: Option[String] = None,
   maxOutputTokens: Option[String] = None,
   timeoutSeconds: Option[String] = None,
   recordRetryLimit: Option[String] = None,
@@ -110,6 +113,7 @@ private[textus] final case class AiPurposeProfile(
 }
 
 private[textus] final case class AiPurposePolicy(
+  maxInputTokens: Option[Int] = None,
   maxOutputTokens: Option[Int] = None,
   timeoutSeconds: Option[Long] = None,
   recordRetryLimit: Option[Int] = None,
@@ -118,6 +122,17 @@ private[textus] final case class AiPurposePolicy(
   outputSchemaId: Option[String] = None,
   promptContractId: Option[String] = None
 ) {
+  def validateInputBudget(estimate: AiInputTokenEstimate): Consequence[Unit] =
+    maxInputTokens match {
+      case Some(limit) if estimate.tokens > limit =>
+        Consequence.operationIllegal(
+          "ai.input-budget",
+          s"AI input budget exceeded: limit=$limit estimated=${estimate.tokens} basis=${AiInputTokenEstimator.basis}"
+        )
+      case _ =>
+        Consequence.unit
+    }
+
   def requestProperties: Vector[org.goldenport.protocol.Property] =
     timeoutSeconds.map(value => org.goldenport.protocol.Property("ai.timeout-seconds", value.toString, None)).toVector ++
       recordRetryLimit.map(value => org.goldenport.protocol.Property("ai.record.retry-limit", value.toString, None)).toVector
@@ -218,9 +233,12 @@ private[textus] final case class AiProfileResolution(
   def executionMetadata(
     maxTokens: Option[Int],
     properties: Vector[org.goldenport.protocol.Property],
-    recordRetryLimit: Option[Int] = None
+    recordRetryLimit: Option[Int] = None,
+    inputEstimate: Option[AiInputTokenEstimate] = None
   ): Map[String, String] = {
     val policyfacts = Vector(
+      AiExecutionFacts.POLICY_MAX_INPUT_TOKENS -> policy.maxInputTokens.map(_.toString),
+      AiExecutionFacts.POLICY_INPUT_BUDGET_BASIS -> Option.when(policy.maxInputTokens.nonEmpty)(AiInputTokenEstimator.basis),
       AiExecutionFacts.POLICY_MAX_OUTPUT_TOKENS -> maxTokens.map(_.toString),
       AiExecutionFacts.POLICY_TIMEOUT_SECONDS -> AiRequestProperties.timeoutSeconds(properties).map(_.toString),
       AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT -> recordRetryLimit.map(_.toString),
@@ -233,7 +251,9 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.POLICY_LOGICAL_LEVEL -> logicalLevel,
       AiExecutionFacts.ENABLED_TOOLS -> Option.when(codexExecutionProfile.nonEmpty && requirement.tools.nonEmpty)(
         requirement.tools.map(_.id).mkString(",")
-      )
+      ),
+      AiExecutionFacts.INPUT_PAYLOAD_BYTES -> inputEstimate.map(_.payloadBytes.toString),
+      AiExecutionFacts.INPUT_ENVELOPE_TOKENS -> inputEstimate.map(_.envelopeTokens.toString)
     ).collect {
       case (key, Some(value)) if value.trim.nonEmpty => key -> value.trim
     }.toMap
@@ -303,6 +323,10 @@ private[textus] final class AiProfileConfig(
             _purpose_keys(normalized, "enabled-tools") ++
             _purpose_keys(normalized, "enabledTools")
         ),
+        maxInputTokens = _config_string(
+          _purpose_keys(normalized, "max-input-tokens") ++
+            _purpose_keys(normalized, "maxInputTokens")
+        ),
         maxOutputTokens = _config_string(
           _purpose_keys(normalized, "max-output-tokens") ++
             _purpose_keys(normalized, "maxOutputTokens")
@@ -344,6 +368,7 @@ private[textus] final class AiProfileConfig(
         profile.cost.nonEmpty ||
         profile.latency.nonEmpty ||
         profile.tools.nonEmpty ||
+        profile.maxInputTokens.nonEmpty ||
         profile.maxOutputTokens.nonEmpty ||
         profile.timeoutSeconds.nonEmpty ||
         profile.recordRetryLimit.nonEmpty ||
@@ -375,6 +400,10 @@ private[textus] final class AiProfileConfig(
         cost = _config_string(_generic_purpose_keys(normalized, "cost")),
         latency = _config_string(_generic_purpose_keys(normalized, "latency")),
         tools = _config_tools(_generic_purpose_keys(normalized, "tools")),
+        maxInputTokens = _config_string(
+          _generic_purpose_keys(normalized, "max-input-tokens") ++
+            _generic_purpose_keys(normalized, "maxInputTokens")
+        ),
         maxOutputTokens = _config_string(_generic_purpose_keys(normalized, "max-output-tokens") ++ _generic_purpose_keys(normalized, "maxOutputTokens")),
         timeoutSeconds = _config_string(_generic_purpose_keys(normalized, "timeout-seconds") ++ _generic_purpose_keys(normalized, "timeoutSeconds")),
         recordRetryLimit = _config_string(_generic_purpose_keys(normalized, "record-retry-limit") ++ _generic_purpose_keys(normalized, "recordRetryLimit")),
@@ -391,6 +420,7 @@ private[textus] final class AiProfileConfig(
         profile.engine.nonEmpty ||
         profile.model.nonEmpty ||
         profile.tools.nonEmpty ||
+        profile.maxInputTokens.nonEmpty ||
         profile.maxOutputTokens.nonEmpty ||
         profile.timeoutSeconds.nonEmpty ||
         profile.recordRetryLimit.nonEmpty ||
@@ -572,6 +602,10 @@ private[textus] final class AiProfileConfig(
     for {
       configured <- _configured_execution_class(profile)
       effective <- _effective_execution_class(requirement, profile.purpose, configured)
+      classmaxinput <- effective match {
+        case Some(executionclass) => _execution_class_max_input_tokens_c(executionclass)
+        case None => Consequence.success(None)
+      }
       materialized <- effective match {
         case Some(executionclass) =>
           _execution_class_model_profile(executionclass).flatMap {
@@ -579,7 +613,8 @@ private[textus] final class AiProfileConfig(
               Consequence.success(profile.copy(
                 executionClass = Some(executionclass.id),
                 level = None,
-                modelProfile = Some(modelprofile)
+                modelProfile = Some(modelprofile),
+                maxInputTokens = profile.maxInputTokens.orElse(classmaxinput)
               ))
             case Some(_) =>
               Consequence.configurationInvalid(
@@ -668,6 +703,22 @@ private[textus] final class AiProfileConfig(
         _level_keys(executionclass.id, "modelProfile")
     ))
 
+  private def _execution_class_max_input_tokens_c(
+    executionclass: AiExecutionClass
+  ): Consequence[Option[String]] = {
+    val value = _config_string(
+      _execution_class_keys(executionclass.id, "max-input-tokens") ++
+        _execution_class_keys(executionclass.id, "maxInputTokens")
+    )
+    value match {
+      case Some(raw) if raw.toIntOption.exists(_ > 0) => Consequence.success(value)
+      case Some(_) => Consequence.configurationInvalid(
+        s"Invalid AI execution-class max-input-tokens: ${executionclass.id}"
+      )
+      case None => Consequence.success(None)
+    }
+  }
+
   private def _inherit_purpose(
     base: AiPurposeProfile,
     application: AiPurposeProfile
@@ -686,6 +737,7 @@ private[textus] final class AiProfileConfig(
       cost = application.cost.orElse(base.cost),
       latency = application.latency.orElse(base.latency),
       tools = if (application.tools.nonEmpty) application.tools else base.tools,
+      maxInputTokens = application.maxInputTokens.orElse(base.maxInputTokens),
       maxOutputTokens = application.maxOutputTokens.orElse(base.maxOutputTokens),
       timeoutSeconds = application.timeoutSeconds.orElse(base.timeoutSeconds),
       recordRetryLimit = application.recordRetryLimit.orElse(base.recordRetryLimit),
@@ -763,7 +815,8 @@ private[textus] final class AiProfileConfig(
     base: AiPurposePolicy,
     application: AiPurposePolicy
   ): Boolean =
-    _at_most(application.maxOutputTokens, base.maxOutputTokens) &&
+    _at_most(application.maxInputTokens, base.maxInputTokens) &&
+      _at_most(application.maxOutputTokens, base.maxOutputTokens) &&
       _at_most(application.timeoutSeconds, base.timeoutSeconds) &&
       _at_most(application.recordRetryLimit, base.recordRetryLimit) &&
       _at_most(application.maxConcurrent, base.maxConcurrent) &&
@@ -847,6 +900,7 @@ private[textus] final class AiProfileConfig(
     profile: AiPurposeProfile
   ): Consequence[AiPurposePolicy] =
     for {
+      maxinputtokens <- _positive_int(profile.maxInputTokens, "max-input-tokens", profile.purpose)
       maxtokens <- _positive_int(profile.maxOutputTokens, "max-output-tokens", profile.purpose)
       timeoutseconds <- _positive_long(profile.timeoutSeconds, "timeout-seconds", profile.purpose)
       retrylimit <- _bounded_int(profile.recordRetryLimit, "record-retry-limit", profile.purpose, 0, 3)
@@ -856,6 +910,7 @@ private[textus] final class AiProfileConfig(
       promptcontractid <- _policy_id(profile.promptContractId, "prompt-contract-id", profile.purpose)
       _ <- _validate_prompt_policy(profile)
     } yield AiPurposePolicy(
+      maxInputTokens = maxinputtokens,
       maxOutputTokens = maxtokens,
       timeoutSeconds = timeoutseconds,
       recordRetryLimit = retrylimit,

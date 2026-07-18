@@ -38,17 +38,17 @@ Stage Status:
 ## Stage EA-02 - Input-Budget Admission
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark DONE only when input admission occurs before execution and
   every unsupported estimate path returns a structured outcome.
 
-- [ ] Add validated execution-class policy configuration for maximum input
+- [x] Add validated execution-class policy configuration for maximum input
   tokens.
-- [ ] Define provider-neutral input estimation and its accepted error bounds.
-- [ ] Reject requests exceeding the effective input budget before provider or
+- [x] Define provider-neutral input estimation and its accepted error bounds.
+- [x] Reject requests exceeding the effective input budget before provider or
   external-tool invocation.
-- [ ] Record the selected budget basis and limitation without exposing input.
+- [x] Record the selected budget basis and limitation without exposing input.
 
 ## Stage EA-03 - Cost Accounting and Admission
 
