@@ -118,7 +118,7 @@ completed on 2026-07-18.
 - Current phase: Phase 2, Purpose Policy Runtime.
 - Current phase dashboard: `docs/phase/phase-2.md`
 - Current phase checklist: `docs/phase/phase-2-checklist.md`
-- Current next task: PP-02 provider/tool compatibility validation and the remaining policy dimensions.
+- Current next task: PP-02 concurrency policy resolution and structured-output/prompt-policy boundaries.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

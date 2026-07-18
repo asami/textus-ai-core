@@ -32,15 +32,18 @@ final class TextusAiRunner(
   def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] =
     _effective_resolution(req.requirement).flatMap { resolution =>
       val requirement = resolution.requirement
+      val effective = _effective_selection(requirement)
+      val properties = _request_properties(req.properties, resolution)
       _with_generate_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
-          service <- provider.generateService(_effective_selection(requirement))
+          _ <- AiProviderAdmission.validate(effective, properties)
+          service <- provider.generateService(effective)
           response <- service.generate(
             GenerateRequest(
               prompt = req.prompt,
               temperature = req.temperature,
               maxTokens = resolution.maxTokens(req.maxTokens),
-              properties = _request_properties(req.properties, resolution)
+              properties = properties
             )
           )
         } yield _to_ai_generate_response(req, response, requirement)
@@ -50,9 +53,12 @@ final class TextusAiRunner(
   def generateRecord(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] =
     _effective_resolution(req.requirement).flatMap { resolution =>
       val requirement = resolution.requirement
+      val effective = _effective_selection(requirement)
+      val properties = _request_properties(req.properties, resolution)
       _with_record_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
-          service <- provider.generateService(_effective_selection(requirement))
+          _ <- AiProviderAdmission.validate(effective, properties)
+          service <- provider.generateService(effective)
           response <- _generate_record_raw_with_retry(
             service,
             req,
@@ -68,15 +74,18 @@ final class TextusAiRunner(
   def chat(req: AiChatRequest)(using ExecutionContext): Consequence[AiChatResponse] =
     _effective_resolution(req.requirement).flatMap { resolution =>
       val requirement = resolution.requirement
+      val effective = _effective_selection(requirement)
+      val properties = _request_properties(req.properties, resolution)
       _with_chat_calltree(req, requirement, resolution.maxTokens(req.maxTokens)) {
         for {
-          service <- provider.chatService(_effective_selection(requirement))
+          _ <- AiProviderAdmission.validate(effective, properties)
+          service <- provider.chatService(effective)
           response <- service.chat(
             ChatRequest(
               messages = req.messages.map(_to_textus_message),
               temperature = req.temperature,
               maxTokens = resolution.maxTokens(req.maxTokens),
-              properties = _request_properties(req.properties, resolution)
+              properties = properties
             )
           )
         } yield _to_ai_chat_response(req, response, requirement)

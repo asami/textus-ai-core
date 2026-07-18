@@ -782,6 +782,50 @@ final class TextusAiRunnerSpec
       generated.toOption.get.text shouldBe "tools:url_context"
     }
 
+    "reject unsupported purpose tools before a provider operation executes" in {
+      Given("a required purpose profile that selects Gemma and URL context")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "unsupported-purpose-tools"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
+            ConfigurationValue.StringValue("gemma"),
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.tools" ->
+            ConfigurationValue.StringValue("url_context")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+      val requirement = AiRunnerRequirement(
+        purpose = Some("artscene-exhibition-extraction-from-source"),
+        purposeRequired = true
+      )
+
+      When("generate, record, and chat request that purpose")
+      val generated = runner.generate(AiGenerateRequest(prompt, requirement = requirement))
+      val recorded = runner.generateRecord(AiRecordRequest(prompt, _artscene_record_schema, requirement = requirement))
+      val chatted = runner.chat(
+        AiChatRequest(Vector(AiMessage("user", prompt)), requirement = requirement)
+      )
+
+      Then("admission rejects every operation before the generate service executes")
+      Vector(generated, recorded, chatted).foreach {
+        case Consequence.Failure(conclusion) =>
+          conclusion.display should include ("AI tools are not supported by provider 'gemma'")
+        case _ =>
+          fail("unsupported purpose tools must fail before provider execution")
+      }
+      _GenerateServiceState.count(prompt) shouldBe 0
+    }
+
     "send Gemini tool requests through the Interactions API" in {
       Given("a Google provider service with a fake HTTP driver")
       val driver = new _FakeHttpDriver(

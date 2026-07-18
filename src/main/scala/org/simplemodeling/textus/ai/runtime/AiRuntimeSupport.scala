@@ -6,6 +6,7 @@ import io.circe.Json
 import io.circe.parser.parse
 import org.goldenport.Consequence
 import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.cncf.unitofwork.UnitOfWorkOp
 import org.goldenport.protocol.Property
@@ -134,6 +135,46 @@ private[textus] object AiRequestProperties:
       case Property(name, value, _) if keys.contains(name.toLowerCase(java.util.Locale.ROOT)) =>
         String.valueOf(value).trim
     }.filter(_.nonEmpty)
+
+private[textus] object AiProviderAdmission:
+  def validate(
+    selection: SpiSelection,
+    properties: Vector[Property]
+  ): Consequence[Unit] =
+    for {
+      tools <- AiRequestProperties.validateTools(properties)
+      _ <- _validate_tools(_provider(selection), tools)
+      _ <- _validate_model_override(_provider(selection), properties)
+    } yield ()
+
+  private def _provider(selection: SpiSelection): String =
+    selection.provider
+      .map(_.trim.toLowerCase(java.util.Locale.ROOT))
+      .filter(_.nonEmpty)
+      .getOrElse("gemma") match {
+      case "codex-cli" => "codex"
+      case value => value
+    }
+
+  private def _validate_tools(
+    provider: String,
+    tools: Vector[AiTool]
+  ): Consequence[Unit] =
+    if (tools.isEmpty || provider == "google" || provider == "openai")
+      Consequence.unit
+    else
+      Consequence.configurationInvalid(
+        s"AI tools are not supported by provider '$provider': ${tools.map(_.id).mkString(",")}"
+      )
+
+  private def _validate_model_override(
+    provider: String,
+    properties: Vector[Property]
+  ): Consequence[Unit] =
+    if (provider == "codex")
+      AiRequestProperties.requireNoModelOverride(provider, properties)
+    else
+      Consequence.unit
 
 private[textus] object HttpSupport:
   private val _sensitive_query_parameters =

@@ -218,8 +218,13 @@ tools to provider-specific APIs:
   and map `web_search` to Google's `google_search` tool.
 - OpenAI: `url_context` and `web_search` use the OpenAI Responses API with the
   `web_search` tool.
-- Gemma/Ollama: tool requests fail explicitly because local Ollama does not
-  provide these provider web tools.
+- Gemma/Ollama and Codex CLI: tool requests fail explicitly because those
+  runtimes do not provide these provider web tools.
+
+Before a provider binding is resolved, `TextusAiRunner` validates the effective
+logical tools and known provider-local model constraints. This prevents an
+unsupported tool or Codex model override from binding a provider and never
+downgrades a tool-enabled request to plain generation.
 
 Provider-local parameters should be passed as request `Property` values rather
 than as global system properties. Supported property keys include:
