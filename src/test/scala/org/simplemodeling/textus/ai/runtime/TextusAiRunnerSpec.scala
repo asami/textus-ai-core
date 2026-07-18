@@ -10,7 +10,7 @@ import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext, ScopeConte
 import org.goldenport.cncf.http.HttpDriver
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiSelection}
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
 import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
 import org.goldenport.bag.Bag
@@ -1224,6 +1224,67 @@ final class TextusAiRunnerSpec
       modelprofileresult.toOption shouldBe None
       commandresult.toOption.flatMap(_.genericPurpose) shouldBe Some("command-execution")
       commandresult.toOption.flatMap(_.logicalLevel) shouldBe Some("simple-work")
+    }
+
+    "resolve a purpose and execution class through canonical class bindings" in {
+      Given("canonical execution-class bindings and a generic purpose default")
+      val values = Map(
+        "textus.ai.execution-classes.standard-work.model-profile" -> ConfigurationValue.StringValue("openai-standard-work"),
+        "textus.ai.execution-classes.standard-consideration.model-profile" -> ConfigurationValue.StringValue("openai-standard-consideration"),
+        "textus.ai.model-profiles.openai-standard-work.provider" -> ConfigurationValue.StringValue("openai"),
+        "textus.ai.model-profiles.openai-standard-work.mode" -> ConfigurationValue.StringValue("remote"),
+        "textus.ai.model-profiles.openai-standard-work.engine" -> ConfigurationValue.StringValue("gpt"),
+        "textus.ai.model-profiles.openai-standard-work.model" -> ConfigurationValue.StringValue("gpt-5"),
+        "textus.ai.model-profiles.openai-standard-consideration.provider" -> ConfigurationValue.StringValue("openai"),
+        "textus.ai.model-profiles.openai-standard-consideration.mode" -> ConfigurationValue.StringValue("remote"),
+        "textus.ai.model-profiles.openai-standard-consideration.engine" -> ConfigurationValue.StringValue("gpt"),
+        "textus.ai.model-profiles.openai-standard-consideration.model" -> ConfigurationValue.StringValue("gpt-5"),
+        "textus.ai.generic-purposes.software-implementation.execution-class" -> ConfigurationValue.StringValue("standard-work"),
+        "textus.ai.generic-purposes.invalid-generic.model-profile" -> ConfigurationValue.StringValue("openai-standard-work")
+      )
+      val profiles = AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(
+        Configuration(values),
+        ConfigurationTrace.empty
+      )))
+
+      When("a caller accepts the purpose default, requests its matching class, or requests another configured class")
+      val defaulted = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("software-implementation"),
+        purposeRequired = true
+      ))
+      val matching = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("software-implementation"),
+        purposeRequired = true,
+        executionClass = Some(AiExecutionClass.StandardWork)
+      ))
+      val classonly = profiles.resolveRequired(AiRunnerRequirement(
+        executionClass = Some(AiExecutionClass.StandardConsideration)
+      ))
+      val incompatible = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("software-implementation"),
+        purposeRequired = true,
+        executionClass = Some(AiExecutionClass.DeepConsideration)
+      ))
+      val unconfigured = profiles.resolveRequired(AiRunnerRequirement(
+        executionClass = Some(AiExecutionClass.SimpleWork)
+      ))
+      val missingclass = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("invalid-generic"),
+        purposeRequired = true
+      ))
+
+      Then("only configured compatible selections reach an approved model profile")
+      defaulted.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardWork)
+      defaulted.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
+      matching.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardWork)
+      classonly.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardConsideration)
+      classonly.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
+      incompatible.isFaillure shouldBe true
+      incompatible.toString should include ("execution-class is incompatible")
+      unconfigured.isFaillure shouldBe true
+      unconfigured.toString should include ("execution class not configured")
+      missingclass.isFaillure shouldBe true
+      missingclass.toString should include ("generic purpose requires an execution-class")
     }
 
     "permit an application purpose to narrow but not broaden its generic base purpose" in {

@@ -244,34 +244,35 @@ invoked. `AiGenerateRequest.maxTokens`, an `ai.timeout-seconds` request
 property, and an `ai.record.retry-limit` request property override the
 corresponding profile default.
 
-### Generic Purposes And Logical Levels
+### Generic Purposes And Execution Classes
 
-Logical levels keep application callers independent of provider, model, and
-reasoning choices. A level selects one approved `model-profile`; a generic
-purpose selects a level; an application purpose may reference that generic
-purpose through `base-purpose` and only narrow its tools or execution bounds.
+Execution classes keep application callers independent of provider, model, and
+reasoning choices. An execution class selects one approved `model-profile`; a
+generic purpose supplies a default execution class; an application purpose may
+reference that generic purpose through `base-purpose` and only narrow its tools
+or execution bounds.
 
 ```yaml
 textus:
   ai:
-    levels:
+    execution-classes:
       deep-consideration: { model-profile: openai-deep }
       standard-consideration: { model-profile: openai-standard }
       standard-work: { model-profile: openai-standard }
       simple-work: { model-profile: local-simple }
     generic-purposes:
       software-analysis:
-        level: standard-consideration
+        execution-class: standard-consideration
       software-design:
-        level: deep-consideration
+        execution-class: deep-consideration
       software-implementation:
-        level: standard-work
+        execution-class: standard-work
       command-execution:
-        level: simple-work
+        execution-class: simple-work
       web-analysis:
-        level: deep-consideration
+        execution-class: deep-consideration
       structured-extraction:
-        level: standard-work
+        execution-class: standard-work
     purposes:
       artscene-exhibition-web-research:
         base-purpose: web-analysis
@@ -285,23 +286,23 @@ textus:
 [`docs/design/ai-purpose-catalog.md`](docs/design/ai-purpose-catalog.md). An application purpose
 cannot replace its inherited provider, mode, engine, model-profile, model, or
 reasoning setting; it may only select a subset of inherited tools and reduce
-maximum-output, timeout, retry, or concurrency bounds. Unknown generic levels,
-missing bases, and broadening configuration fail before a provider binding is
-selected. Generic purpose names are ordinary purpose values, so a caller may
+maximum-output, timeout, retry, or concurrency bounds. Unknown execution
+classes, missing bases, and broadening configuration fail before a provider
+binding is selected. Generic purpose names are ordinary purpose values, so a caller may
 request `AiRunnerRequirement(purpose = Some("software-analysis"))` without
 provider fields.
 
-The current `generic-purposes` configuration is transitional: it binds logical
-levels and may also constrain tools beside the purpose name. The accepted
-design introduces an explicit `executionClass` selector alongside `purpose`.
-Operator model-profile configuration remains separate. See
-[`docs/design/ai-purpose-catalog.md`](docs/design/ai-purpose-catalog.md).
+The canonical configuration binds each execution class to an operator-managed
+model profile, while a generic purpose supplies its default class. Existing
+logical-level configuration remains a migration fallback only. See
+[`docs/spec/ai-execution-class-resolution.md`](docs/spec/ai-execution-class-resolution.md).
 
-Each configured logical level is also available as an implicit purpose. For
-example, `AiRunnerRequirement(purpose = Some("standard-work"))` resolves the
-configured `standard-work` level without exposing its model profile. A model
-profile name is not an implicit purpose. This is a compatibility path until
-the CNCF `executionClass` contract is available.
+Callers specify an explicit class with
+`AiRunnerRequirement(executionClass = Some(AiExecutionClass.StandardWork))`.
+When a generic purpose has an execution-class default, the explicit class must
+match it. A model-profile name is never an implicit purpose. `levels` and
+`generic-purposes.*.level` remain read-only migration fallbacks; configured
+level names may still be used as implicit purposes by existing callers.
 
 Textus AI maps an effective output-token limit to Google `generateContent` and
 Interactions requests, OpenAI Chat Completions and Responses requests, and

@@ -1,7 +1,7 @@
 package org.simplemodeling.textus.ai.runtime
 
 import org.goldenport.cncf.spi.SpiSelection
-import org.goldenport.cncf.spi.ai.runner.{AiRunnerRequirement, AiTool}
+import org.goldenport.cncf.spi.ai.runner.{AiExecutionClass, AiRunnerRequirement, AiTool}
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -26,7 +26,8 @@ final class AiExecutionFactsSpec
       )
       val requirement = AiRunnerRequirement(
         purpose = Some("car-review.documentation-clarity"),
-        tools = Vector(AiTool.WebSearch, AiTool.UrlContext, AiTool.WebSearch)
+        tools = Vector(AiTool.WebSearch, AiTool.UrlContext, AiTool.WebSearch),
+        executionClass = Some(AiExecutionClass.StandardConsideration)
       )
 
       When("Textus AI normalizes the provider response metadata")
@@ -44,6 +45,7 @@ final class AiExecutionFactsSpec
       Then("the effective selection wins and only the safe provider fact remains available")
       metadata(AiExecutionFacts.PROVIDER) shouldBe "google"
       metadata(AiExecutionFacts.MODEL) shouldBe "gemini-2.5-pro"
+      metadata(AiExecutionFacts.EXECUTION_CLASS) shouldBe "standard-consideration"
       metadata(AiExecutionFacts.TOOLS) shouldBe "url_context,web_search"
       metadata("google.response_id") shouldBe "safe-response-id"
       metadata(AiExecutionFacts.RESPONSE_ID) shouldBe "safe-response-id"

@@ -6,20 +6,18 @@ phase=[Phase 3 - Execution Class and Accounting](phase-3.md)
 ## Stage EC-01 - Execution Class
 
 Stage Status:
-- Current status: IN_PROGRESS
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark DONE only when the CNCF selector, Textus AI resolution,
   migration, and deterministic evidence are available.
-- Current step: CNCF provides `AiExecutionClass` and
-  `AiRunnerRequirement.executionClass`; Textus AI resolution remains open.
 
-- [ ] Define CNCF `AiExecutionClass` and
+- [x] Define CNCF `AiExecutionClass` and
   `AiRunnerRequirement.executionClass` without exposing engine or model names.
-- [ ] Define `execution-class` configuration precedence with purpose and
+- [x] Define `execution-class` configuration precedence with purpose and
   operator model-profile configuration.
-- [ ] Migrate implicit level-purpose aliases and transitional generic-purpose
+- [x] Migrate implicit level-purpose aliases and transitional generic-purpose
   level selection without weakening current no-fallback guarantees.
-- [ ] Add deterministic specifications for configured, unconfigured, and
+- [x] Add deterministic specifications for configured, unconfigured, and
   incompatible purpose/execution-class selection.
 
 ## Stage EA-01 - Execution Facts

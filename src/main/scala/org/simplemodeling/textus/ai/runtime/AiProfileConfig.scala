@@ -4,7 +4,7 @@ import scala.util.Try
 import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.config.RuntimeConfig
-import org.goldenport.cncf.spi.ai.runner.{AiRunnerRequirement, AiTool}
+import org.goldenport.cncf.spi.ai.runner.{AiExecutionClass, AiRunnerRequirement, AiTool}
 import org.goldenport.configuration.ResolvedConfiguration
 
 /*
@@ -40,8 +40,10 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.model-profiles.<profile>.quality
  * - textus.ai.model-profiles.<profile>.cost
  * - textus.ai.model-profiles.<profile>.latency
- * - textus.ai.levels.<level>.model-profile
- * - textus.ai.generic-purposes.<purpose>.level
+ * - textus.ai.execution-classes.<execution-class>.model-profile
+ * - textus.ai.generic-purposes.<purpose>.execution-class
+ * - textus.ai.levels.<level>.model-profile (migration fallback)
+ * - textus.ai.generic-purposes.<purpose>.level (migration fallback)
  *
  * A configured logical level is also an implicit caller purpose. For example,
  * purpose `standard-work` resolves through
@@ -70,6 +72,7 @@ private[textus] final case class AiModelProfile(
 private[textus] final case class AiPurposeProfile(
   purpose: String,
   basePurpose: Option[String] = None,
+  executionClass: Option[String] = None,
   level: Option[String] = None,
   modelProfile: Option[String] = None,
   provider: Option[String] = None,
@@ -98,6 +101,7 @@ private[textus] final case class AiPurposeProfile(
       mode = requirement.mode.orElse(mode).orElse(modelprofile.flatMap(_.mode)),
       engine = requirement.engine.orElse(engine).orElse(modelprofile.flatMap(_.engine)),
       model = requirement.model.orElse(model).orElse(modelprofile.flatMap(_.model)),
+      executionClass = requirement.executionClass.orElse(executionClass.flatMap(AiExecutionClass.parse)),
       tools = if (requirement.tools.nonEmpty) requirement.tools else tools match {
         case values if values.nonEmpty => values
         case _ => modelprofile.map(_.tools).getOrElse(Vector.empty)
@@ -277,6 +281,10 @@ private[textus] final class AiProfileConfig(
           _purpose_keys(normalized, "base-purpose") ++
             _purpose_keys(normalized, "basePurpose")
         ),
+        executionClass = _config_string(
+          _purpose_keys(normalized, "execution-class") ++
+            _purpose_keys(normalized, "executionClass")
+        ),
         modelProfile = _config_string(_purpose_keys(normalized, "model-profile") ++ _purpose_keys(normalized, "modelProfile")),
         provider = _config_string(_purpose_keys(normalized, "provider")),
         mode = _config_string(_purpose_keys(normalized, "mode")),
@@ -322,6 +330,7 @@ private[textus] final class AiProfileConfig(
     }.filter(profile =>
       profile.modelProfile.nonEmpty ||
         profile.basePurpose.nonEmpty ||
+        profile.executionClass.nonEmpty ||
         profile.provider.nonEmpty ||
         profile.mode.nonEmpty ||
         profile.engine.nonEmpty ||
@@ -347,6 +356,10 @@ private[textus] final class AiProfileConfig(
     Option.when(normalized.nonEmpty) {
       AiPurposeProfile(
         purpose = normalized,
+        executionClass = _config_string(
+          _generic_purpose_keys(normalized, "execution-class") ++
+            _generic_purpose_keys(normalized, "executionClass")
+        ),
         level = _config_string(_generic_purpose_keys(normalized, "level")),
         modelProfile = _config_string(_generic_purpose_keys(normalized, "model-profile") ++ _generic_purpose_keys(normalized, "modelProfile")),
         provider = _config_string(_generic_purpose_keys(normalized, "provider")),
@@ -367,6 +380,7 @@ private[textus] final class AiProfileConfig(
       )
     }.filter { profile =>
       profile.level.nonEmpty ||
+        profile.executionClass.nonEmpty ||
         profile.modelProfile.nonEmpty ||
         profile.provider.nonEmpty ||
         profile.mode.nonEmpty ||
@@ -442,10 +456,15 @@ private[textus] final class AiProfileConfig(
           _is_configured_logical_level(purpose)
         )
           _resolve_named_purpose(requirement.copy(purpose = Some(purpose)), purpose, false)
+        else if (requirement.executionClass.nonEmpty)
+          Consequence.configurationInvalid(s"AI purpose profile not configured: $purpose")
         else
           Consequence.success(AiProfileResolution(requirement))
       case None =>
-        Consequence.success(AiProfileResolution(requirement))
+        requirement.executionClass match {
+          case Some(executionclass) => _resolve_execution_class_only(requirement, executionclass)
+          case None => Consequence.success(AiProfileResolution(requirement))
+        }
     }
 
   private def _resolve_named_purpose(
@@ -462,7 +481,7 @@ private[textus] final class AiProfileConfig(
       case None =>
         resolveGenericPurpose(purpose) match {
           case Some(profile) =>
-            _materialize_generic_purpose(profile).flatMap { materialized =>
+            _materialize_generic_execution_class(requirement, profile).flatMap { materialized =>
               _resolve_profile(
                 requirement,
                 materialized,
@@ -482,7 +501,7 @@ private[textus] final class AiProfileConfig(
   ): Consequence[AiProfileResolution] =
     if (_is_configured_logical_level(purpose)) {
       val profile = AiPurposeProfile(purpose = purpose, level = Some(purpose))
-      _materialize_generic_purpose(profile).flatMap { materialized =>
+      _materialize_execution_class(requirement, profile).flatMap { materialized =>
         _resolve_profile(
           requirement,
           materialized,
@@ -506,10 +525,13 @@ private[textus] final class AiProfileConfig(
     resolveGenericPurpose(basepurpose) match {
       case Some(base) =>
         for {
-          materializedbase <- _materialize_generic_purpose(base)
+          materializedbase <- _materialize_generic_execution_class(requirement, base)
           merged = _inherit_purpose(materializedbase, application)
           baseresolution <- _resolve_profile(
-            AiRunnerRequirement(purpose = Some(basepurpose)),
+            AiRunnerRequirement(
+              purpose = Some(basepurpose),
+              executionClass = requirement.executionClass
+            ),
             materializedbase,
             true,
             Some(_ProfileOrigin(Some(basepurpose), base.level))
@@ -526,24 +548,121 @@ private[textus] final class AiProfileConfig(
         Consequence.configurationInvalid(s"AI generic purpose profile not configured: $basepurpose")
     }
 
-  private def _materialize_generic_purpose(
+  private def _resolve_execution_class_only(
+    requirement: AiRunnerRequirement,
+    executionclass: AiExecutionClass
+  ): Consequence[AiProfileResolution] =
+    _resolve_profile(
+      requirement,
+      AiPurposeProfile(
+        purpose = s"execution-class:${executionclass.id}",
+        executionClass = Some(executionclass.id)
+      ),
+      false
+    )
+
+  private def _materialize_execution_class(
+    requirement: AiRunnerRequirement,
     profile: AiPurposeProfile
   ): Consequence[AiPurposeProfile] =
-    profile.level match {
-      case Some(level) =>
-        _config_string(_level_keys(level, "model-profile") ++ _level_keys(level, "modelProfile")) match {
-          case Some(modelprofile) if profile.modelProfile.forall(_ == modelprofile) =>
-            Consequence.success(profile.copy(modelProfile = Some(modelprofile), level = None))
-          case Some(_) =>
+    for {
+      configured <- _configured_execution_class(profile)
+      effective <- _effective_execution_class(requirement, profile.purpose, configured)
+      materialized <- effective match {
+        case Some(executionclass) =>
+          _execution_class_model_profile(executionclass).flatMap {
+            case Some(modelprofile) if profile.modelProfile.forall(_ == modelprofile) =>
+              Consequence.success(profile.copy(
+                executionClass = Some(executionclass.id),
+                level = None,
+                modelProfile = Some(modelprofile)
+              ))
+            case Some(_) =>
+              Consequence.configurationInvalid(
+                s"AI execution class model-profile conflicts with purpose: ${profile.purpose}"
+              )
+            case None =>
+              Consequence.configurationInvalid(
+                s"AI execution class not configured: ${executionclass.id}"
+              )
+          }
+        case None =>
+          Consequence.success(profile)
+      }
+    } yield materialized
+
+  private def _materialize_generic_execution_class(
+    requirement: AiRunnerRequirement,
+    profile: AiPurposeProfile
+  ): Consequence[AiPurposeProfile] =
+    if (profile.executionClass.nonEmpty || profile.level.nonEmpty)
+      _materialize_execution_class(requirement, profile)
+    else
+      Consequence.configurationInvalid(
+        s"AI generic purpose requires an execution-class: ${profile.purpose}"
+      )
+
+  private def _configured_execution_class(
+    profile: AiPurposeProfile
+  ): Consequence[Option[AiExecutionClass]] =
+    (profile.executionClass, profile.level) match {
+      case (Some(executionclass), Some(level)) =>
+        for {
+          primary <- _parse_execution_class(executionclass, profile.purpose)
+          legacy <- _parse_execution_class(level, profile.purpose)
+          _ <- if (primary == legacy)
+            Consequence.unit
+          else
             Consequence.configurationInvalid(
-              s"AI generic purpose model-profile must be supplied by level: ${profile.purpose}"
+              s"AI purpose execution-class conflicts with legacy level: ${profile.purpose}"
             )
-          case None =>
-            Consequence.configurationInvalid(s"AI logical level not configured: $level")
-        }
-      case None =>
-        Consequence.configurationInvalid(s"AI generic purpose requires a logical level: ${profile.purpose}")
+        } yield Some(primary)
+      case (Some(executionclass), None) =>
+        _parse_execution_class(executionclass, profile.purpose).map(Some(_))
+      case (None, Some(level)) =>
+        _parse_execution_class(level, profile.purpose).map(Some(_))
+      case (None, None) =>
+        Consequence.success(None)
     }
+
+  private def _effective_execution_class(
+    requirement: AiRunnerRequirement,
+    purpose: String,
+    configured: Option[AiExecutionClass]
+  ): Consequence[Option[AiExecutionClass]] =
+    (requirement.executionClass, configured) match {
+      case (Some(requested), Some(expected)) if requested != expected =>
+        Consequence.configurationInvalid(
+          s"AI purpose execution-class is incompatible: $purpose requires ${expected.id}, got ${requested.id}"
+        )
+      case (Some(requested), _) =>
+        Consequence.success(Some(requested))
+      case (None, Some(expected)) =>
+        Consequence.success(Some(expected))
+      case (None, None) =>
+        Consequence.success(None)
+    }
+
+  private def _parse_execution_class(
+    value: String,
+    purpose: String
+  ): Consequence[AiExecutionClass] =
+    AiExecutionClass.parse(value) match {
+      case Some(executionclass) => Consequence.success(executionclass)
+      case None => Consequence.configurationInvalid(
+        s"Invalid AI execution-class '$value' for purpose: $purpose"
+      )
+    }
+
+  private def _execution_class_model_profile(
+    executionclass: AiExecutionClass
+  ): Consequence[Option[String]] =
+    Consequence.success(_config_string(
+      _execution_class_keys(executionclass.id, "model-profile") ++
+        _execution_class_keys(executionclass.id, "modelProfile") ++
+        _level_keys(executionclass.id, "model-profile") ++
+        _level_keys(executionclass.id, "modelProfile")
+    ))
 
   private def _inherit_purpose(
     base: AiPurposeProfile,
@@ -551,6 +670,7 @@ private[textus] final class AiProfileConfig(
   ): AiPurposeProfile =
     application.copy(
       basePurpose = None,
+      executionClass = application.executionClass.orElse(base.executionClass),
       level = None,
       modelProfile = application.modelProfile.orElse(base.modelProfile),
       provider = application.provider.orElse(base.provider),
@@ -578,14 +698,15 @@ private[textus] final class AiProfileConfig(
     origin: Option[_ProfileOrigin] = None
   ): Consequence[AiProfileResolution] =
     for {
-      modelprofile <- _resolve_model_profile(profile)
-      policy <- _purpose_policy(profile)
+      materialized <- _materialize_execution_class(requirement, profile)
+      modelprofile <- _resolve_model_profile(materialized)
+      policy <- _purpose_policy(materialized)
       resolution <- {
-        val profileprovider = profile.provider.orElse(modelprofile.flatMap(_.provider))
-        val effective = profile.applyTo(requirement, modelprofile)
+        val profileprovider = materialized.provider.orElse(modelprofile.flatMap(_.provider))
+        val effective = materialized.applyTo(requirement, modelprofile)
         if (requiresprovider && profileprovider.isEmpty)
           Consequence.configurationInvalid(
-            s"AI purpose profile must select a provider: ${profile.purpose}"
+            s"AI purpose profile must select a provider: ${materialized.purpose}"
           )
         else
           _validate_codex_profile(requirement, effective, modelprofile).map { _ =>
@@ -618,13 +739,15 @@ private[textus] final class AiProfileConfig(
   private def _same_selection(
     base: AiRunnerRequirement,
     application: AiRunnerRequirement
-  ): Boolean =
-    Vector(
+  ): Boolean = {
+    val selectionmatches = Vector(
       base.provider -> application.provider,
       base.mode -> application.mode,
       base.engine -> application.engine,
       base.model -> application.model
     ).forall { case (left, right) => left.map(_.trim.toLowerCase(java.util.Locale.ROOT)) == right.map(_.trim.toLowerCase(java.util.Locale.ROOT)) }
+    selectionmatches && base.executionClass == application.executionClass
+  }
 
   private def _same_model_profile(
     base: Option[AiModelProfile],
@@ -859,6 +982,18 @@ private[textus] final class AiProfileConfig(
       s"textus.runtime.ai.levels.$level.$leaf",
       s"cncf.ai.levels.$level.$leaf",
       s"cncf.runtime.ai.levels.$level.$leaf"
+    )
+
+  private def _execution_class_keys(
+    executionclass: String,
+    leaf: String
+  ): Vector[String] =
+    Vector(
+      s"textus.ai.execution-classes.$executionclass.$leaf",
+      s"textus.ai.executionClasses.$executionclass.$leaf",
+      s"textus.runtime.ai.execution-classes.$executionclass.$leaf",
+      s"cncf.ai.execution-classes.$executionclass.$leaf",
+      s"cncf.runtime.ai.execution-classes.$executionclass.$leaf"
     )
 
   private def _model_profile_keys(

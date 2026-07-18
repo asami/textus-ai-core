@@ -20,6 +20,7 @@ private[textus] object AiExecutionFacts {
   val ENGINE = "ai.execution.engine"
   val MODEL = "ai.execution.model"
   val PURPOSE = "ai.execution.purpose"
+  val EXECUTION_CLASS = "ai.execution.execution_class"
   val LOCATION = "ai.execution.location"
   val TOOLS = "ai.execution.tools"
   val ENABLED_TOOLS = "ai.execution.enabled_tools"
@@ -58,6 +59,7 @@ private[textus] object AiExecutionFacts {
       ENGINE -> selection.engine,
       MODEL -> responsemodel,
       PURPOSE -> requirement.purpose,
+      EXECUTION_CLASS -> requirement.executionClass.map(_.id),
       LOCATION -> _location(selection.mode),
       TOOLS -> _tools(requirement),
       TOOL_RESULT_SUMMARY -> _tool_result_summary(selection, providermetadata),

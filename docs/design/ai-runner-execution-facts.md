@@ -42,6 +42,7 @@ All normalized facts use the `ai.execution.*`, `ai.policy.*`, `ai.usage.*`, or
 | `ai.execution.engine` | Effective provider engine or runtime | Not resolved |
 | `ai.execution.model` | Effective model identifier | Provider did not report it |
 | `ai.execution.purpose` | Effective caller purpose | No purpose was supplied |
+| `ai.execution.execution_class` | Effective logical execution class | No execution class was selected |
 | `ai.execution.location` | `local` or `remote` execution location | Cannot classify safely |
 | `ai.execution.request_id` | Safe provider request identity | Provider did not expose one safely |
 | `ai.execution.response_id` | Safe provider response identity | Provider did not expose one safely |
@@ -75,10 +76,12 @@ For Codex, these facts identify the profile policy rather than a caller-supplied
 CLI argument. `ai.execution.enabled_tools` records only the logical capability
 set, not URLs, search results, or provider transcripts.
 
-Generic purpose policy is resolved before provider selection. A generic purpose
-selects an operator-configured logical level; an application purpose may name
-it with `base-purpose` only when its effective provider/model/reasoning policy
-is identical and its tools and execution bounds are no broader.
+Purpose and execution-class policy are resolved before provider selection. A
+generic purpose can supply a configured execution-class default; an
+application purpose may name it with `base-purpose` only when its effective
+provider/model/reasoning policy is identical and its tools and execution bounds
+are no broader. The normalized execution class reflects the effective approved
+selector, not a provider or model identifier.
 
 ### Usage Facts
 

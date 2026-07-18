@@ -24,7 +24,7 @@ a provider, model, command-line tool, application, or domain workflow.
 ```text
 purpose + executionClass
   -> approved operator configuration
-  -> logical level and model profile
+  -> execution-class binding and model profile
   -> provider, mode, engine, model, reasoning, tools, and limits
 ```
 
@@ -40,10 +40,9 @@ executionClass = standard-work
   -> effective provider and model
 ```
 
-The current runtime accepts configured logical-level names as implicit purpose
-aliases. That is a compatibility path only. EC-01 will introduce the explicit
-`executionClass` selector; new integrations must not rely on an implicit alias
-as the final contract.
+The runtime resolves the explicit `executionClass` selector. Configured
+logical-level names remain implicit purpose aliases only as a compatibility
+path; new integrations must use `executionClass`.
 
 ## Standard Catalog
 
@@ -94,8 +93,8 @@ names express application intent, not provider selection.
 
 An application requiring a specialized policy that cannot safely inherit a
 standard purpose must define that policy explicitly in its assembly. It must
-still resolve through a logical level and approved model profile; it must not
-place provider or command arguments in application calls.
+still resolve through an execution class and approved model profile; it must
+not place provider or command arguments in application calls.
 
 ## Exclusions
 
@@ -143,11 +142,13 @@ the configuration that supplies provider, mode, engine, model, reasoning, tool
 capabilities, and execution bounds. An execution class does not expose a model
 profile name or grant any capability.
 
-The current `generic-purposes` configuration is a transitional implementation:
-it still places level and some tool selection beside purpose names. It must be
-reconciled to the `executionClass` design before the catalog is treated as a
-fully implemented runtime contract. This does not change current explicit
-failure behavior for an unconfigured purpose.
+Canonical configuration binds `execution-classes.<class>.model-profile` and
+sets a generic purpose default with
+`generic-purposes.<purpose>.execution-class`. When a request supplies a class
+as well, it must match the purpose default; an incompatible pair fails before
+provider selection. `levels` and `generic-purposes.*.level` remain read-only
+migration fallbacks and do not change explicit failure behavior for an
+unconfigured purpose.
 
 ## Invariants
 

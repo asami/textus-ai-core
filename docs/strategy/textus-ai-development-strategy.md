@@ -152,7 +152,8 @@ completed on 2026-07-18.
 - Current phase: Phase 3, Execution Class and Accounting.
 - Current phase dashboard: `docs/phase/phase-3.md`
 - Current phase checklist: `docs/phase/phase-3-checklist.md`
-- Current next task: EC-01 purpose and execution-class contract.
+- Current next task: EA-01 provider-neutral execution facts and safe
+  publication contract.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
