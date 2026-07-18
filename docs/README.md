@@ -26,10 +26,11 @@ This repository follows the document lifecycle defined by `ai/directive/core`.
 - `docs/spec/ai-phase-3-executable-evidence.md` maps Phase 3 exit criteria to deterministic specifications
 - `docs/design/ai-runtime-workflow-boundary.md` records the workflow ownership boundary and later-phase entry contract
 - `docs/phase/phase-3-closure.md` records the completed Phase 3 evidence and deferred work
-- `docs/phase/phase-4.md` records the active runtime-profile and application-purpose migration
+- `docs/phase/phase-4.md` records the completed runtime-profile and application-purpose registration migration
 - `docs/phase/phase-4-checklist.md` records its implementation ledger
 - `docs/phase/phase-4-closure.md` records the completed runtime-profile evidence
-- `docs/journal/2026/07/2026-07-18-runtime-profile-application-purpose-adoption-handoff.md` records Sanpomap and GeoResolver adoption boundaries
+- `docs/spec/ai-application-purpose-registration.md` records the executable registration contract
+- `docs/journal/2026/07/2026-07-18-application-purpose-registration-handoff.md` records Sanpomap and GeoResolver registration adoption boundaries
 - `docs/spec/mock-ai-executable-spec.md` records the deterministic mock AI executable specification
 
 ## Rules

@@ -1,6 +1,6 @@
 # Phase 4 Checklist - Runtime Profiles and Application Purposes
 
-status=in-progress
+status=complete
 phase=[Phase 4 - Runtime Profiles and Application Purposes](phase-4.md)
 
 ## Stage RP-01 - Runtime Profile Catalog
@@ -30,20 +30,51 @@ Stage Status:
 - [x] Reject configuration that attempts to replace a standard purpose's
   concrete runtime selection.
 
-## Stage AP-01 - Application-Purpose Resolver
+## Stage AP-01A - Application-Purpose Registration Contract
 
 Stage Status:
 - Current status: DONE
 - Owner: Textus AI maintainers
-- Update rule: Mark DONE only when an application caller can select a domain
-  purpose without selecting a concrete runtime setting.
+- Update rule: Mark DONE only when application Component.Port output is bound
+  to Textus AI's CNCF registration socket set during bootstrap.
 
-- [x] Resolve `application-purposes.<name>.purpose` to exactly one standard
-  purpose.
-- [x] Permit only validated narrowing of approved execution bounds and caller
-  contract identities.
-- [x] Reject provider, mode, engine, model, reasoning, tool, profile, and
-  execution-class selection from an application purpose or its caller.
+- [x] Define `AiRunnerApplicationPurposeRegistration`, its default standard
+  purpose, and provider-neutral default policy in the CNCF AiRunner protocol.
+- [x] Publish the Textus AI registration input socket set and collect
+  application Port outputs through the existing CNCF SPI resolver.
+- [x] Pass the live registration catalog from `ComponentFactory` to
+  `AiProfileConfig`.
+
+## Stage AP-01B - Registration Defaults And Configuration Tuning
+
+Stage Status:
+- Current status: DONE
+- Owner: Textus AI maintainers
+- Update rule: Mark DONE only when registered entries execute from their
+  defaults and configuration cannot define application-purpose identity.
+
+- [x] Resolve a registered default standard purpose and default policy without
+  `textus.ai.application-purposes.<name>.*` configuration.
+- [x] Apply allowed configuration as a narrowing tuning layer over the
+  registered effective policy.
+- [x] Include registered `max-concurrent` defaults in component-scoped CNCF
+  admission setup.
+
+## Stage AP-01C - Strict Registration And Configuration Validation
+
+Stage Status:
+- Current status: DONE
+- Owner: Textus AI maintainers
+- Update rule: Mark DONE only when every invalid catalog or configuration
+  condition fails before provider/process resolution.
+
+- [x] Reject duplicate registrations and unknown registration standard purposes.
+- [x] Reject configuration-only names and remove configuration-defined
+  application-purpose mappings.
+- [x] Reject unregistered application callers without interpreting the name as
+  an implicit execution-class fallback.
+- [x] Preserve rejection of caller/provider/model/tool and application tuning
+  concrete runtime selection.
 
 ## Stage CM-01 - Strict Configuration Migration
 
@@ -86,11 +117,12 @@ Stage Status:
 
 - [x] Verify `codex-cli` and `gemini` defaults for every standard class without
   a `model-profiles` block.
-- [x] Verify merged user/project override precedence and application-purpose
-  narrowing.
+- [x] Verify bootstrap registration, registration defaults, configuration
+  tuning, and application-purpose narrowing.
 - [x] Verify caller and legacy-key rejection before provider/process execution.
 - [x] Verify safe runtime-profile facts, Codex/Gemini bindings, input/cost
   admission, and no-fallback regression behavior.
-- [x] Publish the application-purpose handoff for Sanpomap and GeoResolver.
+- [x] Publish the application-purpose registration handoff for Sanpomap and
+  GeoResolver.
 - [x] Run review, fix actionable findings, validate, and record closure
   evidence.

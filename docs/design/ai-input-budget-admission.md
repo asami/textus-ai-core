@@ -13,8 +13,8 @@ effective execution class configures `max-input-tokens`. The policy key is:
 textus.ai.execution-classes.<execution-class>.max-input-tokens
 ```
 
-An application purpose may set `max-input-tokens` under
-`textus.ai.application-purposes.<purpose>` only to narrow the resolved
+An application-purpose registration or tuning under
+`textus.ai.application-purposes.<purpose>` may set `max-input-tokens` only to narrow the resolved
 execution-class limit. A missing limit means no input-budget admission is
 applied.
 

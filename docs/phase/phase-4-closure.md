@@ -2,14 +2,18 @@
 
 status=complete
 completed_at=2026-07-18
+reopened_at=2026-07-18
+reclosed_at=2026-07-18
 phase=[Phase 4](phase-4.md)
 
 ## Outcome
 
 Textus AI now resolves application AI requests through runtime-owned profiles,
-standard purposes, execution classes, and application-purpose mappings. The
-legacy model-profile/generic-purpose/level resolver was removed rather than
-retained as a compatibility path.
+standard purposes, execution classes, and bootstrap-registered application
+purposes. Phase 4 was reopened after the initial closure because configuration
+mappings did not establish application ownership. The runtime-profile,
+standard-purpose, execution-class, and provider-binding work remains intact;
+this closure adds the registration correction without reverting it.
 
 ## Evidence
 
@@ -17,15 +21,18 @@ retained as a compatibility path.
 | --- | --- |
 | Supplied profile matrices | `AiRuntimeProfileCatalog` and `AiRuntimeProfileSpec` resolve all four classes for `codex-cli` and `gemini`. |
 | Standard-purpose catalog | `AiRuntimeProfileCatalog.standardPurposes` maps the six shipped purposes to their runtime-owned classes. |
-| Application isolation | `TextusAiRunnerSpec` verifies mapping, policy narrowing, and rejection of caller/application concrete selection. |
+| Registration contract | CNCF `AiRunnerApplicationPurposeRegistration` and its socket set collect application Port outputs during bootstrap. |
+| Application isolation | `AiRuntimeProfileSpec`, `ComponentFactorySpec`, and `TextusAiRunnerSpec` verify registration defaults, tuning, policy narrowing, and rejection of caller/application concrete selection. |
 | Strict migration | `AiProfileConfig` rejects canonical and alias legacy key families before provider execution. |
 | Runtime binding | `ComponentFactorySpec` and `CodexRuntimeProviderSpec` verify profile-derived defaults and managed Codex capability compilation. |
-| Safe attribution | `AiExecutionFactsSpec` and `TextusAiRunnerSpec` verify runtime-profile/effective-class facts without model-profile identity. |
-| Downstream adoption | [Application-purpose adoption handoff](../journal/2026/07/2026-07-18-runtime-profile-application-purpose-adoption-handoff.md) defines Sanpomap and GeoResolver boundaries. |
+| Safe attribution | `AiExecutionFactsSpec` and `TextusAiRunnerSpec` verify application-purpose, effective-standard-purpose, runtime-profile, and effective-class facts without model-profile identity. |
+| Downstream adoption | [Application-purpose registration handoff](../journal/2026/07/2026-07-18-application-purpose-registration-handoff.md) defines Sanpomap and GeoResolver boundaries. |
 
 ## Validation
 
-- `sbt --batch test`: 88 tests passed.
+- `sbt --batch test`: 90 Textus AI tests passed.
+- `sbt --batch test` in `cloud-native-component-framework` passed with the new
+  AiRunner registration SPI specification.
 - CAR lint completed without `FAIL` entries.
 - CAR lint residual warnings are pre-existing direct ambient-environment access
   in Gemma/Google/OpenAI providers and an absent ABI baseline; they are outside

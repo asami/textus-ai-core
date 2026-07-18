@@ -4,7 +4,7 @@ import scala.util.Try
 import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.config.RuntimeConfig
-import org.goldenport.cncf.spi.ai.runner.{AiExecutionClass, AiRunnerRequirement, AiTool}
+import org.goldenport.cncf.spi.ai.runner.{AiExecutionClass, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiTool}
 import org.goldenport.configuration.ResolvedConfiguration
 
 /*
@@ -18,7 +18,6 @@ import org.goldenport.configuration.ResolvedConfiguration
  * Canonical configuration:
  * - textus.ai.profile
  * - textus.ai.execution-classes.<execution-class>.*
- * - textus.ai.application-purposes.<application-purpose>.purpose
  * - textus.ai.application-purposes.<application-purpose>.<policy>
  *
  * @since   Jul.  4, 2026
@@ -102,7 +101,7 @@ private[textus] object AiRuntimeProfileCatalog {
     profile.name -> profile
   }.toMap
 
-  val standardPurposes: Map[String, AiExecutionClass] = Map(
+  private val _standard_purposes: Map[String, AiExecutionClass] = Map(
     "software-analysis" -> AiExecutionClass.StandardConsideration,
     "software-design" -> AiExecutionClass.DeepConsideration,
     "software-implementation" -> AiExecutionClass.StandardWork,
@@ -110,6 +109,12 @@ private[textus] object AiRuntimeProfileCatalog {
     "web-analysis" -> AiExecutionClass.DeepConsideration,
     "structured-extraction" -> AiExecutionClass.StandardWork
   )
+
+  private val _execution_class_purposes: Map[String, AiExecutionClass] =
+    AiExecutionClass.values.map(value => value.id -> value).toMap
+
+  val standardPurposes: Map[String, AiExecutionClass] =
+    _standard_purposes ++ _execution_class_purposes
 
   def profile(name: String): Option[AiRuntimeProfile] =
     profiles.get(name.trim.toLowerCase(java.util.Locale.ROOT))
@@ -148,6 +153,26 @@ private[textus] final case class AiPurposeProfile(
       model = requirement.model.orElse(model),
       executionClass = requirement.executionClass.orElse(executionClass.flatMap(AiExecutionClass.parse)),
       tools = if (requirement.tools.nonEmpty) requirement.tools else tools
+    )
+}
+
+private[textus] object AiPurposeProfile {
+  def fromRegistration(
+    purpose: String,
+    policy: AiRunnerApplicationPurposePolicy
+  ): AiPurposeProfile =
+    AiPurposeProfile(
+      purpose = purpose,
+      maxInputTokens = policy.maxInputTokens.map(_.toString),
+      maxOutputTokens = policy.maxOutputTokens.map(_.toString),
+      maxReasoningTokens = policy.maxReasoningTokens.map(_.toString),
+      maxCostMicrounits = policy.maxCostMicrounits.map(_.toString),
+      rateSchedule = policy.rateSchedule,
+      timeoutSeconds = policy.timeoutSeconds.map(_.toString),
+      recordRetryLimit = policy.recordRetryLimit.map(_.toString),
+      maxConcurrent = policy.maxConcurrent.map(_.toString),
+      outputSchemaId = policy.outputSchemaId,
+      promptContractId = policy.promptContractId
     )
 }
 
@@ -262,6 +287,8 @@ private[textus] final case class AiProfileResolution(
   requirement: AiRunnerRequirement,
   policy: AiPurposePolicy = AiPurposePolicy.empty,
   rateSchedule: Option[AiRateSchedule] = None,
+  applicationPurpose: Option[String] = None,
+  effectiveStandardPurpose: Option[String] = None,
   runtimeProfile: Option[String] = None,
   effectiveExecutionClass: Option[AiExecutionClass] = None,
   runtimeExecution: Option[AiRuntimeExecution] = None
@@ -347,6 +374,8 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.POLICY_MAX_CONCURRENT -> policy.maxConcurrent.map(_.toString),
       AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID -> policy.outputSchemaId,
       AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID -> policy.promptContractId,
+      AiExecutionFacts.POLICY_APPLICATION_PURPOSE -> applicationPurpose,
+      AiExecutionFacts.POLICY_EFFECTIVE_STANDARD_PURPOSE -> effectiveStandardPurpose,
       AiExecutionFacts.POLICY_RUNTIME_PROFILE -> runtimeProfile,
       AiExecutionFacts.POLICY_EFFECTIVE_EXECUTION_CLASS -> effectiveExecutionClass.map(_.id),
       AiExecutionFacts.POLICY_REASONING_LEVEL -> reasoningLevel,
@@ -422,8 +451,83 @@ private[textus] object AiPurposePolicy {
   val empty: AiPurposePolicy = AiPurposePolicy()
 }
 
+private[textus] final case class AiApplicationPurposeDefinition(
+  name: String,
+  standardPurpose: String,
+  defaultPolicy: AiRunnerApplicationPurposePolicy
+)
+
+/*
+ * Registration catalog assembled from application Component.Port outputs.
+ * It stays live over the CNCF socket set, whose members are installed during
+ * subsystem bootstrap before the runner accepts application requests.
+ */
+private[textus] trait AiApplicationPurposeCatalog {
+  def findC(name: String): Consequence[Option[AiApplicationPurposeDefinition]]
+  def definitionsC: Consequence[Vector[AiApplicationPurposeDefinition]]
+}
+
+private[textus] object AiApplicationPurposeCatalog {
+  val empty: AiApplicationPurposeCatalog = fromRegistrations(Vector.empty)
+
+  def fromSocket(
+    socket: AiRunnerApplicationPurposeRegistrationSocketSet
+  ): AiApplicationPurposeCatalog =
+    new AiApplicationPurposeCatalog {
+      def findC(name: String): Consequence[Option[AiApplicationPurposeDefinition]] =
+        _definitions_c(socket.registrations).map(_.get(_normalize(name)))
+
+      def definitionsC: Consequence[Vector[AiApplicationPurposeDefinition]] =
+        _definitions_c(socket.registrations).map(_.values.toVector.sortBy(_.name))
+    }
+
+  def fromRegistrations(
+    registrations: Vector[AiRunnerApplicationPurposeRegistration]
+  ): AiApplicationPurposeCatalog =
+    new AiApplicationPurposeCatalog {
+      def findC(name: String): Consequence[Option[AiApplicationPurposeDefinition]] =
+        _definitions_c(registrations).map(_.get(_normalize(name)))
+
+      def definitionsC: Consequence[Vector[AiApplicationPurposeDefinition]] =
+        _definitions_c(registrations).map(_.values.toVector.sortBy(_.name))
+    }
+
+  private def _definitions_c(
+    registrations: Vector[AiRunnerApplicationPurposeRegistration]
+  ): Consequence[Map[String, AiApplicationPurposeDefinition]] = {
+    val definitions = registrations.flatMap(_.purposes).map(_definition)
+    definitions.find(value => !_is_valid_name(value.name)) match {
+      case Some(value) =>
+        Consequence.configurationInvalid(s"Invalid AI application-purpose registration name: ${value.name}")
+      case None =>
+        definitions.groupBy(_.name).collectFirst { case (name, values) if values.size > 1 => name } match {
+          case Some(name) =>
+            Consequence.configurationInvalid(s"Duplicate AI application-purpose registration: $name")
+          case None =>
+            Consequence.success(definitions.map(value => value.name -> value).toMap)
+        }
+    }
+  }
+
+  private def _definition(
+    registration: AiRunnerApplicationPurpose
+  ): AiApplicationPurposeDefinition =
+    AiApplicationPurposeDefinition(
+      _normalize(registration.name),
+      _normalize(registration.defaultStandardPurpose),
+      registration.defaultPolicy
+    )
+
+  private def _normalize(value: String): String =
+    Option(value).map(_.trim.toLowerCase(java.util.Locale.ROOT)).getOrElse("")
+
+  private def _is_valid_name(value: String): Boolean =
+    value.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+}
+
 private[textus] final class AiProfileConfig(
-  configuration: Option[ResolvedConfiguration]
+  configuration: Option[ResolvedConfiguration],
+  catalog: AiApplicationPurposeCatalog = AiApplicationPurposeCatalog.empty
 ) {
   def resolveRequired(
     requirement: AiRunnerRequirement
@@ -468,6 +572,7 @@ private[textus] final class AiProfileConfig(
   ): Consequence[AiProfileResolution] =
     for {
       _ <- _reject_legacy_configuration
+      _ <- _validate_application_configuration_c
       _ <- _reject_caller_selection(requirement)
       purpose <- requirement.purpose.map(_.trim).filter(_.nonEmpty) match {
         case Some(value) => Consequence.success(value)
@@ -478,12 +583,21 @@ private[textus] final class AiProfileConfig(
       execution <- _runtime_execution_c(runtimeprofile, identity.executionClass)
       baseprofile = _runtime_purpose_profile(identity, execution)
       basepolicy <- _purpose_policy(baseprofile)
-      applicationprofile <- _application_purpose_profile_c(identity.applicationPurpose)
-      _ <- _reject_application_selection(applicationprofile)
-      effectiveprofile = _inherit_purpose(baseprofile, applicationprofile)
-      policy <- _purpose_policy(effectiveprofile)
+      registrationprofile = identity.registration.map { value =>
+        AiPurposeProfile.fromRegistration(identity.applicationPurpose, value.defaultPolicy)
+      }.getOrElse(AiPurposeProfile(identity.applicationPurpose))
+      registeredprofile = _inherit_purpose(baseprofile, registrationprofile)
+      registeredpolicy <- _purpose_policy(registeredprofile)
       _ <- _validate_narrowing(
         AiProfileResolution(AiRunnerRequirement(), basepolicy),
+        AiProfileResolution(AiRunnerRequirement(), registeredpolicy)
+      )
+      applicationprofile <- _application_purpose_profile_c(identity.applicationPurpose)
+      _ <- _reject_application_selection(applicationprofile)
+      effectiveprofile = _inherit_purpose(registeredprofile, applicationprofile)
+      policy <- _purpose_policy(effectiveprofile)
+      _ <- _validate_narrowing(
+        AiProfileResolution(AiRunnerRequirement(), registeredpolicy),
         AiProfileResolution(AiRunnerRequirement(), policy)
       )
       rateschedule <- _rate_schedule_c(policy.rateSchedule)
@@ -496,6 +610,8 @@ private[textus] final class AiProfileConfig(
       effective,
       policy,
       rateSchedule = rateschedule,
+      applicationPurpose = Some(identity.applicationPurpose),
+      effectiveStandardPurpose = Some(identity.standardPurpose),
       runtimeProfile = Some(runtimeprofile.name),
       effectiveExecutionClass = Some(identity.executionClass),
       runtimeExecution = Some(execution)
@@ -504,28 +620,30 @@ private[textus] final class AiProfileConfig(
   private final case class _PurposeIdentity(
     applicationPurpose: String,
     standardPurpose: String,
-    executionClass: AiExecutionClass
+    executionClass: AiExecutionClass,
+    registration: Option[AiApplicationPurposeDefinition]
   )
 
   private def _purpose_identity_c(purpose: String): Consequence[_PurposeIdentity] = {
     val normalized = purpose.trim.toLowerCase(java.util.Locale.ROOT)
-    _application_standard_purpose(normalized) match {
-      case Some(standard) =>
+    catalog.findC(normalized).flatMap {
+      case Some(registration) =>
+        val standard = registration.standardPurpose
         AiRuntimeProfileCatalog.standardPurpose(standard) match {
           case Some(executionclass) =>
-            Consequence.success(_PurposeIdentity(normalized, standard, executionclass))
+            Consequence.success(_PurposeIdentity(
+              registration.name,
+              standard,
+              executionclass,
+              Some(registration)
+            ))
           case None =>
             Consequence.configurationInvalid(s"AI application purpose selects an unknown standard purpose: $standard")
         }
       case None =>
         AiRuntimeProfileCatalog.standardPurpose(normalized)
-          .map(value => Consequence.success(_PurposeIdentity(normalized, normalized, value)))
-          .orElse(
-            AiRuntimeProfileCatalog.implicitExecutionClass(normalized).map { value =>
-              Consequence.success(_PurposeIdentity(normalized, normalized, value))
-            }
-          )
-          .getOrElse(Consequence.configurationInvalid(s"AI purpose is not configured: $purpose"))
+          .map(value => Consequence.success(_PurposeIdentity(normalized, normalized, value, None)))
+          .getOrElse(Consequence.configurationInvalid(s"AI application purpose is not registered: $purpose"))
     }
   }
 
@@ -595,12 +713,6 @@ private[textus] final class AiProfileConfig(
   ): Consequence[AiPurposeProfile] =
     Consequence.success(AiPurposeProfile(
       purpose = purpose,
-      provider = _config_string(_application_purpose_keys(purpose, "provider")),
-      mode = _config_string(_application_purpose_keys(purpose, "mode")),
-      engine = _config_string(_application_purpose_keys(purpose, "engine")),
-      model = _config_string(_application_purpose_keys(purpose, "model")),
-      executionClass = _config_string(_application_purpose_keys(purpose, "execution-class")),
-      tools = _config_string(_application_purpose_keys(purpose, "tools")).map(AiTool.parseList).getOrElse(Vector.empty),
       maxInputTokens = _config_string(_application_purpose_keys(purpose, "max-input-tokens")),
       maxOutputTokens = _config_string(_application_purpose_keys(purpose, "max-output-tokens")),
       maxReasoningTokens = _config_string(_application_purpose_keys(purpose, "max-reasoning-tokens")),
@@ -612,9 +724,6 @@ private[textus] final class AiProfileConfig(
       outputSchemaId = _config_string(_application_purpose_keys(purpose, "output-schema-id")),
       promptContractId = _config_string(_application_purpose_keys(purpose, "prompt-contract-id"))
     ))
-
-  private def _application_standard_purpose(purpose: String): Option[String] =
-    _config_string(_application_purpose_keys(purpose, "purpose"))
 
   private def _reject_caller_selection(requirement: AiRunnerRequirement): Consequence[Unit] =
     if (
@@ -706,7 +815,6 @@ private[textus] final class AiProfileConfig(
   private def _is_invalid_application_purpose_key(key: String): Boolean = {
     val prefix = "textus.ai.application-purposes."
     val permitted = Set(
-      "purpose",
       "max-input-tokens",
       "max-output-tokens",
       "max-reasoning-tokens",
@@ -720,6 +828,19 @@ private[textus] final class AiProfileConfig(
     )
     key.startsWith(prefix) && !permitted.contains(key.drop(prefix.length).split("\\.").lastOption.getOrElse(""))
   }
+
+  private def _validate_application_configuration_c: Consequence[Unit] =
+    catalog.definitionsC.flatMap { definitions =>
+      val registered = definitions.map(_.name).toSet
+      _configured_application_purposes.find(name => !registered.contains(name)) match {
+        case Some(name) =>
+          Consequence.configurationInvalid(
+            s"AI application-purpose configuration does not register a purpose: $name"
+          )
+        case None =>
+          Consequence.unit
+      }
+    }
 
   private def _inherit_purpose(
     base: AiPurposeProfile,
@@ -970,25 +1091,47 @@ private[textus] final class AiProfileConfig(
     }
 
   private def _runtime_concurrency_grants_c: Consequence[Vector[ConcurrencyGrant]] =
-    _application_concurrency_purposes.foldLeft(Consequence.success(Vector.empty[ConcurrencyGrant])) { (z, purpose) =>
-      z.flatMap { grants =>
-        _resolve_runtime_requirement(AiRunnerRequirement(purpose = Some(purpose), purposeRequired = true)).map { resolution =>
-          (resolution.policy.concurrencyScope, resolution.policy.maxConcurrent) match {
-            case (Some(scope), Some(limit)) => grants :+ ConcurrencyGrant(scope, limit)
-            case _ => grants
+    _application_concurrency_purposes_c.flatMap { purposes =>
+      purposes.foldLeft(Consequence.success(Vector.empty[ConcurrencyGrant])) { (z, purpose) =>
+        z.flatMap { grants =>
+          _resolve_runtime_requirement(AiRunnerRequirement(purpose = Some(purpose), purposeRequired = true)).map { resolution =>
+            (resolution.policy.concurrencyScope, resolution.policy.maxConcurrent) match {
+              case (Some(scope), Some(limit)) => grants :+ ConcurrencyGrant(scope, limit)
+              case _ => grants
+            }
           }
         }
       }
     }
 
-  private def _application_concurrency_purposes: Vector[String] =
+  private def _application_concurrency_purposes_c: Consequence[Vector[String]] =
+    catalog.definitionsC.map { definitions =>
+      (definitions.collect {
+        case value if value.defaultPolicy.maxConcurrent.nonEmpty => value.name
+      } ++ _configured_application_concurrency_purposes).distinct.sorted
+    }
+
+  private def _configured_application_purposes: Vector[String] =
+    configuration.toVector
+      .flatMap(_.configuration.values.keys)
+      .flatMap { key =>
+        val prefix = "textus.ai.application-purposes."
+        Option.when(key.startsWith(prefix)) {
+          key.drop(prefix.length).split("\\.").dropRight(1).mkString(".").trim.toLowerCase(java.util.Locale.ROOT)
+        }
+      }
+      .filter(_.nonEmpty)
+      .distinct
+      .sorted
+
+  private def _configured_application_concurrency_purposes: Vector[String] =
     configuration.toVector
       .flatMap(_.configuration.values.keys)
       .flatMap { key =>
         val prefix = "textus.ai.application-purposes."
         val suffix = ".max-concurrent"
         Option.when(key.startsWith(prefix) && key.endsWith(suffix)) {
-          key.drop(prefix.length).dropRight(suffix.length).trim
+          key.drop(prefix.length).dropRight(suffix.length).trim.toLowerCase(java.util.Locale.ROOT)
         }
       }
       .filter(_.nonEmpty)
@@ -1002,7 +1145,8 @@ private[textus] object AiProfileConfig {
   val empty: AiProfileConfig = new AiProfileConfig(None)
 
   def fromConfiguration(
-    configuration: Option[ResolvedConfiguration]
+    configuration: Option[ResolvedConfiguration],
+    catalog: AiApplicationPurposeCatalog = AiApplicationPurposeCatalog.empty
   ): AiProfileConfig =
-    new AiProfileConfig(configuration)
+    new AiProfileConfig(configuration, catalog)
 }

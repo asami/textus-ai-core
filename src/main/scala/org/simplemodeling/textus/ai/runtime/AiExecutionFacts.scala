@@ -130,6 +130,8 @@ private[textus] object AiExecutionFacts {
   val POLICY_MAX_CONCURRENT = "ai.policy.max_concurrent"
   val POLICY_OUTPUT_SCHEMA_ID = "ai.policy.output_schema_id"
   val POLICY_PROMPT_CONTRACT_ID = "ai.policy.prompt_contract_id"
+  val POLICY_APPLICATION_PURPOSE = "ai.policy.application_purpose"
+  val POLICY_EFFECTIVE_STANDARD_PURPOSE = "ai.policy.effective_standard_purpose"
   val POLICY_RUNTIME_PROFILE = "ai.policy.runtime_profile"
   val POLICY_EFFECTIVE_EXECUTION_CLASS = "ai.policy.effective_execution_class"
   val POLICY_REASONING_LEVEL = "ai.policy.reasoning_level"

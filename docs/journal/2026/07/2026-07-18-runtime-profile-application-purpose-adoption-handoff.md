@@ -3,6 +3,11 @@
 status=handoff
 scope=Sanpomap and GeoResolver adoption of Textus AI Phase 4
 updated_at=2026-07-18
+superseded_by=2026-07-18-application-purpose-registration-handoff.md
+
+> Superseded: this record describes the initial Phase 4 configuration-mapping
+> approach. Use the [application-purpose registration handoff](2026-07-18-application-purpose-registration-handoff.md)
+> for current integration guidance.
 
 ## Decision
 

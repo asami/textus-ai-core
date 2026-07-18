@@ -74,9 +74,10 @@ For Codex, these facts identify the profile policy rather than a caller-supplied
 CLI argument. `ai.execution.enabled_tools` records only the logical capability
 set, not URLs, search results, or provider transcripts.
 
-Purpose policy is resolved before provider selection. An application purpose
-maps to one runtime-owned standard purpose through
-`application-purposes.<name>.purpose` and may only narrow its inherited bounds.
+Purpose policy is resolved before provider selection. An application purpose is
+registered through the CNCF AiRunner Port; configuration under
+`application-purposes.<name>.*` tunes that registered entry and may only narrow
+its inherited bounds.
 The normalized execution class identifies the effective runtime class, not a
 provider or model identifier.
 

@@ -141,14 +141,14 @@ Artifacts:
 
 Goal: replace configuration-defined model profiles and generic-purpose
 inheritance with Textus AI-owned runtime profiles, standard purposes, and
-strict application-purpose mappings.
+strict bootstrap-registered application purposes.
 
 Scope:
 
 - supply `codex-cli` and `gemini` runtime profile defaults for all standard
   execution classes;
-- supply the standard-purpose catalog and resolve application-purpose mappings
-  through it;
+- supply the standard-purpose catalog and resolve bootstrap application-purpose
+  registrations through it;
 - apply merged CNCF runtime/execution-class overrides without allowing
   application callers to select concrete AI settings;
 - reject the replaced model-profile, generic-purpose, base-purpose, and level
@@ -181,7 +181,8 @@ completed on 2026-07-18.
 
 - Phase 2: complete on 2026-07-18.
 - Phase 3: complete on 2026-07-18.
-- Phase 4: complete on 2026-07-18.
+- Phase 4: reopened and reclosed on 2026-07-18 for the application-purpose
+  registration correction.
 - Latest phase closure: `docs/phase/phase-4-closure.md`
 - Current next task: define the next runtime expansion phase before adding a
   runtime profile, workflow, or public operation.

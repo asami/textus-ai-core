@@ -1,7 +1,7 @@
 package org.simplemodeling.textus.ai.runtime
 
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
-import org.goldenport.cncf.spi.ai.runner.{AiExecutionClass, AiRunnerRequirement}
+import org.goldenport.cncf.spi.ai.runner.{AiExecutionClass, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement}
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -63,11 +63,13 @@ final class AiRuntimeProfileSpec
 
     "map an application purpose to its standard purpose without granting caller selection" in {
       Given("a mapped application purpose with a narrower output bound")
-      val profiles = _profiles(
+      val profiles = _profiles(Vector(_registration(
+        "sanpomap-scenario-generation",
+        "structured-extraction",
+        AiRunnerApplicationPurposePolicy(maxOutputTokens = Some(120), maxConcurrent = Some(1))
+      )),
         "textus.ai.profile" -> "gemini",
-        "textus.ai.application-purposes.sanpomap-scenario-generation.purpose" -> "structured-extraction",
-        "textus.ai.application-purposes.sanpomap-scenario-generation.max-output-tokens" -> "120",
-        "textus.ai.application-purposes.sanpomap-scenario-generation.max-concurrent" -> "1"
+        "textus.ai.application-purposes.sanpomap-scenario-generation.max-output-tokens" -> "100"
       )
 
       When("the application purpose is resolved and a caller attempts a provider selection")
@@ -81,7 +83,7 @@ final class AiRuntimeProfileSpec
 
       Then("only the mapped standard purpose reaches the runtime profile")
       mapped.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardWork)
-      mapped.toOption.flatMap(_.policy.maxOutputTokens) shouldBe Some(120)
+      mapped.toOption.flatMap(_.policy.maxOutputTokens) shouldBe Some(100)
       profiles.concurrencyAdmissionC.toOption.flatten should not be empty
       selected.isFaillure shouldBe true
       selected.toString should include ("callers may select only an application purpose")
@@ -101,9 +103,11 @@ final class AiRuntimeProfileSpec
         "textus.ai.profile" -> "gemini",
         "cncf.runtime.ai.levels.standard-work.model-profile" -> "old"
       )
-      val invalidapplication = _profiles(
+      val invalidapplication = _profiles(Vector(_registration(
+        "sanpomap-scenario-generation",
+        "structured-extraction"
+      )),
         "textus.ai.profile" -> "gemini",
-        "textus.ai.application-purposes.sanpomap-scenario-generation.purpose" -> "structured-extraction",
         "textus.ai.application-purposes.sanpomap-scenario-generation.provider" -> "openai"
       )
       val current = _profiles("textus.ai.profile" -> "gemini")
@@ -130,11 +134,79 @@ final class AiRuntimeProfileSpec
       metadata should not contain "ai.policy.model_profile"
       metadata should not contain "ai.policy.logical_level"
     }
+
+    "resolve registered defaults without application-purpose configuration" in {
+      Given("a registered application purpose with a default policy")
+      val profiles = _profiles(Vector(_registration(
+        "sanpomap-location-investigation",
+        "web-analysis",
+        AiRunnerApplicationPurposePolicy(maxOutputTokens = Some(120))
+      )), "textus.ai.profile" -> "gemini")
+
+      When("the application calls its registered purpose")
+      val resolution = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("sanpomap-location-investigation"),
+        purposeRequired = true
+      ))
+
+      Then("the registration supplies the standard purpose and policy defaults")
+      resolution.toOption.flatMap(_.effectiveStandardPurpose) shouldBe Some("web-analysis")
+      resolution.toOption.flatMap(_.policy.maxOutputTokens) shouldBe Some(120)
+    }
+
+    "reject duplicate invalid and configuration-only application purposes structurally" in {
+      Given("duplicate, invalid, and unregistered application-purpose definitions")
+      val duplicate = _profiles(Vector(
+        _registration("sanpomap-scenario-generation", "structured-extraction"),
+        _registration("sanpomap-scenario-generation", "web-analysis")
+      ), "textus.ai.profile" -> "gemini")
+      val invalid = _profiles(Vector(_registration(
+        "sanpomap-scenario-generation",
+        "not-a-standard-purpose"
+      )), "textus.ai.profile" -> "gemini")
+      val configurationonly = _profiles(
+        "textus.ai.profile" -> "gemini",
+        "textus.ai.application-purposes.sanpomap-scenario-generation.max-output-tokens" -> "120"
+      )
+
+      When("the runtime resolves application requests")
+      val duplicated = duplicate.resolveRequired(AiRunnerRequirement(
+        purpose = Some("sanpomap-scenario-generation"), purposeRequired = true
+      ))
+      val unsupported = invalid.resolveRequired(AiRunnerRequirement(
+        purpose = Some("sanpomap-scenario-generation"), purposeRequired = true
+      ))
+      val configured = configurationonly.resolveRequired(AiRunnerRequirement(
+        purpose = Some("sanpomap-scenario-generation"), purposeRequired = true
+      ))
+
+      Then("every malformed catalog condition fails before provider selection")
+      duplicated.toString should include ("Duplicate AI application-purpose registration")
+      unsupported.toString should include ("unknown standard purpose")
+      configured.toString should include ("configuration does not register a purpose")
+    }
   }
 
   private def _profiles(values: (String, String)*): AiProfileConfig =
+    _profiles(Vector.empty, values*)
+
+  private def _profiles(
+    registrations: Vector[AiRunnerApplicationPurposeRegistration],
+    values: (String, String)*
+  ): AiProfileConfig =
     AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(
       Configuration(values.map { case (key, value) => key -> ConfigurationValue.StringValue(value) }.toMap),
       ConfigurationTrace.empty
+    )), AiApplicationPurposeCatalog.fromRegistrations(registrations))
+
+  private def _registration(
+    name: String,
+    standardpurpose: String,
+    policy: AiRunnerApplicationPurposePolicy = AiRunnerApplicationPurposePolicy()
+  ): AiRunnerApplicationPurposeRegistration =
+    AiRunnerApplicationPurposeRegistration(Vector(AiRunnerApplicationPurpose(
+      name,
+      standardpurpose,
+      policy
     )))
 }

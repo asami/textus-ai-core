@@ -10,7 +10,7 @@ import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext, ScopeConte
 import org.goldenport.cncf.http.HttpDriver
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiSelection}
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
 import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
 import org.goldenport.bag.Bag
@@ -274,7 +274,6 @@ final class TextusAiRunnerSpec
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
-          "textus.ai.application-purposes.linear-feature.worker.anchor-plan.purpose" -> ConfigurationValue.StringValue("structured-extraction"),
           "textus.ai.execution-classes.standard-work.model" -> ConfigurationValue.StringValue("gemini-worker")
         )),
         ConfigurationTrace.empty
@@ -282,7 +281,7 @@ final class TextusAiRunnerSpec
       val runner = new TextusAiRunnerProvider(
         _component(),
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
+        _profiles(configuration, "linear-feature.worker.anchor-plan" -> "structured-extraction")
       ).provide(
         SpiContract("ai-runner", classOf[AiRunner]),
         SpiSelection()
@@ -309,7 +308,6 @@ final class TextusAiRunnerSpec
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
-          "textus.ai.application-purposes.sanpomap-scenario-generation.purpose" -> ConfigurationValue.StringValue("structured-extraction"),
           "textus.ai.execution-classes.standard-work.model" -> ConfigurationValue.StringValue("operator-profile-model")
         )),
         ConfigurationTrace.empty
@@ -317,7 +315,7 @@ final class TextusAiRunnerSpec
       val runner = new TextusAiRunnerProvider(
         _component(),
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
+        _profiles(configuration, "sanpomap-scenario-generation" -> "structured-extraction")
       ).provide(
         SpiContract("ai-runner", classOf[AiRunner]),
         SpiSelection()
@@ -357,7 +355,6 @@ final class TextusAiRunnerSpec
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
-          "textus.ai.application-purposes.sanpomap-location-investigation.purpose" -> ConfigurationValue.StringValue("software-analysis"),
           "textus.ai.application-purposes.sanpomap-location-investigation.provider" -> ConfigurationValue.StringValue("unavailable-provider")
         )),
         ConfigurationTrace.empty
@@ -365,7 +362,7 @@ final class TextusAiRunnerSpec
       val runner = new TextusAiRunnerProvider(
         _component(),
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
+        _profiles(configuration, "sanpomap-location-investigation" -> "software-analysis")
       ).provide(
         SpiContract("ai-runner", classOf[AiRunner]),
         SpiSelection()
@@ -417,7 +414,7 @@ final class TextusAiRunnerSpec
       Then("each unknown application purpose fails structurally without invoking the provider")
       Vector(generated, recorded, chatted).foreach {
         case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("AI purpose is not configured")
+          conclusion.display should include ("AI application purpose is not registered")
         case _ => fail("an unknown application purpose must fail before execution")
       }
       _GenerateServiceState.count(prompt) shouldBe 0
@@ -433,7 +430,6 @@ final class TextusAiRunnerSpec
           "textus.ai.execution-classes.standard-work.max-output-tokens" -> ConfigurationValue.StringValue("240"),
           "textus.ai.execution-classes.standard-work.timeout-seconds" -> ConfigurationValue.StringValue("90"),
           "textus.ai.execution-classes.standard-work.record-retry-limit" -> ConfigurationValue.StringValue("2"),
-          "textus.ai.application-purposes.artscene-exhibition-extraction.purpose" -> ConfigurationValue.StringValue("structured-extraction"),
           "textus.ai.application-purposes.artscene-exhibition-extraction.output-schema-id" -> ConfigurationValue.StringValue("artscene.exhibitions.v1"),
           "textus.ai.application-purposes.artscene-exhibition-extraction.prompt-contract-id" -> ConfigurationValue.StringValue("artscene.exhibition.extract.v1")
         )),
@@ -442,7 +438,7 @@ final class TextusAiRunnerSpec
       val runner = new TextusAiRunnerProvider(
         _component(),
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
+        _profiles(configuration, "artscene-exhibition-extraction" -> "structured-extraction")
       ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.get
       val requirement = AiRunnerRequirement(
         purpose = Some("artscene-exhibition-extraction"),
@@ -474,14 +470,13 @@ final class TextusAiRunnerSpec
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
           "textus.ai.execution-classes.deep-consideration.max-output-tokens" -> ConfigurationValue.StringValue("240"),
-          "textus.ai.application-purposes.invalid-web-analysis.purpose" -> ConfigurationValue.StringValue("web-analysis"),
           "textus.ai.application-purposes.invalid-web-analysis.max-output-tokens" -> ConfigurationValue.StringValue("241")
         )),
         ConfigurationTrace.empty
       )
 
       When("the application purpose is resolved")
-      val result = AiProfileConfig.fromConfiguration(Some(configuration)).resolveRequired(
+      val result = _profiles(configuration, "invalid-web-analysis" -> "web-analysis").resolveRequired(
         AiRunnerRequirement(purpose = Some("invalid-web-analysis"), purposeRequired = true)
       )
 
@@ -525,20 +520,21 @@ final class TextusAiRunnerSpec
         "textus.ai.execution-classes.deep-consideration.max-output-tokens" -> ConfigurationValue.StringValue("480"),
         "textus.ai.execution-classes.deep-consideration.timeout-seconds" -> ConfigurationValue.StringValue("90"),
         "textus.ai.execution-classes.deep-consideration.max-concurrent" -> ConfigurationValue.StringValue("2"),
-        "textus.ai.application-purposes.artscene-exhibition-web-research.purpose" -> ConfigurationValue.StringValue("web-analysis"),
         "textus.ai.application-purposes.artscene-exhibition-web-research.max-input-tokens" -> ConfigurationValue.StringValue("50"),
         "textus.ai.application-purposes.artscene-exhibition-web-research.max-output-tokens" -> ConfigurationValue.StringValue("240"),
         "textus.ai.application-purposes.artscene-exhibition-web-research.timeout-seconds" -> ConfigurationValue.StringValue("45"),
         "textus.ai.application-purposes.artscene-exhibition-web-research.max-concurrent" -> ConfigurationValue.StringValue("1"),
-        "textus.ai.application-purposes.invalid-web-analysis.purpose" -> ConfigurationValue.StringValue("web-analysis"),
         "textus.ai.application-purposes.invalid-web-analysis.timeout-seconds" -> ConfigurationValue.StringValue("120"),
-        "textus.ai.application-purposes.invalid-input-web-analysis.purpose" -> ConfigurationValue.StringValue("web-analysis"),
         "textus.ai.application-purposes.invalid-input-web-analysis.max-input-tokens" -> ConfigurationValue.StringValue("101")
       )
-      val profiles = AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(
+      val profiles = _profiles(ResolvedConfiguration(
         Configuration(values),
         ConfigurationTrace.empty
-      )))
+      ),
+        "artscene-exhibition-web-research" -> "web-analysis",
+        "invalid-web-analysis" -> "web-analysis",
+        "invalid-input-web-analysis" -> "web-analysis"
+      )
 
       When("the narrowed and broadened application purposes are resolved")
       val narrowed = profiles.resolveRequired(AiRunnerRequirement(
@@ -1029,8 +1025,6 @@ final class TextusAiRunnerSpec
             ConfigurationValue.StringValue("90"),
           "textus.ai.execution-classes.standard-work.record-retry-limit" ->
             ConfigurationValue.StringValue("2"),
-          "textus.ai.application-purposes.artscene-exhibition-extraction-from-source.purpose" ->
-            ConfigurationValue.StringValue("structured-extraction"),
           "textus.ai.application-purposes.artscene-exhibition-extraction-from-source.output-schema-id" ->
             ConfigurationValue.StringValue("artscene.exhibitions.v1"),
           "textus.ai.application-purposes.artscene-exhibition-extraction-from-source.prompt-contract-id" ->
@@ -1041,7 +1035,7 @@ final class TextusAiRunnerSpec
       val runner = new TextusAiRunnerProvider(
         _component(),
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        AiProfileConfig.fromConfiguration(Some(configuration))
+        _profiles(configuration, "artscene-exhibition-extraction-from-source" -> "structured-extraction")
       ).provide(
         SpiContract("ai-runner", classOf[AiRunner]),
         SpiSelection()
@@ -1080,6 +1074,10 @@ final class TextusAiRunnerSpec
       node.getString(AiExecutionFacts.POLICY_RECORD_RETRY_LIMIT) shouldBe Some("2")
       node.getString(AiExecutionFacts.POLICY_OUTPUT_SCHEMA_ID) shouldBe Some("artscene.exhibitions.v1")
       node.getString(AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID) shouldBe Some("artscene.exhibition.extract.v1")
+      node.getString(AiExecutionFacts.POLICY_APPLICATION_PURPOSE) shouldBe
+        Some("artscene-exhibition-extraction-from-source")
+      node.getString(AiExecutionFacts.POLICY_EFFECTIVE_STANDARD_PURPOSE) shouldBe
+        Some("structured-extraction")
       node.getString(s"response_metadata.${AiExecutionFacts.INPUT_TOKENS_SOURCE}") shouldBe Some("reported")
       node.getString("prompt") shouldBe empty
       node.getString("response") shouldBe empty
@@ -1353,6 +1351,19 @@ final class TextusAiRunnerSpec
       redacted should not include ("secret-key")
     }
   }
+
+  private def _profiles(
+    configuration: ResolvedConfiguration,
+    purposes: (String, String)*
+  ): AiProfileConfig =
+    AiProfileConfig.fromConfiguration(
+      Some(configuration),
+      AiApplicationPurposeCatalog.fromRegistrations(Vector(
+        AiRunnerApplicationPurposeRegistration(purposes.map { case (name, standardpurpose) =>
+          AiRunnerApplicationPurpose(name, standardpurpose)
+        }.toVector)
+      ))
+    )
 
   private def _component(): Component =
     new Component() {}

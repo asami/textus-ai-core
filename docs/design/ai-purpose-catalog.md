@@ -1,28 +1,54 @@
 # AI Purpose Catalog
 
 status=accepted
-scope=textus-ai runtime-owned purpose vocabulary and application-purpose mapping
+scope=textus-ai runtime-owned purpose vocabulary and application-purpose registration
 updated_at=2026-07-18
 
 ## Decision
 
-An application selects an `AiRunnerRequirement.purpose` only. Textus AI then
-resolves the effective provider execution through this fixed sequence:
+Applications register domain application purposes through the CNCF `AiRunner`
+Port during component bootstrap. A registration owns a stable name, one default
+Textus AI standard purpose, and a provider-neutral default policy. Textus AI
+owns the runtime profile and resolves all concrete provider settings.
 
 ```text
-application purpose
+application Component.Port registration
+  -> application purpose catalog
   -> standard purpose
   -> execution class
   -> selected runtime profile defaults
-  -> merged CNCF configuration overrides
+  -> merged CNCF execution-class configuration
+  -> registered policy and registered-purpose configuration tuning
   -> provider, mode, engine, model, reasoning, tools, and limits
 ```
 
-The caller never selects a runtime profile, provider, mode, engine, model,
-execution class, or tool set. Those are runtime-owned settings. A direct
-standard purpose and an execution-class name are accepted as implicit
-purposes for runtime and operator use; application integrations should use a
-descriptive application purpose.
+The application caller passes only its registered name as
+`AiRunnerRequirement.purpose`. It never selects a runtime profile, provider,
+mode, engine, model, execution class, or tools.
+
+## CNCF Registration Contract
+
+The CNCF-owned contract is published on an application's output
+`Component.Port`:
+
+```scala
+AiRunnerApplicationPurposeRegistration(Vector(
+  AiRunnerApplicationPurpose(
+    name = "sanpomap-location-investigation",
+    defaultStandardPurpose = "web-analysis",
+    defaultPolicy = AiRunnerApplicationPurposePolicy(
+      maxOutputTokens = Some(240),
+      maxConcurrent = Some(1)
+    )
+  )
+))
+```
+
+Textus AI publishes an input
+`AiRunnerApplicationPurposeRegistrationSocketSet`. CNCF's existing SPI
+resolver collects every matching application Port output into that set during
+bootstrap. No global registry or configuration-defined application catalog is
+used.
 
 ## Standard Purposes
 
@@ -35,56 +61,53 @@ descriptive application purpose.
 | `web-analysis` | `deep-consideration` | Consider a supplied problem using Web information. |
 | `structured-extraction` | `standard-work` | Extract or normalize supplied material into a structured result. |
 
-The four execution classes are `simple-work`, `standard-work`,
-`standard-consideration`, and `deep-consideration`. They indicate the expected
-work/consideration level, not a provider capability or workflow grant.
+The execution-class identifiers `simple-work`, `standard-work`,
+`standard-consideration`, and `deep-consideration` are explicit built-in direct
+purpose aliases. They are catalog entries in Textus AI, not an implicit fallback
+for an unregistered application name.
 
 ## Runtime Profiles
 
-Textus AI ships two runtime profiles:
+Textus AI ships `codex-cli` and `gemini` runtime profiles. `textus.ai.profile`
+selects the profile; approved `textus.ai.execution-classes.<class>.*` settings
+tune that profile after ordinary CNCF configuration merge. Provider binding and
+tools remain runtime-owned.
 
-| Profile | Simple / standard work | Standard / deep consideration |
-| --- | --- | --- |
-| `codex-cli` | Codex CLI, `gpt-5-codex`, `minimal` / `low` reasoning | Codex CLI, `gpt-5-codex`, `high` / `xhigh` reasoning |
-| `gemini` | Gemini, `gemini-2.5-flash` | Gemini, `gemini-2.5-pro` |
+## Registration Defaults And Tuning
 
-`textus.ai.profile` selects one profile. CNCF configuration may override an
-execution class's provider binding, model, reasoning level, tools, and policy
-bounds. Such overrides remain operator-managed.
-
-## Application Purposes
-
-An application maps its domain name to one standard purpose and may narrow the
-inherited policy:
+Registration defaults apply without an
+`textus.ai.application-purposes.<name>.*` configuration block. Configuration is
+only a tuning layer for an already registered name:
 
 ```yaml
 textus:
   ai:
     profile: gemini
-    execution-classes:
-      deep-consideration:
-        max-output-tokens: 480
     application-purposes:
-      artscene-exhibition-web-research:
-        purpose: web-analysis
-        max-output-tokens: 240
-        max-concurrent: 1
+      sanpomap-location-investigation:
+        max-output-tokens: 180
+        timeout-seconds: 45
 ```
 
-Allowed application-purpose fields are bounds, rate schedule, timeout, retry,
-concurrency, output-schema identity, and prompt-contract identity. Provider,
-model, execution class, reasoning, and tools are rejected. A broader bound is
-rejected before provider execution.
+The allowed tuning fields are bounds, rate schedule, timeout, retry,
+concurrency, output-schema identity, and prompt-contract identity. They may
+only narrow the registered effective policy. Configuration cannot define a
+standard purpose, register an application name, or select provider/model/tools.
 
-## Migration Rules
+## Validation And Attribution
 
-`model-profiles`, `model-profile`, `generic-purposes`, `base-purpose`,
-`levels`, and their aliases are removed. They fail structurally rather than
-acting as compatibility fallbacks. Standard purposes are runtime-owned and may
-not be configured under `textus.ai.purposes`.
+Before provider execution, Textus AI rejects:
 
-## Growth Rule
+1. an unregistered application purpose;
+2. duplicate registrations;
+3. a registration whose default standard purpose is unknown;
+4. configuration for a name that has no registration;
+5. provider/model/tool or execution-class selection from either caller or
+   application-purpose tuning; and
+6. a policy that broadens its runtime or registered default bound.
 
-Add a standard purpose only for a recurring provider-neutral intent that needs
-a distinct execution-class baseline. Provider, model, CLI, transport, and
-one-off application workflow names are not standard purposes.
+Response metadata and CallTree records safely include
+`ai.policy.application_purpose`, `ai.policy.effective_standard_purpose`,
+`ai.policy.runtime_profile`, and `ai.policy.effective_execution_class`. They do
+not include credentials, prompts, raw provider payloads, or a caller-selected
+provider identity.

@@ -7,13 +7,13 @@ import org.goldenport.cncf.admission.ConcurrencyScopeId
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.{ExecutionContext, GlobalContext, RuntimeContext, ScopeContext, ScopeKind}
 import org.goldenport.cncf.processexecution.{LocalProcessExecutionDriver, ProcessArtifactName, ProcessCapabilityId, ProcessExecutionAdmission, ProcessExecutionInputFile, ProcessExecutionRequest, WorkAreaRelativePath}
-import org.goldenport.cncf.spi.{SpiContract, SpiSelection}
+import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
 import org.goldenport.cncf.subsystem.Subsystem
 import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.cncf.workarea.WorkAreaSpace
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ResolvedConfiguration}
 import org.goldenport.configuration.ConfigurationValue
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerRequirement}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement}
 import org.goldenport.record.Record
 import org.simplemodeling.textus.ai.provider.codex.CodexRuntimeConfig
 import org.simplemodeling.textus.ai.runtime.TextusAiRunnerProvider
@@ -34,15 +34,11 @@ final class ComponentFactorySpec
   with OptionValues {
   "ComponentFactory" should {
     "install configured purpose concurrency admission in the provider component scope" in {
-      Given("a Textus AI runtime with one bounded ArtScene purpose")
+      Given("a Textus AI runtime with one bootstrap-registered bounded ArtScene purpose")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
-          "textus.ai.application-purposes.artscene-exhibition-web-research.purpose" ->
-            ConfigurationValue.StringValue("web-analysis"),
-          "textus.ai.application-purposes.artscene-exhibition-web-research.max-concurrent" ->
-            ConfigurationValue.StringValue("1")
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini")
         )),
         ConfigurationTrace.empty
       )
@@ -51,6 +47,14 @@ final class ComponentFactorySpec
         configuration = configuration
       )
       val component = new ComponentFactory().create(ComponentCreate(subsystem, ComponentOrigin.Main)).primary
+      val application = new Component() {}.withPort(Component.Port.of(
+        AiRunnerApplicationPurposeRegistration(Vector(AiRunnerApplicationPurpose(
+          "artscene-exhibition-web-research",
+          "web-analysis",
+          AiRunnerApplicationPurposePolicy(maxConcurrent = Some(1))
+        )))
+      ))
+      SpiResolver.resolve(Vector(application, component)) shouldBe a[Consequence.Success[_]]
       val parent = ScopeContext(
         ScopeKind.Runtime,
         "textus-ai-concurrency-scope-spec",
