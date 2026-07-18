@@ -1,24 +1,24 @@
-# Phase 3 Checklist - Profile Binding and Execution Accounting
+# Phase 3 Checklist - Execution Class and Accounting
 
 status=in-progress
-phase=[Phase 3 - Profile Binding and Execution Accounting](phase-3.md)
+phase=[Phase 3 - Execution Class and Accounting](phase-3.md)
 
-## Stage PB-01 - Profile Binding
+## Stage EC-01 - Execution Class
 
 Stage Status:
 - Current status: OPEN
 - Owner: Textus AI maintainers
-- Update rule: Mark DONE only when purpose/profile separation is represented,
-  validated, migration-safe, and covered by deterministic evidence.
+- Update rule: Mark DONE only when the CNCF selector, Textus AI resolution,
+  migration, and deterministic evidence are available.
 
-- [ ] Define an operator-managed execution profile that owns logical level,
-  provider/model selection, capability admission, and execution bounds.
-- [ ] Define purpose-to-profile binding without adding a profile selector to
-  ordinary application calls.
-- [ ] Migrate the transitional generic-purpose level and tool configuration
-  without weakening current no-fallback or narrowing guarantees.
+- [ ] Define CNCF `AiExecutionClass` and
+  `AiRunnerRequirement.executionClass` without exposing engine or model names.
+- [ ] Define `execution-class` configuration precedence with purpose and
+  operator model-profile configuration.
+- [ ] Migrate implicit level-purpose aliases and transitional generic-purpose
+  level selection without weakening current no-fallback guarantees.
 - [ ] Add deterministic specifications for configured, unconfigured, and
-  incompatible purpose/profile binding.
+  incompatible purpose/execution-class selection.
 
 ## Stage EA-01 - Execution Facts
 
@@ -43,7 +43,8 @@ Stage Status:
 - Update rule: Mark DONE only when input admission occurs before execution and
   every unsupported estimate path returns a structured outcome.
 
-- [ ] Add validated profile-policy configuration for maximum input tokens.
+- [ ] Add validated execution-class policy configuration for maximum input
+  tokens.
 - [ ] Define provider-neutral input estimation and its accepted error bounds.
 - [ ] Reject requests exceeding the effective input budget before provider or
   external-tool invocation.
@@ -58,7 +59,8 @@ Stage Status:
   configured rate data and observed or documented estimated usage.
 
 - [ ] Define operator-owned rate schedule configuration and stable identity.
-- [ ] Add profile-policy cost budgets and pre-execution admission semantics.
+- [ ] Add execution-class policy cost budgets and pre-execution admission
+  semantics.
 - [ ] Account for actual provider usage when it is reported; retain explicit
   unknown or estimate limitations otherwise.
 - [ ] Reject missing accounting prerequisites and over-budget execution
@@ -90,9 +92,9 @@ Stage Status:
 - [ ] Add deterministic specifications for admission success, input-budget
   rejection, unknown usage and price, cost-budget rejection, and accounting
   summaries.
-- [ ] Add deterministic specifications for profile binding and configured
-  no-fallback behavior.
-- [ ] Document operator configuration and safe observability for profiles,
+- [ ] Add deterministic specifications for execution-class binding and
+  configured no-fallback behavior.
+- [ ] Document configuration and safe observability for execution classes,
   budgets, rates, and workflow-boundary facts.
 - [ ] Run review, fix actionable findings, validate the phase, and record
   closure evidence.

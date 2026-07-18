@@ -104,18 +104,19 @@ Artifacts:
 - [Phase 2 Checklist](../phase/phase-2-checklist.md)
 - [ArtScene AI Fetch Purpose Contract Handoff](../journal/2026/07/2026-07-18-artscene-ai-fetch-purpose-contract-handoff.md)
 
-### Phase 3: Profile Binding and Execution Accounting
+### Phase 3: Execution Class and Accounting
 
-Goal: complete purpose/profile separation and make input-token and cost
-decisions attributable without inventing unavailable provider facts.
+Goal: introduce caller-selected execution classes alongside purposes and make
+input-token and cost decisions attributable without inventing unavailable
+provider facts.
 
 Scope:
 
-- define purpose-to-profile binding so profiles, not callers, select logical
-  level, provider/model, admitted capabilities, and execution bounds;
+- define CNCF `executionClass` selection and purpose-plus-class resolution
+  without exposing concrete provider/model selection;
 - define stable provider-neutral execution facts for usage, estimation,
   accounting identity, and limitations;
-- enforce profile-policy input-token budgets before execution;
+- enforce execution-class policy input-token budgets before execution;
 - support operator-owned rate schedules, explicit cost admission, and measured
   accounting where provider usage permits it; and
 - record the decision boundary for any future runtime workflow without
@@ -148,10 +149,10 @@ completed on 2026-07-18.
 ## Process Status
 
 - Phase 2: complete on 2026-07-18.
-- Current phase: Phase 3, Profile Binding and Execution Accounting.
+- Current phase: Phase 3, Execution Class and Accounting.
 - Current phase dashboard: `docs/phase/phase-3.md`
 - Current phase checklist: `docs/phase/phase-3-checklist.md`
-- Current next task: PB-01 purpose-to-profile binding.
+- Current next task: EC-01 purpose and execution-class contract.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

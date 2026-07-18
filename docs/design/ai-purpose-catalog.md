@@ -8,45 +8,46 @@ updated_at=2026-07-18
 
 Textus AI defines a small standard catalog of generic purposes. A caller
 selects one of these purposes, or an application-specific purpose that
-explicitly inherits one. Textus AI resolves the selected purpose to an
-operator-managed execution profile. That profile resolves the logical level
-and effective provider execution settings.
+explicitly inherits one. A caller may also select an `executionClass`. Textus
+AI resolves both selectors to approved operator configuration and effective
+provider execution settings.
 
-The catalog standardizes names and intended profile selection; it does not
-ship a concrete provider binding. Each deployment binds the listed generic
-purposes to approved profiles. A requested standard purpose that is not bound
-to a profile fails structurally before provider execution.
+The catalog standardizes names and intended execution-class selection; it does
+not ship a concrete provider binding. Each deployment binds the listed generic
+purposes and execution classes to approved operator configuration. A requested
+standard purpose that is not configured fails structurally before provider
+execution.
 
 The standard purpose vocabulary names user-visible AI intent. It must not name
 a provider, model, command-line tool, application, or domain workflow.
 
 ```text
-purpose
-  -> operator-managed execution profile
+purpose + executionClass
+  -> approved operator configuration
   -> logical level and model profile
   -> provider, mode, engine, model, reasoning, tools, and limits
 ```
 
-## Implicit Baseline Purposes
+## Execution Classes
 
-The four configured logical-level names are also standard implicit purposes:
-`simple-work`, `standard-work`, `standard-consideration`, and
-`deep-consideration`. A caller may use one directly when it needs the baseline
-profile without adding semantic intent.
+The standard execution-class values are `simple-work`, `standard-work`,
+`standard-consideration`, and `deep-consideration`. They classify requested
+execution independently of semantic purpose and concrete provider selection.
 
 ```text
-purpose = standard-work
-  -> configured standard-work execution profile
+purpose = software-implementation
+executionClass = standard-work
   -> effective provider and model
 ```
 
-This mechanism applies only to logical-level names. An operator model-profile
-name is never a caller purpose. For example, `purpose=openai-standard` must
-fail unless an explicit purpose binding exists for that name.
+The current runtime accepts configured logical-level names as implicit purpose
+aliases. That is a compatibility path only. EC-01 will introduce the explicit
+`executionClass` selector; new integrations must not rely on an implicit alias
+as the final contract.
 
 ## Standard Catalog
 
-| Purpose | Intended profile level | Intent |
+| Purpose | Intended execution class | Intent |
 | --- | --- | --- |
 | `software-analysis` | `standard-consideration` | Understand existing software, investigate causes, and assess change impact. |
 | `software-design` | `deep-consideration` | Develop design alternatives, boundaries, and implementation direction. |
@@ -55,21 +56,17 @@ fail unless an explicit purpose binding exists for that name.
 | `web-analysis` | `deep-consideration` | Consider a supplied problem using information from the Web. |
 | `structured-extraction` | `standard-work` | Extract or normalize caller-supplied material into a required structured result. |
 
-The remaining logical levels are covered by the semantic purposes above.
-
-The intended level is an approved policy baseline, not a caller choice. An
-operator can bind a purpose to a different approved profile without changing
-application code. A caller cannot replace the resolved level, model,
-reasoning setting, or tool set through provider-specific request fields.
+An execution class is an approved policy baseline, not a provider/model
+override. A caller cannot replace the resolved model, reasoning setting, or
+tool set through provider-specific request fields.
 
 `consideration` expresses the amount of analysis expected from the selected
 profile. It intentionally avoids the stronger connotation of `deliberation`;
 the level is not a claim that a provider performs formal deliberation.
 
-The semantic purposes in this catalog add readable intent above the implicit
-baseline purposes. Use `standard-consideration` when only the baseline level is
-known; use `software-analysis` when the caller is specifically requesting
-software analysis.
+The semantic purpose and execution class remain independent. For example,
+`software-analysis` identifies the task intent, while
+`standard-consideration` identifies its requested execution class.
 
 ## Application Purposes
 
@@ -137,31 +134,31 @@ If a runtime workflow is needed later, it requires a separate design covering
 its public contract, ownership, admission, lifecycle, budget scope, failure
 semantics, and executable specification. Application orchestration, evidence
 admission, source comparison, and domain fallback remain outside the current
-purpose/profile mechanism.
+purpose/execution-class mechanism.
 
-## Profile Ownership
+## Execution-Class Resolution
 
-An execution profile is operator-managed configuration. It binds a purpose to
-the approved logical level, provider, mode, engine, model, reasoning, tool
-capabilities, and execution bounds. A profile is not selected directly by an
-ordinary application caller.
+`executionClass` is a caller selector. Operator-managed model profiles remain
+the configuration that supplies provider, mode, engine, model, reasoning, tool
+capabilities, and execution bounds. An execution class does not expose a model
+profile name or grant any capability.
 
 The current `generic-purposes` configuration is a transitional implementation:
 it still places level and some tool selection beside purpose names. It must be
-reconciled to this profile-binding design before the catalog is treated as a
+reconciled to the `executionClass` design before the catalog is treated as a
 fully implemented runtime contract. This does not change current explicit
 failure behavior for an unconfigured purpose.
 
 ## Invariants
 
-- Every standard purpose resolves through one approved execution profile,
-  logical level, and model profile before execution.
-- External research tools are admitted only by the selected profile and runtime
-  capability; no purpose name grants a tool.
+- Every request resolves its purpose and optional execution class through
+  approved operator configuration before execution.
+- External research tools are admitted only by normal runtime capability
+  policy; neither selector grants a tool.
 - A standard purpose does not imply a provider, model, or provider-specific
   tool wire format or runtime workflow.
-- Application purposes may select only profiles approved by their assembly;
-  they may not broaden approved capabilities or replace profile policy through
-  request fields.
+- Application purposes and execution classes may select only configuration
+  approved by their assembly; they may not broaden approved capabilities or
+  replace model policy through request fields.
 - Missing, unsupported, or incompatible configured capabilities return a
   structured failure; they do not select a fallback purpose or provider.

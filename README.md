@@ -293,14 +293,15 @@ provider fields.
 
 The current `generic-purposes` configuration is transitional: it binds logical
 levels and may also constrain tools beside the purpose name. The accepted
-design moves those operational choices into an operator-managed execution
-profile, while callers continue to select only `purpose`. See
+design introduces an explicit `executionClass` selector alongside `purpose`.
+Operator model-profile configuration remains separate. See
 [`docs/design/ai-purpose-catalog.md`](docs/design/ai-purpose-catalog.md).
 
 Each configured logical level is also available as an implicit purpose. For
 example, `AiRunnerRequirement(purpose = Some("standard-work"))` resolves the
 configured `standard-work` level without exposing its model profile. A model
-profile name is not an implicit purpose.
+profile name is not an implicit purpose. This is a compatibility path until
+the CNCF `executionClass` contract is available.
 
 Textus AI maps an effective output-token limit to Google `generateContent` and
 Interactions requests, OpenAI Chat Completions and Responses requests, and
