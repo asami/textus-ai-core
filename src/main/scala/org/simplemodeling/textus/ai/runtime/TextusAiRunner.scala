@@ -491,7 +491,13 @@ final class TextusAiRunner(
       Option.when(requirement.tools.nonEmpty)(
         Property("ai.tools", requirement.tools.map(_.id).mkString(","), None)
       )
-    resolution.requestProperties(AiRequestProperties.withoutInternalCodexProfile(properties)) ++
+    val sanitized = AiRequestProperties.withoutInternalCodexProfile(properties)
+    val controlled =
+      if (resolution.controlsOpenAiReasoning)
+        AiRequestProperties.withoutOpenAiReasoningOverride(sanitized)
+      else
+        sanitized
+    resolution.requestProperties(controlled) ++
       modelproperty ++ purposeproperty ++ toolsproperty
   }
 

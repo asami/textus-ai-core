@@ -18,6 +18,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * Supported key families:
  *
  * - textus.ai.purposes.<purpose>.model-profile
+ * - textus.ai.purposes.<purpose>.base-purpose
  * - textus.ai.purposes.<purpose>.provider
  * - textus.ai.purposes.<purpose>.mode
  * - textus.ai.purposes.<purpose>.engine
@@ -39,6 +40,8 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.model-profiles.<profile>.quality
  * - textus.ai.model-profiles.<profile>.cost
  * - textus.ai.model-profiles.<profile>.latency
+ * - textus.ai.levels.<level>.model-profile
+ * - textus.ai.generic-purposes.<purpose>.level
  *
  * @since   Jul.  4, 2026
  * @version Jul. 18, 2026
@@ -61,6 +64,8 @@ private[textus] final case class AiModelProfile(
 
 private[textus] final case class AiPurposeProfile(
   purpose: String,
+  basePurpose: Option[String] = None,
+  level: Option[String] = None,
   modelProfile: Option[String] = None,
   provider: Option[String] = None,
   mode: Option[String] = None,
@@ -177,7 +182,9 @@ private[textus] final case class AiPurposePolicy(
 private[textus] final case class AiProfileResolution(
   requirement: AiRunnerRequirement,
   policy: AiPurposePolicy = AiPurposePolicy.empty,
-  modelProfile: Option[AiModelProfile] = None
+  modelProfile: Option[AiModelProfile] = None,
+  genericPurpose: Option[String] = None,
+  logicalLevel: Option[String] = None
 ) {
   def maxTokens(request: Option[Int]): Option[Int] =
     request.orElse(policy.maxOutputTokens)
@@ -185,16 +192,19 @@ private[textus] final case class AiProfileResolution(
   def requestProperties(
     properties: Vector[org.goldenport.protocol.Property]
   ): Vector[org.goldenport.protocol.Property] =
-    properties ++ policy.requestProperties ++ _codex_execution_profile_property
+    properties ++ policy.requestProperties ++ _codex_execution_profile_property ++ _openai_reasoning_property
 
   def isCodexProfile: Boolean =
     requirement.provider.exists(_is_codex)
+
+  def controlsOpenAiReasoning: Boolean =
+    requirement.provider.exists(_is_openai) && reasoningLevel.nonEmpty
 
   def codexExecutionProfile: Option[String] =
     Option.when(isCodexProfile)(modelProfile.map(_.name)).flatten
 
   def reasoningLevel: Option[String] =
-    Option.when(isCodexProfile)(modelProfile.flatMap(_.reasoningLevel)).flatten
+    modelProfile.flatMap(_.reasoningLevel)
 
   def executionMetadata(
     maxTokens: Option[Int],
@@ -210,6 +220,8 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.POLICY_PROMPT_CONTRACT_ID -> policy.promptContractId,
       AiExecutionFacts.POLICY_MODEL_PROFILE -> codexExecutionProfile,
       AiExecutionFacts.POLICY_REASONING_LEVEL -> reasoningLevel,
+      AiExecutionFacts.POLICY_GENERIC_PURPOSE -> genericPurpose,
+      AiExecutionFacts.POLICY_LOGICAL_LEVEL -> logicalLevel,
       AiExecutionFacts.ENABLED_TOOLS -> Option.when(codexExecutionProfile.nonEmpty && requirement.tools.nonEmpty)(
         requirement.tools.map(_.id).mkString(",")
       )
@@ -222,8 +234,16 @@ private[textus] final case class AiProfileResolution(
       org.goldenport.protocol.Property(AiRequestProperties.CODEX_EXECUTION_PROFILE, value, None)
     }.toVector
 
+  private def _openai_reasoning_property: Vector[org.goldenport.protocol.Property] =
+    Option.when(requirement.provider.exists(_is_openai))(reasoningLevel).flatten.map { value =>
+      org.goldenport.protocol.Property("ai.openai.reasoning.effort", value, None)
+    }.toVector
+
   private def _is_codex(value: String): Boolean =
     value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")
+
+  private def _is_openai(value: String): Boolean =
+    value.trim.equalsIgnoreCase("openai")
 }
 
 private[textus] object AiPurposePolicy {
@@ -248,6 +268,10 @@ private[textus] final class AiProfileConfig(
     Option.when(normalized.nonEmpty) {
       AiPurposeProfile(
         purpose = normalized,
+        basePurpose = _config_string(
+          _purpose_keys(normalized, "base-purpose") ++
+            _purpose_keys(normalized, "basePurpose")
+        ),
         modelProfile = _config_string(_purpose_keys(normalized, "model-profile") ++ _purpose_keys(normalized, "modelProfile")),
         provider = _config_string(_purpose_keys(normalized, "provider")),
         mode = _config_string(_purpose_keys(normalized, "mode")),
@@ -292,6 +316,7 @@ private[textus] final class AiProfileConfig(
       )
     }.filter(profile =>
       profile.modelProfile.nonEmpty ||
+        profile.basePurpose.nonEmpty ||
         profile.provider.nonEmpty ||
         profile.mode.nonEmpty ||
         profile.engine.nonEmpty ||
@@ -309,6 +334,47 @@ private[textus] final class AiProfileConfig(
         profile.promptContractId.nonEmpty ||
         profile.unsupportedPromptPolicy.nonEmpty
     )
+
+  def resolveGenericPurpose(
+    purpose: String
+  ): Option[AiPurposeProfile] =
+    val normalized = purpose.trim
+    Option.when(normalized.nonEmpty) {
+      AiPurposeProfile(
+        purpose = normalized,
+        level = _config_string(_generic_purpose_keys(normalized, "level")),
+        modelProfile = _config_string(_generic_purpose_keys(normalized, "model-profile") ++ _generic_purpose_keys(normalized, "modelProfile")),
+        provider = _config_string(_generic_purpose_keys(normalized, "provider")),
+        mode = _config_string(_generic_purpose_keys(normalized, "mode")),
+        engine = _config_string(_generic_purpose_keys(normalized, "engine")),
+        model = _config_string(_generic_purpose_keys(normalized, "model")),
+        role = _config_string(_generic_purpose_keys(normalized, "role")),
+        quality = _config_string(_generic_purpose_keys(normalized, "quality")),
+        cost = _config_string(_generic_purpose_keys(normalized, "cost")),
+        latency = _config_string(_generic_purpose_keys(normalized, "latency")),
+        tools = _config_tools(_generic_purpose_keys(normalized, "tools")),
+        maxOutputTokens = _config_string(_generic_purpose_keys(normalized, "max-output-tokens") ++ _generic_purpose_keys(normalized, "maxOutputTokens")),
+        timeoutSeconds = _config_string(_generic_purpose_keys(normalized, "timeout-seconds") ++ _generic_purpose_keys(normalized, "timeoutSeconds")),
+        recordRetryLimit = _config_string(_generic_purpose_keys(normalized, "record-retry-limit") ++ _generic_purpose_keys(normalized, "recordRetryLimit")),
+        maxConcurrent = _config_string(_generic_purpose_keys(normalized, "max-concurrent") ++ _generic_purpose_keys(normalized, "maxConcurrent")),
+        outputSchemaId = _config_string(_generic_purpose_keys(normalized, "output-schema-id") ++ _generic_purpose_keys(normalized, "outputSchemaId")),
+        promptContractId = _config_string(_generic_purpose_keys(normalized, "prompt-contract-id") ++ _generic_purpose_keys(normalized, "promptContractId"))
+      )
+    }.filter { profile =>
+      profile.level.nonEmpty ||
+        profile.modelProfile.nonEmpty ||
+        profile.provider.nonEmpty ||
+        profile.mode.nonEmpty ||
+        profile.engine.nonEmpty ||
+        profile.model.nonEmpty ||
+        profile.tools.nonEmpty ||
+        profile.maxOutputTokens.nonEmpty ||
+        profile.timeoutSeconds.nonEmpty ||
+        profile.recordRetryLimit.nonEmpty ||
+        profile.maxConcurrent.nonEmpty ||
+        profile.outputSchemaId.nonEmpty ||
+        profile.promptContractId.nonEmpty
+    }
 
   def resolveModelProfile(
     name: String
@@ -355,12 +421,7 @@ private[textus] final class AiProfileConfig(
   ): Consequence[AiProfileResolution] =
     requirement.purpose.map(_.trim).filter(_.nonEmpty) match {
       case Some(purpose) =>
-        resolvePurpose(purpose) match {
-          case Some(profile) =>
-            _resolve_profile(requirement.copy(purpose = Some(purpose)), profile, true)
-          case None =>
-            Consequence.configurationInvalid(s"AI purpose profile not configured: $purpose")
-        }
+        _resolve_named_purpose(requirement.copy(purpose = Some(purpose)), purpose, true)
       case None =>
         Consequence.configurationInvalid("AI purpose is required")
     }
@@ -368,17 +429,122 @@ private[textus] final class AiProfileConfig(
   private def _resolve_optional_purpose(
     requirement: AiRunnerRequirement
   ): Consequence[AiProfileResolution] =
-    requirement.purpose.map(_.trim).filter(_.nonEmpty).flatMap(resolvePurpose) match {
-      case Some(profile) =>
-        _resolve_profile(requirement.copy(purpose = Some(profile.purpose)), profile, false)
+    requirement.purpose.map(_.trim).filter(_.nonEmpty) match {
+      case Some(purpose) =>
+        if (resolvePurpose(purpose).nonEmpty || resolveGenericPurpose(purpose).nonEmpty)
+          _resolve_named_purpose(requirement.copy(purpose = Some(purpose)), purpose, false)
+        else
+          Consequence.success(AiProfileResolution(requirement))
       case None =>
         Consequence.success(AiProfileResolution(requirement))
     }
 
+  private def _resolve_named_purpose(
+    requirement: AiRunnerRequirement,
+    purpose: String,
+    requiresprovider: Boolean
+  ): Consequence[AiProfileResolution] =
+    resolvePurpose(purpose) match {
+      case Some(profile) =>
+        profile.basePurpose match {
+          case Some(base) => _resolve_inherited_purpose(requirement, profile, base, requiresprovider)
+          case None => _resolve_profile(requirement, profile, requiresprovider)
+        }
+      case None =>
+        resolveGenericPurpose(purpose) match {
+          case Some(profile) =>
+            _materialize_generic_purpose(profile).flatMap { materialized =>
+              _resolve_profile(
+                requirement,
+                materialized,
+                requiresprovider,
+                Some(_ProfileOrigin(Some(profile.purpose), profile.level))
+              )
+            }
+          case None =>
+            Consequence.configurationInvalid(s"AI purpose profile not configured: $purpose")
+        }
+    }
+
+  private def _resolve_inherited_purpose(
+    requirement: AiRunnerRequirement,
+    application: AiPurposeProfile,
+    basepurpose: String,
+    requiresprovider: Boolean
+  ): Consequence[AiProfileResolution] =
+    resolveGenericPurpose(basepurpose) match {
+      case Some(base) =>
+        for {
+          materializedbase <- _materialize_generic_purpose(base)
+          merged = _inherit_purpose(materializedbase, application)
+          baseresolution <- _resolve_profile(
+            AiRunnerRequirement(purpose = Some(basepurpose)),
+            materializedbase,
+            true,
+            Some(_ProfileOrigin(Some(basepurpose), base.level))
+          )
+          applicationresolution <- _resolve_profile(
+            requirement,
+            merged,
+            requiresprovider,
+            Some(_ProfileOrigin(Some(basepurpose), base.level))
+          )
+          _ <- _validate_narrowing(baseresolution, applicationresolution)
+        } yield applicationresolution
+      case None =>
+        Consequence.configurationInvalid(s"AI generic purpose profile not configured: $basepurpose")
+    }
+
+  private def _materialize_generic_purpose(
+    profile: AiPurposeProfile
+  ): Consequence[AiPurposeProfile] =
+    profile.level match {
+      case Some(level) =>
+        _config_string(_level_keys(level, "model-profile") ++ _level_keys(level, "modelProfile")) match {
+          case Some(modelprofile) if profile.modelProfile.forall(_ == modelprofile) =>
+            Consequence.success(profile.copy(modelProfile = Some(modelprofile), level = None))
+          case Some(_) =>
+            Consequence.configurationInvalid(
+              s"AI generic purpose model-profile must be supplied by level: ${profile.purpose}"
+            )
+          case None =>
+            Consequence.configurationInvalid(s"AI logical level not configured: $level")
+        }
+      case None =>
+        Consequence.configurationInvalid(s"AI generic purpose requires a logical level: ${profile.purpose}")
+    }
+
+  private def _inherit_purpose(
+    base: AiPurposeProfile,
+    application: AiPurposeProfile
+  ): AiPurposeProfile =
+    application.copy(
+      basePurpose = None,
+      level = None,
+      modelProfile = application.modelProfile.orElse(base.modelProfile),
+      provider = application.provider.orElse(base.provider),
+      mode = application.mode.orElse(base.mode),
+      engine = application.engine.orElse(base.engine),
+      model = application.model.orElse(base.model),
+      role = application.role.orElse(base.role),
+      quality = application.quality.orElse(base.quality),
+      cost = application.cost.orElse(base.cost),
+      latency = application.latency.orElse(base.latency),
+      tools = if (application.tools.nonEmpty) application.tools else base.tools,
+      maxOutputTokens = application.maxOutputTokens.orElse(base.maxOutputTokens),
+      timeoutSeconds = application.timeoutSeconds.orElse(base.timeoutSeconds),
+      recordRetryLimit = application.recordRetryLimit.orElse(base.recordRetryLimit),
+      maxConcurrent = application.maxConcurrent.orElse(base.maxConcurrent),
+      outputSchemaId = application.outputSchemaId.orElse(base.outputSchemaId),
+      promptContractId = application.promptContractId.orElse(base.promptContractId),
+      unsupportedPromptPolicy = application.unsupportedPromptPolicy.orElse(base.unsupportedPromptPolicy)
+    )
+
   private def _resolve_profile(
     requirement: AiRunnerRequirement,
     profile: AiPurposeProfile,
-    requiresprovider: Boolean
+    requiresprovider: Boolean,
+    origin: Option[_ProfileOrigin] = None
   ): Consequence[AiProfileResolution] =
     for {
       modelprofile <- _resolve_model_profile(profile)
@@ -392,10 +558,74 @@ private[textus] final class AiProfileConfig(
           )
         else
           _validate_codex_profile(requirement, effective, modelprofile).map { _ =>
-            AiProfileResolution(effective, policy, modelprofile)
+            AiProfileResolution(
+              effective,
+              policy,
+              modelprofile,
+              origin.flatMap(_.genericPurpose),
+              origin.flatMap(_.logicalLevel)
+            )
           }
       }
     } yield resolution
+
+  private def _validate_narrowing(
+    base: AiProfileResolution,
+    application: AiProfileResolution
+  ): Consequence[Unit] =
+    if (!_same_selection(base.requirement, application.requirement))
+      Consequence.configurationInvalid("AI application purpose may not broaden an inherited provider/model policy")
+    else if (!_same_model_profile(base.modelProfile, application.modelProfile))
+      Consequence.configurationInvalid("AI application purpose may not replace an inherited model-profile")
+    else if (!application.requirement.tools.toSet.subsetOf(base.requirement.tools.toSet))
+      Consequence.configurationInvalid("AI application purpose may not broaden inherited tools")
+    else if (!_is_narrower_policy(base.policy, application.policy))
+      Consequence.configurationInvalid("AI application purpose may not broaden inherited execution policy")
+    else
+      Consequence.unit
+
+  private def _same_selection(
+    base: AiRunnerRequirement,
+    application: AiRunnerRequirement
+  ): Boolean =
+    Vector(
+      base.provider -> application.provider,
+      base.mode -> application.mode,
+      base.engine -> application.engine,
+      base.model -> application.model
+    ).forall { case (left, right) => left.map(_.trim.toLowerCase(java.util.Locale.ROOT)) == right.map(_.trim.toLowerCase(java.util.Locale.ROOT)) }
+
+  private def _same_model_profile(
+    base: Option[AiModelProfile],
+    application: Option[AiModelProfile]
+  ): Boolean =
+    base.map(_.name) == application.map(_.name)
+
+  private def _is_narrower_policy(
+    base: AiPurposePolicy,
+    application: AiPurposePolicy
+  ): Boolean =
+    _at_most(application.maxOutputTokens, base.maxOutputTokens) &&
+      _at_most(application.timeoutSeconds, base.timeoutSeconds) &&
+      _at_most(application.recordRetryLimit, base.recordRetryLimit) &&
+      _at_most(application.maxConcurrent, base.maxConcurrent) &&
+      _same_or_added(application.outputSchemaId, base.outputSchemaId) &&
+      _same_or_added(application.promptContractId, base.promptContractId)
+
+  private def _at_most[A: Ordering](application: Option[A], base: Option[A]): Boolean =
+    (application, base) match {
+      case (_, None) => true
+      case (Some(value), Some(limit)) => summon[Ordering[A]].lteq(value, limit)
+      case (None, Some(_)) => false
+    }
+
+  private def _same_or_added(application: Option[String], base: Option[String]): Boolean =
+    base.forall(value => application.contains(value))
+
+  private final case class _ProfileOrigin(
+    genericPurpose: Option[String],
+    logicalLevel: Option[String]
+  )
 
   private def _resolve_model_profile(
     profile: AiPurposeProfile
@@ -576,6 +806,30 @@ private[textus] final class AiProfileConfig(
       s"cncf.runtime.ai.purposes.$purpose.$leaf"
     )
 
+  private def _generic_purpose_keys(
+    purpose: String,
+    leaf: String
+  ): Vector[String] =
+    Vector(
+      s"textus.ai.generic-purposes.$purpose.$leaf",
+      s"textus.ai.genericPurposes.$purpose.$leaf",
+      s"textus.runtime.ai.generic-purposes.$purpose.$leaf",
+      s"cncf.ai.generic-purposes.$purpose.$leaf",
+      s"cncf.runtime.ai.generic-purposes.$purpose.$leaf"
+    )
+
+  private def _level_keys(
+    level: String,
+    leaf: String
+  ): Vector[String] =
+    Vector(
+      s"textus.ai.levels.$level.$leaf",
+      s"textus.ai.logical-levels.$level.$leaf",
+      s"textus.runtime.ai.levels.$level.$leaf",
+      s"cncf.ai.levels.$level.$leaf",
+      s"cncf.runtime.ai.levels.$level.$leaf"
+    )
+
   private def _model_profile_keys(
     profile: String,
     leaf: String
@@ -615,16 +869,15 @@ private[textus] final class AiProfileConfig(
   private def _concurrency_grants_c: Consequence[Vector[ConcurrencyGrant]] =
     _concurrency_purposes.foldLeft(Consequence.success(Vector.empty[ConcurrencyGrant])) { (z, purpose) =>
       z.flatMap { grants =>
-        resolvePurpose(purpose) match {
-          case Some(profile) =>
-            _purpose_policy(profile).map { policy =>
-              (policy.concurrencyScope, policy.maxConcurrent) match {
-                case (Some(scope), Some(limit)) => grants :+ ConcurrencyGrant(scope, limit)
-                case _ => grants
-              }
-            }
-          case None =>
-            Consequence.success(grants)
+        _resolve_named_purpose(
+          AiRunnerRequirement(purpose = Some(purpose), purposeRequired = true),
+          purpose,
+          true
+        ).map { resolution =>
+          (resolution.policy.concurrencyScope, resolution.policy.maxConcurrent) match {
+            case (Some(scope), Some(limit)) => grants :+ ConcurrencyGrant(scope, limit)
+            case _ => grants
+          }
         }
       }
     }
@@ -650,7 +903,12 @@ private[textus] final class AiProfileConfig(
     "textus.ai.purpose.",
     "textus.runtime.ai.purposes.",
     "cncf.ai.purposes.",
-    "cncf.runtime.ai.purposes."
+    "cncf.runtime.ai.purposes.",
+    "textus.ai.generic-purposes.",
+    "textus.ai.genericPurposes.",
+    "textus.runtime.ai.generic-purposes.",
+    "cncf.ai.generic-purposes.",
+    "cncf.runtime.ai.generic-purposes."
   )
 
   private val _concurrency_suffixes = Vector(".max-concurrent", ".maxConcurrent")

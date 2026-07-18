@@ -68,10 +68,17 @@ executed.
 | --- | --- | --- |
 | `ai.policy.model_profile` | Approved Codex model-profile selected by the effective purpose | No Codex purpose profile was selected |
 | `ai.policy.reasoning_level` | Fixed Codex reasoning level compiled into the admitted capability | The profile did not configure reasoning |
+| `ai.policy.generic_purpose` | Generic purpose selected directly or inherited by an application purpose | No generic purpose policy applied |
+| `ai.policy.logical_level` | Logical level that selected the approved model-profile | No logical level policy applied |
 
 For Codex, these facts identify the profile policy rather than a caller-supplied
 CLI argument. `ai.execution.enabled_tools` records only the logical capability
 set, not URLs, search results, or provider transcripts.
+
+Generic purpose policy is resolved before provider selection. A generic purpose
+selects an operator-configured logical level; an application purpose may name
+it with `base-purpose` only when its effective provider/model/reasoning policy
+is identical and its tools and execution bounds are no broader.
 
 ### Usage Facts
 

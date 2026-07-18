@@ -146,6 +146,17 @@ private[textus] object AiRequestProperties:
   ): Vector[Property] =
     properties.filterNot(_.name.equalsIgnoreCase(CODEX_EXECUTION_PROFILE))
 
+  def withoutOpenAiReasoningOverride(
+    properties: Vector[Property]
+  ): Vector[Property] =
+    properties.filterNot { property =>
+      Set(
+        "ai.openai.reasoning.effort",
+        "textus.ai.openai.reasoning.effort",
+        "openai.reasoning.effort"
+      ).contains(property.name.toLowerCase(java.util.Locale.ROOT))
+    }
+
   def codexExecutionProfile(
     properties: Vector[Property]
   ): Option[String] =

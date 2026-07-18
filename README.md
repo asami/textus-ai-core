@@ -244,6 +244,50 @@ invoked. `AiGenerateRequest.maxTokens`, an `ai.timeout-seconds` request
 property, and an `ai.record.retry-limit` request property override the
 corresponding profile default.
 
+### Generic Purposes And Logical Levels
+
+Logical levels keep application callers independent of provider, model, and
+reasoning choices. A level selects one approved `model-profile`; a generic
+purpose selects a level; an application purpose may reference that generic
+purpose through `base-purpose` and only narrow its tools or execution bounds.
+
+```yaml
+textus:
+  ai:
+    levels:
+      deep-deliberation: { model-profile: openai-deep }
+      standard-deliberation: { model-profile: openai-standard }
+      standard-work: { model-profile: openai-standard }
+      simple-work: { model-profile: local-simple }
+    generic-purposes:
+      web-research:
+        level: standard-deliberation
+        tools: url_context, web_search
+        timeout-seconds: 90
+      specification-analysis:
+        level: standard-work
+      implementation-work:
+        level: standard-work
+      structured-extraction:
+        level: standard-work
+      local-source-extraction:
+        level: simple-work
+    purposes:
+      artscene-exhibition-web-research:
+        base-purpose: web-research
+        max-output-tokens: 240
+        max-concurrent: 1
+```
+
+`base-purpose` must name a configured generic purpose. An application purpose
+cannot replace its inherited provider, mode, engine, model-profile, model, or
+reasoning setting; it may only select a subset of inherited tools and reduce
+maximum-output, timeout, retry, or concurrency bounds. Unknown generic levels,
+missing bases, and broadening configuration fail before a provider binding is
+selected. Generic purpose names are ordinary purpose values, so a caller may
+request `AiRunnerRequirement(purpose = Some("specification-analysis"))` without
+provider fields.
+
 Textus AI maps an effective output-token limit to Google `generateContent` and
 Interactions requests, OpenAI Chat Completions and Responses requests, and
 Gemma/Ollama `options.num_predict`. It rejects an effective output-token limit

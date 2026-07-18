@@ -1161,6 +1161,88 @@ final class TextusAiRunnerSpec
       _GenerateServiceState.count(prompt) shouldBe 0
     }
 
+    "resolve a generic purpose through its logical level without caller provider fields" in {
+      Given("a standard-work level and a generic specification-analysis purpose")
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.levels.standard-work.model-profile" -> ConfigurationValue.StringValue("openai-standard-work"),
+          "textus.ai.model-profiles.openai-standard-work.provider" -> ConfigurationValue.StringValue("openai"),
+          "textus.ai.model-profiles.openai-standard-work.mode" -> ConfigurationValue.StringValue("remote"),
+          "textus.ai.model-profiles.openai-standard-work.engine" -> ConfigurationValue.StringValue("gpt"),
+          "textus.ai.model-profiles.openai-standard-work.model" -> ConfigurationValue.StringValue("gpt-5"),
+          "textus.ai.model-profiles.openai-standard-work.reasoning-level" -> ConfigurationValue.StringValue("medium"),
+          "textus.ai.generic-purposes.specification-analysis.level" -> ConfigurationValue.StringValue("standard-work"),
+          "textus.ai.generic-purposes.specification-analysis.max-output-tokens" -> ConfigurationValue.StringValue("480")
+        )),
+        ConfigurationTrace.empty
+      )
+      val profiles = AiProfileConfig.fromConfiguration(Some(configuration))
+
+      When("a caller requires only the generic purpose")
+      val result = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("specification-analysis"),
+        purposeRequired = true
+      ))
+
+      Then("the level selects the approved provider/model/reasoning policy")
+      result.toOption.map(_.requirement.provider) shouldBe Some(Some("openai"))
+      result.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
+      result.toOption.flatMap(_.genericPurpose) shouldBe Some("specification-analysis")
+      result.toOption.flatMap(_.logicalLevel) shouldBe Some("standard-work")
+      result.toOption.flatMap(_.reasoningLevel) shouldBe Some("medium")
+      result.toOption.map(_.policy.maxOutputTokens) shouldBe Some(Some(480))
+      result.toOption.flatMap(_.requestProperties(Vector.empty).find { property =>
+        property.name == "ai.openai.reasoning.effort" && property.value.toString == "medium"
+      }) should not be empty
+    }
+
+    "permit an application purpose to narrow but not broaden its generic base purpose" in {
+      Given("a Web-research generic purpose and one narrowed application purpose")
+      val values = Map(
+        "textus.ai.levels.standard-deliberation.model-profile" -> ConfigurationValue.StringValue("openai-web-research"),
+        "textus.ai.model-profiles.openai-web-research.provider" -> ConfigurationValue.StringValue("openai"),
+        "textus.ai.model-profiles.openai-web-research.mode" -> ConfigurationValue.StringValue("remote"),
+        "textus.ai.model-profiles.openai-web-research.engine" -> ConfigurationValue.StringValue("gpt"),
+        "textus.ai.model-profiles.openai-web-research.model" -> ConfigurationValue.StringValue("gpt-5"),
+        "textus.ai.generic-purposes.web-research.level" -> ConfigurationValue.StringValue("standard-deliberation"),
+        "textus.ai.generic-purposes.web-research.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
+        "textus.ai.generic-purposes.web-research.max-output-tokens" -> ConfigurationValue.StringValue("480"),
+        "textus.ai.generic-purposes.web-research.timeout-seconds" -> ConfigurationValue.StringValue("90"),
+        "textus.ai.generic-purposes.web-research.max-concurrent" -> ConfigurationValue.StringValue("2"),
+        "textus.ai.purposes.artscene-exhibition-web-research.base-purpose" -> ConfigurationValue.StringValue("web-research"),
+        "textus.ai.purposes.artscene-exhibition-web-research.tools" -> ConfigurationValue.StringValue("web_search"),
+        "textus.ai.purposes.artscene-exhibition-web-research.max-output-tokens" -> ConfigurationValue.StringValue("240"),
+        "textus.ai.purposes.artscene-exhibition-web-research.timeout-seconds" -> ConfigurationValue.StringValue("45"),
+        "textus.ai.purposes.artscene-exhibition-web-research.max-concurrent" -> ConfigurationValue.StringValue("1"),
+        "textus.ai.purposes.invalid-web-research.base-purpose" -> ConfigurationValue.StringValue("web-research"),
+        "textus.ai.purposes.invalid-web-research.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
+        "textus.ai.purposes.invalid-web-research.timeout-seconds" -> ConfigurationValue.StringValue("120")
+      )
+      val profiles = AiProfileConfig.fromConfiguration(Some(ResolvedConfiguration(
+        Configuration(values),
+        ConfigurationTrace.empty
+      )))
+
+      When("the narrowed and broadened application purposes are resolved")
+      val narrowed = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("artscene-exhibition-web-research"),
+        purposeRequired = true
+      ))
+      val broadened = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("invalid-web-research"),
+        purposeRequired = true
+      ))
+
+      Then("only the application policy that stays within the generic bound is admitted")
+      narrowed.toOption.map(_.requirement.tools.map(_.id)) shouldBe Some(Vector("web_search"))
+      narrowed.toOption.map(_.policy.maxOutputTokens) shouldBe Some(Some(240))
+      narrowed.toOption.map(_.policy.timeoutSeconds) shouldBe Some(Some(45L))
+      narrowed.toOption.map(_.policy.maxConcurrent) shouldBe Some(Some(1))
+      profiles.concurrencyAdmissionC.toOption.flatten should not be empty
+      broadened.isFaillure shouldBe true
+      broadened.toString should include ("may not broaden inherited execution policy")
+    }
+
     "send Gemini tool requests through the Interactions API" in {
       Given("a Google provider service with a fake HTTP driver")
       val driver = new _FakeHttpDriver(
