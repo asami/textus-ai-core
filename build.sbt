@@ -1,45 +1,29 @@
 import org.goldenport.cozy.CozyPlugin.autoImport._
 import sbt.Keys.*
 
-ThisBuild / organization := "org.textus"
-ThisBuild / version := "0.2.1-SNAPSHOT"
-
-val cncfVersion = "0.5.1-SNAPSHOT"
-
-lazy val root = (project in file("."))
+lazy val root = project
+  .in(file("."))
   .enablePlugins(org.goldenport.cozy.CozyPlugin)
   .settings(
-    name := "textus-ai-runtime",
-    scalaVersion := "3.3.8",
-    scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
+    organization := TextusAiProjectYamlBuild.requiredValue(cozyProjectMetadata.value, "project.organization"),
+    name := TextusAiProjectYamlBuild.requiredValue(cozyProjectMetadata.value, "project.name"),
+    version := TextusAiProjectYamlBuild.requiredValue(cozyProjectMetadata.value, "project.component.version"),
+    scalaVersion := TextusAiProjectYamlBuild.requiredValue(cozyProjectMetadata.value, "build.scalaVersion"),
+    useCoursier := false,
+
+    resolvers += Resolver.defaultLocal,
+    resolvers += Resolver.file("Local Ivy", file(Path.userHome.absolutePath + "/.ivy2/local"))(Resolver.ivyStylePatterns),
+    resolvers += "Local Maven Repository" at ("file://" + Path.userHome.absolutePath + "/.m2/repository"),
+    resolvers += "SimpleModeling.org" at "https://www.simplemodeling.org/repository/maven",
+    libraryDependencies ++= TextusAiProjectYamlBuild.dependencies(cozyProjectMetadata.value),
+
     cozyGeneratorBackend := "cozy",
-    cozyDelegateProjectDir := Some(file("/Users/asami/src/dev2025/cozy")),
-    resolvers ++= Seq(
-      Resolver.defaultLocal,
-      Resolver.mavenLocal,
-      "SimpleModeling.org" at "https://www.simplemodeling.org/repository/maven"
-    ),
-    libraryDependencies ++= Seq(
-      "org.goldenport" % "goldenport-cncf_3" % cncfVersion,
-      "org.simplemodeling" % "simplemodeling-model_3" % "0.1.8-SNAPSHOT",
-      "org.scalatest" %% "scalatest" % "3.2.19" % Test
-    ),
-    dependencyOverrides ++= Seq(
-      "org.simplemodeling" % "simplemodeling-model_3" % "0.1.8-SNAPSHOT"
-    ),
-    cozyManifestMetadata ++= Map(
-      "component" -> "textus-ai-runtime",
-      "version" -> version.value,
-      "boundedContext" -> "platform",
-      "domain" -> "ai-runtime"
-    ),
-    publish := {
-      val _ = cozyPublishCar.value
-      ()
-    },
-    publishLocal := {
-      val _ = cozyPublishLocalCar.value
-      ()
-    },
-    Test / fork := false
+    cozyDelegateProjectDir := None,
+    cozyDelegateCommand := Seq("cozy"),
+    scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
+    dependencyOverrides += "org.simplemodeling" %% "simplemodeling-model" % "0.2.0-SNAPSHOT",
+    Test / fork := false,
+    cozyManifestMetadata ++=
+      cozyProjectMetadata.value.mapUnder("packaging.car.manifest_metadata") ++
+        Map("component" -> TextusAiProjectYamlBuild.requiredValue(cozyProjectMetadata.value, "project.component.name"))
   )

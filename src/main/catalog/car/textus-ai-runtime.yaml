@@ -5,6 +5,8 @@ recommended: 0.1.1
 latestStable: 0.2.0
 status: active
 aliases: []
+tags: []
+terms: []
 versions:
   - version: 0.1.1
     channel: stable

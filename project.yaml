@@ -12,6 +12,15 @@ project:
     config:
       textus.server.default-port: "18001"
 
+build:
+  scalaVersion: "3.3.8"
+  dependencies:
+    compile:
+      - "org.goldenport::goldenport-cncf:0.5.1-SNAPSHOT"
+      - "org.simplemodeling::simplemodeling-model:0.2.0-SNAPSHOT"
+    test:
+      - "org.scalatest::scalatest:3.2.19"
+
 publication:
   source_manifest:
     enabled: false
@@ -19,6 +28,9 @@ publication:
 packaging:
   kind: car
   car:
+    manifest_metadata:
+      boundedContext: "platform"
+      domain: "ai-runtime"
     runtime:
       cncf:
         minimum: "0.5.1-SNAPSHOT"
