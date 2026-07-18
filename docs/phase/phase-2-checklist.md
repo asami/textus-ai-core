@@ -34,11 +34,11 @@ Phase: [Phase 2 - Purpose Policy Runtime](phase-2.md)
 
 ## PP-05 Executable Specification
 
-- [ ] Add deterministic tests for successful resolution of each ArtScene integration purpose.
-- [ ] Add deterministic tests for unresolved required purposes and invalid profile configuration.
-- [ ] Add deterministic tests for unsupported logical tools and no-fallback behavior.
-- [ ] Add deterministic tests for bounded execution policy propagation and enforcement.
-- [ ] Update operator documentation with profile examples and safe observability expectations.
+- [x] Add deterministic tests for successful resolution of each ArtScene integration purpose.
+- [x] Add deterministic tests for unresolved required purposes and invalid profile configuration.
+- [x] Add deterministic tests for unsupported logical tools and no-fallback behavior.
+- [x] Add deterministic tests for bounded execution policy propagation and record-retry enforcement.
+- [x] Update operator documentation with profile examples and safe observability expectations.
 - [ ] Run review, fix actionable findings, and commit the completed phase.
 
 ## Deferred To Phase 3

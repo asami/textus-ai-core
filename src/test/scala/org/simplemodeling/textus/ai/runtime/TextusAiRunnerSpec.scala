@@ -514,6 +514,66 @@ final class TextusAiRunnerSpec
       result.toOption.get.model shouldBe Some("google")
     }
 
+    "resolve every ArtScene purpose through its configured provider-neutral profile" in {
+      Given("the three ArtScene purposes are configured without provider details in requests")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.purposes.artscene-exhibition-extraction-from-source.provider" ->
+            ConfigurationValue.StringValue("gemma"),
+          "textus.ai.purposes.artscene-exhibition-web-research.provider" ->
+            ConfigurationValue.StringValue("google"),
+          "textus.ai.purposes.artscene-exhibition-web-research.tools" ->
+            ConfigurationValue.StringValue("url_context,web_search"),
+          "textus.ai.purposes.artscene-exhibition-managed-research.provider" ->
+            ConfigurationValue.StringValue("openai")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+      def _required_(purpose: String): AiRunnerRequirement =
+        AiRunnerRequirement(purpose = Some(purpose), purposeRequired = true)
+
+      When("each purpose is requested through the provider-neutral AI runner contract")
+      val extraction = runner.generateRecord(
+        AiRecordRequest(
+          "strict-record",
+          _artscene_record_schema,
+          requirement = _required_("artscene-exhibition-extraction-from-source")
+        )
+      ).toOption.get
+      val web = runner.generate(
+        AiGenerateRequest(
+          "inspect-ai-tools",
+          requirement = _required_("artscene-exhibition-web-research")
+        )
+      ).toOption.get
+      val managed = runner.generate(
+        AiGenerateRequest(
+          "managed-research-purpose",
+          requirement = _required_("artscene-exhibition-managed-research")
+        )
+      ).toOption.get
+
+      Then("the profile selects the expected provider and logical tools without request provider fields")
+      extraction.record.getAny("exhibitions") should not be empty
+      extraction.metadata(AiExecutionFacts.PROVIDER) shouldBe "gemma"
+      extraction.metadata(AiExecutionFacts.PURPOSE) shouldBe "artscene-exhibition-extraction-from-source"
+      web.text shouldBe "tools:url_context,web_search"
+      web.metadata(AiExecutionFacts.PROVIDER) shouldBe "google"
+      web.metadata(AiExecutionFacts.PURPOSE) shouldBe "artscene-exhibition-web-research"
+      web.metadata(AiExecutionFacts.TOOLS) shouldBe "url_context,web_search"
+      managed.metadata(AiExecutionFacts.PROVIDER) shouldBe "openai"
+      managed.metadata(AiExecutionFacts.PURPOSE) shouldBe "artscene-exhibition-managed-research"
+    }
+
     "apply bounded execution defaults from a purpose profile while preserving request overrides" in {
       Given("an AI runner with output-token and timeout defaults for a purpose")
       given ExecutionContext = ExecutionContext.create()
