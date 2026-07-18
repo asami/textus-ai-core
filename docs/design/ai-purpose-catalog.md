@@ -33,12 +33,12 @@ purpose
 | --- | --- | --- |
 | `quick-response` | `simple-work` | Produce a bounded direct response from caller-supplied input. |
 | `structured-extraction` | `standard-work` | Extract or normalize caller-supplied material into a required structured result. |
-| `analysis` | `standard-deliberation` | Compare, explain, classify, or reason over caller-supplied material. |
-| `deep-analysis` | `deep-deliberation` | Perform higher-cost, deeper reasoning over caller-supplied material. |
-| `web-research` | `deep-deliberation` | Request an approved research-oriented execution profile. |
+| `analysis` | `standard-consideration` | Compare, explain, classify, or reason over caller-supplied material. |
+| `deep-analysis` | `deep-consideration` | Perform higher-cost, deeper reasoning over caller-supplied material. |
+| `web-research` | `deep-consideration` | Request an approved research-oriented execution profile. |
 
 The first four purposes cover every standard logical level. `web-research`
-shares `deep-deliberation` because research-oriented execution usually needs
+shares `deep-consideration` because research-oriented execution usually needs
 stronger source, timeout, concurrency, and cost controls. It is separate from
 local analysis because its selected profile may admit external capabilities
 and requires a different observability policy.
@@ -47,6 +47,10 @@ The intended level is an approved policy baseline, not a caller choice. An
 operator can bind a purpose to a different approved profile without changing
 application code. A caller cannot replace the resolved level, model,
 reasoning setting, or tool set through provider-specific request fields.
+
+`consideration` expresses the amount of analysis expected from the selected
+profile. It intentionally avoids the stronger connotation of `deliberation`;
+the level is not a claim that a provider performs formal deliberation.
 
 ## Application Purposes
 

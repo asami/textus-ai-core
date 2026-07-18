@@ -1162,17 +1162,17 @@ final class TextusAiRunnerSpec
     }
 
     "resolve a generic purpose through its logical level without caller provider fields" in {
-      Given("a standard-work level and a generic specification-analysis purpose")
+      Given("a standard-consideration level and a generic analysis purpose")
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.levels.standard-work.model-profile" -> ConfigurationValue.StringValue("openai-standard-work"),
-          "textus.ai.model-profiles.openai-standard-work.provider" -> ConfigurationValue.StringValue("openai"),
-          "textus.ai.model-profiles.openai-standard-work.mode" -> ConfigurationValue.StringValue("remote"),
-          "textus.ai.model-profiles.openai-standard-work.engine" -> ConfigurationValue.StringValue("gpt"),
-          "textus.ai.model-profiles.openai-standard-work.model" -> ConfigurationValue.StringValue("gpt-5"),
-          "textus.ai.model-profiles.openai-standard-work.reasoning-level" -> ConfigurationValue.StringValue("medium"),
-          "textus.ai.generic-purposes.specification-analysis.level" -> ConfigurationValue.StringValue("standard-work"),
-          "textus.ai.generic-purposes.specification-analysis.max-output-tokens" -> ConfigurationValue.StringValue("480")
+          "textus.ai.levels.standard-consideration.model-profile" -> ConfigurationValue.StringValue("openai-standard-consideration"),
+          "textus.ai.model-profiles.openai-standard-consideration.provider" -> ConfigurationValue.StringValue("openai"),
+          "textus.ai.model-profiles.openai-standard-consideration.mode" -> ConfigurationValue.StringValue("remote"),
+          "textus.ai.model-profiles.openai-standard-consideration.engine" -> ConfigurationValue.StringValue("gpt"),
+          "textus.ai.model-profiles.openai-standard-consideration.model" -> ConfigurationValue.StringValue("gpt-5"),
+          "textus.ai.model-profiles.openai-standard-consideration.reasoning-level" -> ConfigurationValue.StringValue("medium"),
+          "textus.ai.generic-purposes.analysis.level" -> ConfigurationValue.StringValue("standard-consideration"),
+          "textus.ai.generic-purposes.analysis.max-output-tokens" -> ConfigurationValue.StringValue("480")
         )),
         ConfigurationTrace.empty
       )
@@ -1180,15 +1180,15 @@ final class TextusAiRunnerSpec
 
       When("a caller requires only the generic purpose")
       val result = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("specification-analysis"),
+        purpose = Some("analysis"),
         purposeRequired = true
       ))
 
       Then("the level selects the approved provider/model/reasoning policy")
       result.toOption.map(_.requirement.provider) shouldBe Some(Some("openai"))
       result.toOption.map(_.requirement.model) shouldBe Some(Some("gpt-5"))
-      result.toOption.flatMap(_.genericPurpose) shouldBe Some("specification-analysis")
-      result.toOption.flatMap(_.logicalLevel) shouldBe Some("standard-work")
+      result.toOption.flatMap(_.genericPurpose) shouldBe Some("analysis")
+      result.toOption.flatMap(_.logicalLevel) shouldBe Some("standard-consideration")
       result.toOption.flatMap(_.reasoningLevel) shouldBe Some("medium")
       result.toOption.map(_.policy.maxOutputTokens) shouldBe Some(Some(480))
       result.toOption.flatMap(_.requestProperties(Vector.empty).find { property =>
@@ -1199,12 +1199,12 @@ final class TextusAiRunnerSpec
     "permit an application purpose to narrow but not broaden its generic base purpose" in {
       Given("a Web-research generic purpose and one narrowed application purpose")
       val values = Map(
-        "textus.ai.levels.standard-deliberation.model-profile" -> ConfigurationValue.StringValue("openai-web-research"),
+        "textus.ai.levels.standard-consideration.model-profile" -> ConfigurationValue.StringValue("openai-web-research"),
         "textus.ai.model-profiles.openai-web-research.provider" -> ConfigurationValue.StringValue("openai"),
         "textus.ai.model-profiles.openai-web-research.mode" -> ConfigurationValue.StringValue("remote"),
         "textus.ai.model-profiles.openai-web-research.engine" -> ConfigurationValue.StringValue("gpt"),
         "textus.ai.model-profiles.openai-web-research.model" -> ConfigurationValue.StringValue("gpt-5"),
-        "textus.ai.generic-purposes.web-research.level" -> ConfigurationValue.StringValue("standard-deliberation"),
+        "textus.ai.generic-purposes.web-research.level" -> ConfigurationValue.StringValue("standard-consideration"),
         "textus.ai.generic-purposes.web-research.tools" -> ConfigurationValue.StringValue("url_context,web_search"),
         "textus.ai.generic-purposes.web-research.max-output-tokens" -> ConfigurationValue.StringValue("480"),
         "textus.ai.generic-purposes.web-research.timeout-seconds" -> ConfigurationValue.StringValue("90"),

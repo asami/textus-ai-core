@@ -255,19 +255,19 @@ purpose through `base-purpose` and only narrow its tools or execution bounds.
 textus:
   ai:
     levels:
-      deep-deliberation: { model-profile: openai-deep }
-      standard-deliberation: { model-profile: openai-standard }
+      deep-consideration: { model-profile: openai-deep }
+      standard-consideration: { model-profile: openai-standard }
       standard-work: { model-profile: openai-standard }
       simple-work: { model-profile: local-simple }
     generic-purposes:
       web-research:
-        level: deep-deliberation
+        level: deep-consideration
         tools: url_context, web_search
         timeout-seconds: 90
       deep-analysis:
-        level: deep-deliberation
+        level: deep-consideration
       analysis:
-        level: standard-deliberation
+        level: standard-consideration
       structured-extraction:
         level: standard-work
       quick-response:
