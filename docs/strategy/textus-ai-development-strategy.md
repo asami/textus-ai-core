@@ -18,8 +18,8 @@ prompt contracts, and the decision to accept or reject an AI result.
 ## Development Principles
 
 - Keep the component operation surface provider-neutral.
-- Select provider, mode, model, limits, and tools through `AiRunnerRequirement`
-  and purpose profiles.
+- Select provider, mode, model, limits, and tools through Textus AI-owned
+  runtime profiles and application-purpose resolution.
 - Keep review policy and provider fallback outside the runtime unless they are
   explicitly configured by the owning application.
 - Prefer structured generation for domain integration and fail explicitly when
@@ -137,6 +137,37 @@ Artifacts:
 - [Phase 3 Dashboard](../phase/phase-3.md)
 - [Phase 3 Checklist](../phase/phase-3-checklist.md)
 
+### Phase 4: Runtime Profiles and Application Purposes
+
+Goal: replace configuration-defined model profiles and generic-purpose
+inheritance with Textus AI-owned runtime profiles, standard purposes, and
+strict application-purpose mappings.
+
+Scope:
+
+- supply `codex-cli` and `gemini` runtime profile defaults for all standard
+  execution classes;
+- supply the standard-purpose catalog and resolve application-purpose mappings
+  through it;
+- apply merged CNCF runtime/execution-class overrides without allowing
+  application callers to select concrete AI settings;
+- reject the replaced model-profile, generic-purpose, base-purpose, and level
+  configuration families structurally; and
+- publish safe runtime-profile and effective execution-class facts.
+
+Non-goals:
+
+- no new CNCF `AiRunner` operation or CML operation;
+- no application-owned provider/model/tool selector;
+- no runtime workflow, scheduler, state store, or application fallback; and
+- no implicit compatibility path for the replaced configuration families.
+
+Artifacts:
+
+- [Phase 4 Dashboard](../phase/phase-4.md)
+- [Phase 4 Checklist](../phase/phase-4-checklist.md)
+- [Runtime Profile and Application Purpose Specification](../journal/2026/07/2026-07-18-runtime-profile-and-application-purpose-specification.md)
+
 ## Phase Ordering
 
 Phase 1 was reopened on 2026-07-16 after the user clarified that Codex CLI is
@@ -151,8 +182,10 @@ completed on 2026-07-18.
 - Phase 2: complete on 2026-07-18.
 - Phase 3: complete on 2026-07-18.
 - Latest phase closure: `docs/phase/phase-3-closure.md`
-- No implementation phase is active. A later workflow phase requires a
-  concrete caller contract and a separately approved strategy item.
+- Current phase: Phase 4, Runtime Profiles and Application Purposes.
+- Current phase dashboard: `docs/phase/phase-4.md`
+- Current phase checklist: `docs/phase/phase-4-checklist.md`
+- Current next task: RP-01 runtime profile catalog and class-default matrix.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
