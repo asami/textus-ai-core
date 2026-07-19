@@ -114,6 +114,41 @@ final class ComponentFactorySpec
       ) shouldBe true
     }
 
+    "bind commercial providers only from merged CNCF configuration" in {
+      Given("an empty runtime configuration and explicitly configured commercial runtimes")
+      given ExecutionContext = ExecutionContext.create()
+      val empty = ComponentFactory.configureRuntimeSpi(new Component() {}, None)
+      val openaiconfigured = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.openai.api-key" -> ConfigurationValue.StringValue("test-openai-key"),
+          "textus.ai.openai.model" -> ConfigurationValue.StringValue("gpt-test")
+        )),
+        ConfigurationTrace.empty
+      )))
+      val googleconfigured = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.google.api-key" -> ConfigurationValue.StringValue("test-google-key"),
+          "textus.ai.google.model" -> ConfigurationValue.StringValue("gemini-test")
+        )),
+        ConfigurationTrace.empty
+      )))
+      val contract = SpiContract("ai-runner", classOf[AiRunner])
+      val openaiselection = SpiSelection(provider = Some("openai"))
+      val googleselection = SpiSelection(provider = Some("google"))
+
+      When("the component resolves commercial AI runners")
+      val emptyopenai = empty.port.get[TextusAiRunnerProvider].value.provide(contract, openaiselection)
+      val emptygoogle = empty.port.get[TextusAiRunnerProvider].value.provide(contract, googleselection)
+      val configuredopenai = openaiconfigured.port.get[TextusAiRunnerProvider].value.provide(contract, openaiselection)
+      val configuredgoogle = googleconfigured.port.get[TextusAiRunnerProvider].value.provide(contract, googleselection)
+
+      Then("only explicit merged configuration admits the commercial provider")
+      emptyopenai.isFaillure shouldBe true
+      emptygoogle.isFaillure shouldBe true
+      configuredopenai.isSuccess shouldBe true
+      configuredgoogle.isSuccess shouldBe true
+    }
+
     "install the enabled Codex capability into the component execution scope" in {
       Given("an explicitly enabled Codex runtime with a trusted executable location")
       given ExecutionContext = ExecutionContext.create()

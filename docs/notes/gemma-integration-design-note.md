@@ -136,10 +136,7 @@ services:
     build: .
     depends_on:
       - ollama
-    environment:
-      AI_LLM_PROVIDER: gemma
-      AI_LLM_MODE: local
-      AI_LLM_ENDPOINT: http://ollama:11434
+    # Supply textus.ai.gemma.* through normal merged CNCF configuration.
 
   ollama:
     image: ollama/ollama
@@ -210,18 +207,18 @@ execution `Port`.
 
 # Configuration Model (Recommended Form)
 
-ai:
-  llm:
-    provider: gemma
-    mode: local
-    local:
+textus:
+  ai:
+    gemma:
+      provider: gemma
+      mode: local
       engine: ollama
       endpoint: http://ollama:11434
       model: gemma:2b
 
 ## Mode Semantics
 
-The `AI_LLM_MODE` setting controls endpoint selection behavior.
+The `textus.ai.gemma.mode` setting controls endpoint selection behavior.
 
 - `local`: use the local endpoint first; fallback is allowed when configured
 - `local-first`: use the local endpoint first, then try the fallback endpoint
@@ -319,20 +316,13 @@ Although Ollama is the default, remote execution MUST remain supported.
 
 ## Remote Example
 
-ai:
-  llm:
-    provider: gemma
-    mode: remote
-    endpoint: http://llm-server:8080
-
-Example runtime invocation:
-
-```bash
-AI_LLM_MODE=remote \
-AI_LLM_ENDPOINT=http://llm-server:8080 \
-AI_LLM_MODEL=gemma:2b \
-sbt run
-```
+textus:
+  ai:
+    gemma:
+      provider: gemma
+      mode: remote
+      endpoint: http://llm-server:8080
+      model: gemma:2b
 
 ---
 

@@ -30,13 +30,13 @@ import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ComponentFactory
 import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
 import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaOllamaGenerateService, GemmaRuntimeConfig}
-import org.simplemodeling.textus.ai.provider.google.{GoogleGenerateService, GoogleRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.google.{GoogleConfig, GoogleGenerateService, GoogleRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.{OpenAiGenerateService, OpenAiRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul. 19, 2026
+ * @version Jul. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -1468,6 +1468,32 @@ final class TextusAiRunnerSpec
       config.map(_.apiKey) shouldBe Some("test-openai-key")
       config.map(_.model) shouldBe Some("gpt-test")
       config.map(_.timeoutSeconds) shouldBe Some(180L)
+    }
+
+    "default commercial provider timeouts from CNCF configuration only" in {
+      Given("OpenAI and Google configurations without timeout settings")
+      val openaiconfiguration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.openai.api-key" -> ConfigurationValue.StringValue("test-openai-key"),
+          "textus.ai.openai.model" -> ConfigurationValue.StringValue("gpt-test")
+        )),
+        ConfigurationTrace.empty
+      )
+      val googleconfiguration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.google.api-key" -> ConfigurationValue.StringValue("test-google-key"),
+          "textus.ai.google.model" -> ConfigurationValue.StringValue("gemini-test")
+        )),
+        ConfigurationTrace.empty
+      )
+
+      When("the commercial runtime configurations are resolved")
+      val openai = OpenAiConfig.fromConfiguration(openaiconfiguration)
+      val google = GoogleConfig.fromConfiguration(googleconfiguration)
+
+      Then("both use the code-owned timeout default without ambient input")
+      openai.map(_.timeoutSeconds) shouldBe Some(30L)
+      google.map(_.timeoutSeconds) shouldBe Some(30L)
     }
 
     "read Gemma/Ollama endpoint and local runtime selection from CNCF configuration" in {

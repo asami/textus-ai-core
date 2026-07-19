@@ -106,6 +106,8 @@ Stage Status:
 - [x] Verify the managed Codex CLI version before GPT-5.6 profile prompt
   execution, without bypassing process admission or falling back to another
   model.
+- [x] Bind Gemma, OpenAI, and Google providers only from merged CNCF
+  configuration, with code-owned defaults where a local runtime is supplied.
 - [x] Replace model-profile/generic-purpose/logical-level facts with safe
   runtime-profile and effective-class facts.
 

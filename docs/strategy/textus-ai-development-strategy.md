@@ -190,6 +190,10 @@ completed on 2026-07-18.
   the GPT-5.6 model family gained a managed CLI version gate. The phase remains
   closed because this hardens the existing runtime binding without changing the
   runtime-profile, standard-purpose, or application-purpose contracts.
+- Phase 4 configuration-boundary follow-up: on 2026-07-20, Gemma, OpenAI, and
+  Google provider assembly became dependent only on merged CNCF configuration.
+  The phase remains closed because this removes an ambient bootstrap fallback
+  without changing its public contracts.
 - Latest phase closure: `docs/phase/phase-4-closure.md`
 - Current next task: define the next runtime expansion phase before adding a
   runtime profile, workflow, or public operation.

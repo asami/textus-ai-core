@@ -26,6 +26,10 @@ final case class GemmaRuntimeConfig(
 )
 
 object GemmaConfig:
+  val default: GemmaRuntimeConfig = GemmaRuntimeConfig(
+    endpoint = URI.create("http://ollama:11434")
+  )
+
   def fromConfiguration(
     configuration: ResolvedConfiguration
   ): Option[GemmaRuntimeConfig] = {
@@ -53,24 +57,6 @@ object GemmaConfig:
     )
   }
 
-  def fromEnvironment(): GemmaRuntimeConfig =
-    val environment = _bootstrap_environment
-    val endpoint = environment.getOrElse("AI_LLM_ENDPOINT", "http://ollama:11434")
-    val fallback = environment.get("AI_LLM_FALLBACK_ENDPOINT").orElse(environment.get("AI_LLM_REMOTE_ENDPOINT"))
-    val model = environment.getOrElse("AI_GEMMA_MODEL", environment.getOrElse("AI_LLM_MODEL", "gemma:2b"))
-    val timeout = environment.get("AI_LLM_TIMEOUT_SECONDS").flatMap(_.toLongOption).getOrElse(30L)
-    val concurrency = environment.get("AI_LLM_MAX_CONCURRENCY").flatMap(_.toIntOption).getOrElse(2)
-    GemmaRuntimeConfig(
-      provider = environment.getOrElse("AI_GEMMA_PROVIDER", environment.getOrElse("AI_LLM_PROVIDER", "gemma")),
-      mode = environment.getOrElse("AI_GEMMA_MODE", environment.getOrElse("AI_LLM_MODE", "local")),
-      engine = environment.getOrElse("AI_GEMMA_ENGINE", environment.getOrElse("AI_LLM_LOCAL_ENGINE", "ollama")),
-      endpoint = URI.create(endpoint),
-      fallbackEndpoint = fallback.map(URI.create),
-      model = model,
-      timeoutSeconds = timeout,
-      maxConcurrency = concurrency
-    )
-
   private def _config_string(
     configuration: ResolvedConfiguration,
     leaves: String*
@@ -87,9 +73,6 @@ object GemmaConfig:
       .flatMap(key => Try(RuntimeConfig.getString(configuration, key)).toOption.flatten)
       .map(_.trim)
       .find(_.nonEmpty)
-
-  // cncf-car-lint: ignore provider/bootstrap compatibility fallback
-  private def _bootstrap_environment: scala.collection.immutable.Map[String, String] = sys.env
 
 private object GemmaSupport:
   def endpoints(config: GemmaRuntimeConfig): Vector[URI] =

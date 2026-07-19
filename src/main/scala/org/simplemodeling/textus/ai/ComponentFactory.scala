@@ -18,7 +18,7 @@ import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConc
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul. 19, 2026
+ * @version Jul. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -103,9 +103,9 @@ object ComponentFactory:
     profiles: AiProfileConfig,
     concurrencystate: AiConcurrencyAdmissionState
   ): Component =
-    val gemma = configuration.flatMap(GemmaConfig.fromConfiguration).getOrElse(GemmaConfig.fromEnvironment())
-    val openai = configuration.flatMap(OpenAiConfig.fromConfiguration).orElse(OpenAiConfig.fromEnvironment())
-    val google = configuration.flatMap(GoogleConfig.fromConfiguration).orElse(GoogleConfig.fromEnvironment())
+    val gemma = configuration.flatMap(GemmaConfig.fromConfiguration).getOrElse(GemmaConfig.default)
+    val openai = configuration.flatMap(OpenAiConfig.fromConfiguration)
+    val google = configuration.flatMap(GoogleConfig.fromConfiguration)
     val codex = codexconfig.orElse(configuration.flatMap { value =>
       CodexConfig.fromConfiguration(value, codexExecutionProfiles(profiles))
     })

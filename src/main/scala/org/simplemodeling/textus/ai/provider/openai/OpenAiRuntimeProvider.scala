@@ -62,21 +62,8 @@ object OpenAiConfig:
           "cncf.ai.openai.timeout-seconds",
           "cncf.runtime.ai.openai.timeout-seconds"
         )).headOption
-          .orElse(sys.env.get("AI_OPENAI_TIMEOUT_SECONDS"))
           .flatMap(_.toLongOption)
           .getOrElse(30L)
-      )
-
-  def fromEnvironment(): Option[OpenAiRuntimeConfig] =
-    for
-      apiKey <- sys.env.get("OPENAI_API_KEY").orElse(sys.env.get("AI_OPENAI_API_KEY"))
-      model <- sys.env.get("AI_OPENAI_MODEL").orElse(sys.env.get("AI_LLM_MODEL"))
-    yield
-      OpenAiRuntimeConfig(
-        endpoint = URI.create(sys.env.getOrElse("AI_OPENAI_ENDPOINT", "https://api.openai.com")),
-        apiKey = apiKey,
-        model = model,
-        timeoutSeconds = sys.env.get("AI_OPENAI_TIMEOUT_SECONDS").flatMap(_.toLongOption).getOrElse(30L)
       )
 
   private def _config_strings(

@@ -62,21 +62,8 @@ object GoogleConfig:
           "cncf.ai.google.timeout-seconds",
           "cncf.runtime.ai.google.timeout-seconds"
         )).headOption
-          .orElse(sys.env.get("AI_GOOGLE_TIMEOUT_SECONDS"))
           .flatMap(_.toLongOption)
           .getOrElse(30L)
-      )
-
-  def fromEnvironment(): Option[GoogleRuntimeConfig] =
-    for
-      apiKey <- sys.env.get("GOOGLE_API_KEY").orElse(sys.env.get("GEMINI_API_KEY")).orElse(sys.env.get("AI_GOOGLE_API_KEY"))
-      model <- sys.env.get("AI_GOOGLE_MODEL").orElse(sys.env.get("AI_LLM_MODEL"))
-    yield
-      GoogleRuntimeConfig(
-        endpoint = URI.create(sys.env.getOrElse("AI_GOOGLE_ENDPOINT", "https://generativelanguage.googleapis.com")),
-        apiKey = apiKey,
-        model = model,
-        timeoutSeconds = sys.env.get("AI_GOOGLE_TIMEOUT_SECONDS").flatMap(_.toLongOption).getOrElse(30L)
       )
 
   private def _config_strings(

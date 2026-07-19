@@ -32,18 +32,20 @@ this closure adds the registration correction without reverting it.
 
 ## Validation
 
-- `sbt --batch test`: 93 Textus AI tests passed.
+- `sbt --batch test`: 95 Textus AI tests passed.
 - `sbt --batch test` in `cloud-native-component-framework` passed with the new
   AiRunner registration SPI specification.
 - CAR lint completed without `FAIL` entries.
-- CAR lint residual warnings are pre-existing direct ambient-environment access
-  in Gemma/Google/OpenAI providers and an absent ABI baseline; they are outside
-  this Phase 4 migration slice.
+- CAR lint residual warnings are an absent ABI baseline and the development
+  `sbt-cozy` SNAPSHOT dependency; they are outside this Phase 4 migration
+  slice.
 - The Jul. 19 release follow-up strengthened executable evidence for the
   bootstrap ordering boundary. It does not reopen Phase 4 or change the
   application-purpose contract.
 - The Jul. 20 release follow-up adds the managed Codex CLI compatibility gate
   for GPT-5.6 profiles. It does not reopen Phase 4 or change its contracts.
+- The Jul. 20 configuration-boundary follow-up removes ambient environment
+  provider configuration. It does not reopen Phase 4 or change its contracts.
 
 ## Deferred Work
 
