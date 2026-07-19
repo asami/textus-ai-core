@@ -16,6 +16,7 @@ import org.goldenport.configuration.ConfigurationValue
 import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement}
 import org.goldenport.record.Record
 import org.simplemodeling.textus.ai.provider.codex.CodexRuntimeConfig
+import org.simplemodeling.textus.ai.provider.gemma.OllamaDockerExecutionBinding
 import org.simplemodeling.textus.ai.runtime.TextusAiRunnerProvider
 import org.scalatest.GivenWhenThen
 import org.scalatest.OptionValues
@@ -132,21 +133,32 @@ final class ComponentFactorySpec
         )),
         ConfigurationTrace.empty
       )))
+      val anthropicconfigured = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.anthropic.api-key" -> ConfigurationValue.StringValue("test-anthropic-key")
+        )),
+        ConfigurationTrace.empty
+      )))
       val contract = SpiContract("ai-runner", classOf[AiRunner])
       val openaiselection = SpiSelection(provider = Some("openai"))
       val googleselection = SpiSelection(provider = Some("google"))
+      val anthropicselection = SpiSelection(provider = Some("anthropic"))
 
       When("the component resolves commercial AI runners")
       val emptyopenai = empty.port.get[TextusAiRunnerProvider].value.provide(contract, openaiselection)
       val emptygoogle = empty.port.get[TextusAiRunnerProvider].value.provide(contract, googleselection)
+      val emptyanthropic = empty.port.get[TextusAiRunnerProvider].value.provide(contract, anthropicselection)
       val configuredopenai = openaiconfigured.port.get[TextusAiRunnerProvider].value.provide(contract, openaiselection)
       val configuredgoogle = googleconfigured.port.get[TextusAiRunnerProvider].value.provide(contract, googleselection)
+      val configuredanthropic = anthropicconfigured.port.get[TextusAiRunnerProvider].value.provide(contract, anthropicselection)
 
       Then("only explicit merged configuration admits the commercial provider")
       emptyopenai.isFaillure shouldBe true
       emptygoogle.isFaillure shouldBe true
+      emptyanthropic.isFaillure shouldBe true
       configuredopenai.isSuccess shouldBe true
       configuredgoogle.isSuccess shouldBe true
+      configuredanthropic.isSuccess shouldBe true
     }
 
     "install the enabled Codex capability into the component execution scope" in {
@@ -204,6 +216,165 @@ final class ComponentFactorySpec
       record.toOption.map(_.effectiveArguments) shouldBe Some(Vector("exec", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "--output-schema", "schema.json", "-"))
       unsafe.isFaillure shouldBe true
       relocated.isFaillure shouldBe true
+      component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
+    }
+
+    "install Gemma/Ollama Docker capabilities when the Gemma profile has no endpoint override" in {
+      Given("a Gemma runtime profile with Docker image and container overrides")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.gemma.docker.image" -> ConfigurationValue.StringValue("example/ollama:test"),
+          "textus.ai.gemma.docker.container-name" -> ConfigurationValue.StringValue("textus-ai-test-ollama"),
+          "textus.ai.gemma.docker.volume-name" -> ConfigurationValue.StringValue("textus-ai-test-models"),
+          "textus.ai.gemma.docker.port" -> ConfigurationValue.StringValue("12434")
+        )),
+        ConfigurationTrace.empty
+      )
+      val subsystem = new Subsystem(
+        name = "textus-ai-ollama-scope-spec",
+        configuration = configuration
+      )
+      val component = new ComponentFactory().create(ComponentCreate(subsystem, ComponentOrigin.Main)).primary
+      val parent = ScopeContext(
+        ScopeKind.Runtime,
+        "textus-ai-ollama-scope-spec",
+        None,
+        summon[ExecutionContext].observability
+      )
+      component.withScopeContext(parent)
+      val inspect = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.inspectCapability).toOption.get
+      val run = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.runCapability).toOption.get
+      val pull = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.pullCapability(0)).toOption.get
+
+      When("the component scope admits its trusted Docker lifecycle commands")
+      val inspected = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(inspect))
+      val started = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(run))
+      val model = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(pull))
+      val unsafe = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(run, Vector("--privileged")))
+
+      Then("only the profile-owned image, container, volume, port, and model are admitted")
+      inspected.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
+        "container", "inspect", "--format", "{{.State.Running}}", "textus-ai-test-ollama"
+      ))
+      started.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
+        "run", "--detach", "--name", "textus-ai-test-ollama", "--publish", "127.0.0.1:12434:11434",
+        "--volume", "textus-ai-test-models:/root/.ollama", "example/ollama:test"
+      ))
+      model.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
+        "exec", "textus-ai-test-ollama", "ollama", "pull", "gemma:2b"
+      ))
+      unsafe.isFaillure shouldBe true
+      component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
+    }
+
+    "skip Gemma/Ollama Docker capabilities for an explicit external endpoint" in {
+      Given("a Gemma profile configured to use an externally managed Ollama endpoint")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.gemma.endpoint" -> ConfigurationValue.StringValue("http://ollama.example:11434")
+        )),
+        ConfigurationTrace.empty
+      )
+      val subsystem = new Subsystem(
+        name = "textus-ai-external-ollama-scope-spec",
+        configuration = configuration
+      )
+      val component = new ComponentFactory().create(ComponentCreate(subsystem, ComponentOrigin.Main)).primary
+      val parent = ScopeContext(
+        ScopeKind.Runtime,
+        "textus-ai-external-ollama-scope-spec",
+        None,
+        summon[ExecutionContext].observability
+      )
+      component.withScopeContext(parent)
+      val inspect = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.inspectCapability).toOption.get
+
+      When("the local Docker lifecycle capability is requested")
+      val result = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(inspect))
+
+      Then("the external endpoint takes precedence and Docker is not installed")
+      result.isFaillure shouldBe true
+      component.scopeContext.processExecutionDriverOption shouldBe empty
+    }
+
+    "combine Gemma Docker and Codex CLI capabilities for a composite profile" in {
+      Given("a Gemma-simple Codex profile with an enabled Codex CLI runtime")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-simple-codex-cli"),
+          "textus.ai.codex.enabled" -> ConfigurationValue.StringValue("true"),
+          "textus.ai.codex.executable" -> ConfigurationValue.StringValue("/runtime/codex-cli")
+        )),
+        ConfigurationTrace.empty
+      )
+      val subsystem = new Subsystem(
+        name = "textus-ai-composite-local-scope-spec",
+        configuration = configuration
+      )
+      val component = new ComponentFactory().create(ComponentCreate(subsystem, ComponentOrigin.Main)).primary
+      val parent = ScopeContext(
+        ScopeKind.Runtime,
+        "textus-ai-composite-local-scope-spec",
+        None,
+        summon[ExecutionContext].observability
+      )
+      component.withScopeContext(parent)
+      val ollama = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.inspectCapability).toOption.get
+      val codex = ProcessCapabilityId.parseC("codex-cli").toOption.get
+
+      When("the composite runtime admits both local backends")
+      val ollamaresult = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(ollama))
+      val codexresult = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(codex, Vector("-")))
+
+      Then("the shared component scope retains each provider's fixed capability")
+      ollamaresult.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
+        "container", "inspect", "--format", "{{.State.Running}}", "textus-ai-ollama"
+      ))
+      codexresult.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
+        "exec", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "-"
+      ))
+    }
+
+    "install the enabled Claude Code capability from its runtime profile" in {
+      Given("an enabled Claude Code runtime with a trusted executable location")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("claude-code"),
+          "textus.ai.claude.enabled" -> ConfigurationValue.StringValue("true"),
+          "textus.ai.claude.executable" -> ConfigurationValue.StringValue("/runtime/claude")
+        )),
+        ConfigurationTrace.empty
+      )
+      val subsystem = new Subsystem(
+        name = "textus-ai-claude-code-scope-spec",
+        configuration = configuration
+      )
+      val component = new ComponentFactory().create(ComponentCreate(subsystem, ComponentOrigin.Main)).primary
+      val parent = ScopeContext(
+        ScopeKind.Runtime,
+        "textus-ai-claude-code-scope-spec",
+        None,
+        summon[ExecutionContext].observability
+      )
+      component.withScopeContext(parent)
+      val capability = ProcessCapabilityId.parseC("claude-code-profile-runtime-standard-work").toOption.get
+
+      When("the runtime resolves its standard-work process request")
+      val result = ProcessExecutionAdmission.resolveC(
+        component.scopeContext,
+        ProcessExecutionRequest(capability, Vector("-"))
+      )
+
+      Then("only Claude Code print-mode JSON arguments and the profile model are admitted")
+      result.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
+        "-p", "--output-format", "json", "--model", "sonnet", "--max-turns", "1", "-"
+      ))
       component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
     }
 

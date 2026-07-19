@@ -22,7 +22,8 @@ final case class GemmaRuntimeConfig(
   fallbackEndpoint: Option[URI] = None,
   model: String = "gemma:2b",
   timeoutSeconds: Long = 30L,
-  maxConcurrency: Int = 2
+  maxConcurrency: Int = 2,
+  bootstrap: Option[OllamaDockerBootstrap] = None
 )
 
 object GemmaConfig:
@@ -56,6 +57,11 @@ object GemmaConfig:
       )
     )
   }
+
+  def endpointFromConfiguration(
+    configuration: ResolvedConfiguration
+  ): Option[String] =
+    _config_string(configuration, "endpoint")
 
   private def _config_string(
     configuration: ResolvedConfiguration,
@@ -103,6 +109,7 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
     given ExecutionContext = context
     for
       _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
+      _ <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.unit)
       model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
       body = Json.obj(
         "model" -> Json.fromString(model),
@@ -141,6 +148,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
     given ExecutionContext = context
     for
       _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
+      _ <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.unit)
       model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
       body = Json.obj(
         "model" -> Json.fromString(model),

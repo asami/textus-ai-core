@@ -10,9 +10,11 @@ import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.cncf.unitofwork.UnitOfWorkOp
 import org.goldenport.protocol.Property
+import org.goldenport.record.Record
 
 private[textus] object AiRequestProperties:
   val CODEX_EXECUTION_PROFILE = "ai.textus.codex.execution-profile"
+  val CLAUDE_CODE_EXECUTION_PROFILE = "ai.textus.claude-code.execution-profile"
 
   def model(
     properties: Vector[Property],
@@ -62,6 +64,8 @@ private[textus] object AiRequestProperties:
       "cncf.ai.google.timeout-seconds",
       "textus.ai.openai.timeout-seconds",
       "cncf.ai.openai.timeout-seconds",
+      "textus.ai.anthropic.timeout-seconds",
+      "cncf.ai.anthropic.timeout-seconds",
       "timeout-seconds",
       "timeoutSeconds"
     )).flatMap(_.toLongOption).filter(_ > 0)
@@ -139,12 +143,30 @@ private[textus] object AiRequestProperties:
         )
     }
 
+  def requireNoRecordSchema(
+    provider: String,
+    recordSchema: Option[Record]
+  ): Consequence[Unit] =
+    recordSchema match
+      case Some(_) =>
+        Consequence.configurationInvalid(
+          s"AI structured record generation is not supported by provider '$provider'"
+        )
+      case None => Consequence.unit
+
   // This marker is installed only after purpose-profile resolution. Caller
   // properties must not select a managed-process capability.
+  def withoutInternalManagedCliProfile(
+    properties: Vector[Property]
+  ): Vector[Property] =
+    properties.filterNot { property =>
+      Set(CODEX_EXECUTION_PROFILE, CLAUDE_CODE_EXECUTION_PROFILE).contains(property.name)
+    }
+
   def withoutInternalCodexProfile(
     properties: Vector[Property]
   ): Vector[Property] =
-    properties.filterNot(_.name.equalsIgnoreCase(CODEX_EXECUTION_PROFILE))
+    withoutInternalManagedCliProfile(properties)
 
   def withoutOpenAiReasoningOverride(
     properties: Vector[Property]
@@ -161,6 +183,11 @@ private[textus] object AiRequestProperties:
     properties: Vector[Property]
   ): Option[String] =
     _property_string(properties, Vector(CODEX_EXECUTION_PROFILE))
+
+  def claudeCodeExecutionProfile(
+    properties: Vector[Property]
+  ): Option[String] =
+    _property_string(properties, Vector(CLAUDE_CODE_EXECUTION_PROFILE))
 
   private def _property_string(
     properties: Vector[Property],

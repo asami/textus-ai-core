@@ -23,7 +23,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul. 19, 2026
+ * @version Jul. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -520,7 +520,7 @@ final class TextusAiRunner(
     resolution: AiProfileResolution
   ): Vector[Property] = {
     val requirement = resolution.requirement
-    val modelproperty = Option.when(!resolution.isCodexProfile)(requirement.model).flatten.map { value =>
+    val modelproperty = Option.when(!resolution.isManagedCliProfile)(requirement.model).flatten.map { value =>
       Property("ai.model", value, None)
     }
     val purposeproperty = requirement.purpose.map(value => Property("ai.purpose", value, None))
@@ -822,7 +822,7 @@ final class TextusAiRunner(
 
   private def _default_mode(provider: String): String =
     provider match {
-      case "google" | "openai" => "remote"
+      case "google" | "openai" | "anthropic" => "remote"
       case _ => "local"
     }
 
@@ -830,6 +830,7 @@ final class TextusAiRunner(
     provider match {
       case "google" => "gemini"
       case "openai" => "gpt"
+      case "anthropic" => "claude"
       case "codex" => "codex-cli"
       case _ => "ollama"
     }
@@ -983,7 +984,7 @@ final class TextusAiRunnerProvider(
 
   private def _default_mode(provider: String): String =
     provider match {
-      case "google" | "openai" => "remote"
+      case "google" | "openai" | "anthropic" => "remote"
       case _ => "local"
     }
 
@@ -991,6 +992,7 @@ final class TextusAiRunnerProvider(
     provider match {
       case "google" => "gemini"
       case "openai" => "gpt"
+      case "anthropic" => "claude"
       case _ => "ollama"
     }
 

@@ -14,11 +14,18 @@ object CodexExecutionBinding {
 
   def admissionC(config: CodexRuntimeConfig): Consequence[ProcessExecutionAdmission] =
     for {
-      definitions <- _definitions_c(config)
+      binding <- definitionsAndGrantsC(config)
+      (definitions, grants) = binding
       policy <- ProcessExecutionPolicy.createC(definitions)
-      grants <- _grants_c(definitions)
       admission <- ProcessExecutionAdmission.createC(policy, grants)
     } yield admission
+
+  private[ai] def definitionsAndGrantsC(
+    config: CodexRuntimeConfig
+  ): Consequence[(Vector[ProcessProgramDefinition], Vector[ProcessExecutionGrant])] =
+    _definitions_c(config).flatMap { definitions =>
+      _grants_c(definitions).map(grants => definitions -> grants)
+    }
 
   private def _definitions_c(
     config: CodexRuntimeConfig

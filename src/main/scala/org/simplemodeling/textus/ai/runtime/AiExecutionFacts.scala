@@ -83,7 +83,7 @@ private[textus] object AiAccountingFacts {
  * Provider-neutral execution metadata normalization for Textus AI responses.
  *
  * @since   Jul. 16, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] object AiExecutionFacts {
@@ -290,9 +290,14 @@ private[textus] object AiExecutionFacts {
           "openai.usage.cached_input_tokens" | "openai.usage.reasoning_tokens" |
           "openai.request_id" |
           "openai.web_search_calls" => true
+      case "anthropic.response_id" | "anthropic.finish_reason" |
+          "anthropic.usage.input_tokens" | "anthropic.usage.output_tokens" |
+          "anthropic.usage.total_tokens" | "anthropic.usage.cached_input_tokens" => true
       case "gemma.finish_reason" |
           "gemma.usage.input_tokens" | "gemma.usage.output_tokens" | "gemma.usage.total_tokens" => true
       case "codex.finish_reason" => true
+      case "claude.finish_reason" | "claude.session_id" |
+          "claude.duration_ms" | "claude.num_turns" | "claude.profile" => true
       case _ => false
     }
 

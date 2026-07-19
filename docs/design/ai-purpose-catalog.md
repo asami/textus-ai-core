@@ -68,10 +68,18 @@ for an unregistered application name.
 
 ## Runtime Profiles
 
-Textus AI ships `codex-cli` and `gemini` runtime profiles. `textus.ai.profile`
-selects the profile; approved `textus.ai.execution-classes.<class>.*` settings
-tune that profile after ordinary CNCF configuration merge. Provider binding and
-tools remain runtime-owned.
+Textus AI ships `gemma`, `codex-cli`, `claude-code`, `anthropic`, and `gemini` runtime profiles, plus
+`gemma-simple-gemini` and `gemma-simple-codex-cli`. The composite profiles bind
+only `simple-work` to local Gemma and keep their remaining class defaults from
+Gemini or Codex CLI. `textus.ai.profile` selects the profile; approved
+`textus.ai.execution-classes.<class>.*` settings tune that profile after
+ordinary CNCF configuration merge. Provider binding and tools remain
+runtime-owned.
+
+`anthropic` selects the direct remote Messages API provider. `claude-code`
+selects the separate local managed-process provider. They are intentionally not
+aliases: the former uses an operator-supplied API key, while the latter uses the
+installed CLI's own authentication and execution boundary.
 
 ## Registration Defaults And Tuning
 

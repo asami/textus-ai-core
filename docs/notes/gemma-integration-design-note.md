@@ -1,8 +1,8 @@
 Gemma Integration Design Note for CNCF TextusAi Component (Recommended Architecture)
 =============================================================================
 
-status=draft
-updated_at=2026-04-04
+status=implemented
+updated_at=2026-07-20
 tag=cncf, ai, llm, gemma, adapter, docker, ollama
 
 # Overview
@@ -124,48 +124,34 @@ Instead, it MUST delegate inference to:
 
 ---
 
-# Standard Deployment (Recommended)
+# Standard Deployment (Implemented)
 
-## Docker Compose Template
+## Runtime-Owned Docker Provisioning
 
-version: "3.8"
+Selecting `textus.ai.profile: gemma` with no explicit Gemma endpoint installs
+component-owned CNCF managed-process capabilities for `docker container inspect`,
+`docker start`, `docker run`, and fixed `docker exec ... ollama pull` commands.
+Textus AI creates or starts its owned Ollama container and prepares every model
+selected by the profile's execution classes.
 
-services:
+The default container uses `ollama/ollama:latest`, container and volume
+`textus-ai-ollama`, and `127.0.0.1:11434`. Operators can override the Docker
+executable, image, container name, volume name, host, port, and startup timeout
+through `textus.ai.gemma.docker.*`. Application callers cannot supply Docker
+arguments, image names, container names, or models.
 
-  cncf:
-    build: .
-    depends_on:
-      - ollama
-    # Supply textus.ai.gemma.* through normal merged CNCF configuration.
-
-  ollama:
-    image: ollama/ollama
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: always
-
-volumes:
-  ollama_data:
-
----
-
-## Model Initialization
-
-After container startup, Gemma must be pulled once:
-
-docker exec -it ollama ollama pull gemma:2b
-
-This step prepares the local model for inference.
+An explicit `textus.ai.gemma.endpoint` selects an externally managed Ollama
+service and disables Textus AI Docker provisioning.
 
 ---
 
 ## Runtime Endpoint
 
-The standard local endpoint is:
+The runtime-owned local endpoint is:
 
-http://ollama:11434/api/generate
+http://127.0.0.1:11434/api/generate
 
-This MUST be treated as the canonical local inference endpoint.
+An explicit endpoint configuration takes precedence over this default.
 
 ---
 
@@ -209,20 +195,17 @@ execution `Port`.
 
 textus:
   ai:
+    profile: gemma
     gemma:
-      provider: gemma
-      mode: local
-      engine: ollama
-      endpoint: http://ollama:11434
-      model: gemma:2b
+      docker:
+        image: ollama/ollama:latest
+        container-name: textus-ai-ollama
+        volume-name: textus-ai-ollama
 
 ## Mode Semantics
 
-The `textus.ai.gemma.mode` setting controls endpoint selection behavior.
-
-- `local`: use the local endpoint first; fallback is allowed when configured
-- `local-first`: use the local endpoint first, then try the fallback endpoint
-- `remote`: use the primary endpoint only; do not use fallback
+An explicit `textus.ai.gemma.endpoint` controls endpoint selection behavior.
+When it is absent, the selected Gemma profile owns local Docker provisioning.
 
 ---
 
@@ -231,8 +214,8 @@ The `textus.ai.gemma.mode` setting controls endpoint selection behavior.
 - provider selects model family
 - mode selects local or remote execution
 - local.engine selects runtime (default: ollama)
-- endpoint defines connection target
-- model defines runtime model identifier
+- endpoint defines an externally managed connection target
+- model is selected by the runtime profile and execution class
 
 ---
 

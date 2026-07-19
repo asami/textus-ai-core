@@ -26,9 +26,12 @@ textus:
         max-output-tokens: 240
 ```
 
-The supplied profiles are `gemini` and `codex-cli`. Standard purposes are
-`software-analysis`, `software-design`, `software-implementation`,
-`command-execution`, `web-analysis`, and `structured-extraction`.
+The supplied profiles are `gemma`, `gemini`, `codex-cli`, `claude-code`,
+`anthropic`, `gemma-simple-gemini`, and `gemma-simple-codex-cli`. The composite
+profiles use local Gemma only for `simple-work`; all other execution classes use
+their named Gemini or Codex CLI defaults. Standard purposes are `software-analysis`,
+`software-design`, `software-implementation`, `command-execution`,
+`web-analysis`, and `structured-extraction`.
 
 An application registers its own domain purposes through its output
 `Component.Port` during bootstrap:
@@ -79,7 +82,46 @@ effective standard purpose, runtime profile, and execution class.
 Connection credentials and endpoints remain ordinary CNCF configuration. Keep
 credentials in user-local configuration and provider-independent runtime policy
 in project configuration. The current provider adapters are Gemma/Ollama,
-OpenAI, Google Gemini, and an opt-in Codex CLI runtime.
+OpenAI, Google Gemini, Anthropic Messages API, and opt-in Codex and Claude Code
+CLI runtimes.
+
+Gemma/Ollama uses the local `gemma` profile. With no endpoint configuration,
+Textus AI starts its owned Ollama Docker container and pulls the models required
+by that profile. The container lifecycle uses CNCF managed-process capabilities;
+callers cannot provide Docker arguments, images, or models.
+
+```yaml
+textus:
+  ai:
+    profile: gemma
+```
+
+The profile supplies `gemma:2b` by default. Set an execution-class model only
+when the deployment needs a different approved local model:
+
+```yaml
+textus:
+  ai:
+    execution-classes:
+      standard-work:
+        model: gemma3:4b
+```
+
+Use an explicit endpoint for an externally managed Ollama service. It takes
+precedence over Docker provisioning:
+
+```yaml
+textus:
+  ai:
+    profile: gemma
+    gemma:
+      endpoint: http://ollama.example:11434
+```
+
+The managed-container defaults are `ollama/ollama:latest`, container and volume
+`textus-ai-ollama`, and host port `11434`. Operators may override them with
+`textus.ai.gemma.docker.image`, `container-name`, `volume-name`, `host`, `port`,
+`executable`, and `startup-timeout-seconds`.
 
 Codex CLI requires explicit enablement and an absolute executable path:
 
@@ -98,6 +140,32 @@ do not invoke a shell or pass Codex model, reasoning, or Web flags directly.
 Profiles selecting `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` require
 Codex CLI `0.144.0` or later. Textus AI verifies that requirement through a
 separate managed `codex --version` capability before it submits a prompt.
+
+Claude Code is also opt-in and requires an absolute executable path. Textus AI
+uses Claude Code non-interactive print mode with JSON output and a profile-owned
+`sonnet` or `opus` model alias. It does not install, authenticate, or execute
+Claude Code during runtime assembly:
+
+```yaml
+textus:
+  ai:
+    profile: claude-code
+    claude:
+      enabled: true
+      executable: /usr/local/bin/claude
+```
+
+Anthropic Messages API is a separate remote provider from Claude Code. It uses
+an API key configured by the operator; the selected runtime profile resolves
+the model, and selecting `anthropic` never starts a local CLI process:
+
+```yaml
+textus:
+  ai:
+    profile: anthropic
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY}
+```
 
 Provider-local request options use `Property` values. Runtime-owned provider
 selection and logical tools remain resolved from the selected profile for an

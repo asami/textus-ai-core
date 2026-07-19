@@ -29,6 +29,8 @@ import org.scalatest.wordspec.AnyWordSpec
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ComponentFactory
 import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
+import org.simplemodeling.textus.ai.provider.anthropic.{AnthropicConfig, AnthropicGenerateService, AnthropicRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeGenerateService, ClaudeCodeRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaOllamaGenerateService, GemmaRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.google.{GoogleConfig, GoogleGenerateService, GoogleRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.{OpenAiGenerateService, OpenAiRuntimeConfig}
@@ -303,6 +305,42 @@ final class TextusAiRunnerSpec
       Then("the runtime profile chooses the provider and model for that purpose")
       generated.toOption.get.text shouldBe "purpose:linear-feature.worker.anchor-plan;model:gemini-worker"
       generated.toOption.get.model shouldBe Some("google")
+    }
+
+    "route a Gemma profile purpose through the registered Ollama binding" in {
+      Given("a Gemma profile and the existing Gemma/Ollama HTTP bindings")
+      val driver = new _FakeHttpDriver(
+        """{"response":"local answer","done_reason":"stop","prompt_eval_count":7,"eval_count":3}"""
+      )
+      given ExecutionContext = _context(driver)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map("textus.ai.profile" -> ConfigurationValue.StringValue("gemma"))),
+        ConfigurationTrace.empty
+      )
+      val component = new Component() {}
+        .withBinding("generate", AiRuntimeGenerateBinding.create(Some(GemmaConfig.default), None, None, None))
+        .withBinding("chat", AiRuntimeChatBinding.create(Some(GemmaConfig.default), None, None, None))
+      val runner = new TextusAiRunnerProvider(
+        component,
+        SpiSelection(),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("a caller specifies only the standard simple-work purpose")
+      val response = runner.generate(AiGenerateRequest(
+        "answer locally",
+        requirement = AiRunnerRequirement(purpose = Some("simple-work"))
+      )).toOption.get
+
+      Then("the profile-owned Gemma model reaches the registered Ollama endpoint")
+      response.text shouldBe "local answer"
+      response.model shouldBe Some("gemma:2b")
+      response.metadata(AiExecutionFacts.PROVIDER) shouldBe "gemma"
+      driver.calls.head should include ("/api/generate")
+      driver.body.value should include ("\"model\":\"gemma:2b\"")
     }
 
     "reject a caller attempt to override an application-purpose runtime binding" in {
@@ -881,6 +919,67 @@ final class TextusAiRunnerSpec
       response.metadata("ai.provider_tools") shouldBe "web_search"
       response.metadata("openai.web_search_calls") shouldBe "1"
       response.metadata("openai.response_id") shouldBe "resp_test"
+    }
+
+    "send Anthropic API requests through Messages without selecting Claude Code" in {
+      Given("an Anthropic Messages service with a fake HTTP driver")
+      val driver = new _FakeHttpDriver(
+        """{"id":"msg_test","content":[{"type":"text","text":"anthropic answer"}],"stop_reason":"end_turn","usage":{"input_tokens":11,"cache_read_input_tokens":2,"output_tokens":7}}"""
+      )
+      given ExecutionContext = _context(driver)
+      val service = new AnthropicGenerateService(
+        AnthropicRuntimeConfig(
+          endpoint = URI.create("https://api.anthropic.com"),
+          apiKey = "test-anthropic-key",
+          model = "claude-test"
+        ),
+        summon[ExecutionContext]
+      )
+
+      When("a plain generate request uses the direct Anthropic API")
+      val response = service.generate(GenerateRequest("direct API prompt", maxTokens = Some(120))).toOption.get
+      val toolRequest = service.generate(GenerateRequest(
+        "tool prompt",
+        properties = Vector(Property("ai.tools", "web_search", None))
+      ))
+      val structuredRequest = service.generate(GenerateRequest(
+        "structured prompt",
+        recordSchema = Some(Record.dataAuto("type" -> "object"))
+      ))
+
+      Then("the provider uses Messages credentials and returns safe response facts")
+      driver.calls.head should include ("/v1/messages")
+      driver.headers.get("x-api-key") shouldBe Some("test-anthropic-key")
+      driver.headers.get("anthropic-version") shouldBe Some("2023-06-01")
+      driver.body.value should include ("\"model\":\"claude-test\"")
+      driver.body.value should include ("\"max_tokens\":120")
+      response.text shouldBe "anthropic answer"
+      response.metadata("anthropic.response_id") shouldBe "msg_test"
+      response.metadata("anthropic.usage.total_tokens") shouldBe "18"
+      toolRequest.isFaillure shouldBe true
+      toolRequest.toString should include ("AI tools are not supported by provider 'anthropic'")
+      structuredRequest.isFaillure shouldBe true
+      structuredRequest.toString should include ("AI structured record generation is not supported by provider 'anthropic'")
+      driver.calls should have size 1
+    }
+
+    "reject Claude Code structured records before process admission" in {
+      Given("a Claude Code service without an admitted execution profile")
+      given ExecutionContext = ExecutionContext.create()
+      val service = new ClaudeCodeGenerateService(
+        ClaudeCodeRuntimeConfig("/usr/local/bin/claude"),
+        summon[ExecutionContext]
+      )
+
+      When("a structured record request is made")
+      val result = service.generate(GenerateRequest(
+        "structured prompt",
+        recordSchema = Some(Record.dataAuto("type" -> "object"))
+      ))
+
+      Then("it fails before attempting a local process execution")
+      result.isFaillure shouldBe true
+      result.toString should include ("AI structured record generation is not supported by provider 'claude'")
     }
 
     "map Gemma output and timeout policies to the CNCF HTTP boundary" in {
@@ -1494,6 +1593,26 @@ final class TextusAiRunnerSpec
       Then("both use the code-owned timeout default without ambient input")
       openai.map(_.timeoutSeconds) shouldBe Some(30L)
       google.map(_.timeoutSeconds) shouldBe Some(30L)
+    }
+
+    "read direct Anthropic API configuration with its model fallback" in {
+      Given("merged configuration for the direct Anthropic Messages API")
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.anthropic.api-key" -> ConfigurationValue.StringValue("test-anthropic-key"),
+          "textus.ai.anthropic.timeout-seconds" -> ConfigurationValue.StringValue("45")
+        )),
+        ConfigurationTrace.empty
+      )
+
+      When("the direct API configuration is resolved")
+      val config = AnthropicConfig.fromConfiguration(configuration)
+
+      Then("it remains a remote Claude API runtime")
+      config.map(_.provider) shouldBe Some("anthropic")
+      config.map(_.engine) shouldBe Some("claude")
+      config.map(_.model) shouldBe Some(AnthropicConfig.defaultModel)
+      config.map(_.timeoutSeconds) shouldBe Some(45L)
     }
 
     "read Gemma/Ollama endpoint and local runtime selection from CNCF configuration" in {

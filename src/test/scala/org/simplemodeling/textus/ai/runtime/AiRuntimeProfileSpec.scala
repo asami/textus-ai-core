@@ -8,7 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 18, 2026
- * @version Jul. 19, 2026
+ * @version Jul. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiRuntimeProfileSpec
@@ -59,6 +59,82 @@ final class AiRuntimeProfileSpec
       resolution.toOption.flatMap(_.requirement.model) shouldBe Some("gemini-project-work")
       resolution.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardWork)
       resolution.toOption.flatMap(_.policy.maxOutputTokens) shouldBe Some(240)
+    }
+
+    "resolve every standard purpose through the built-in Gemma/Ollama defaults" in {
+      Given("a Gemma runtime profile with an operator model override")
+      val profiles = _profiles(
+        "textus.ai.profile" -> "gemma",
+        "textus.ai.execution-classes.standard-work.model" -> "gemma3:4b"
+      )
+
+      When("the simple and standard-work purposes are resolved")
+      val simple = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("simple-work")))
+      val standard = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+
+      Then("the profile owns local Ollama selection while configuration tunes its model")
+      simple.toOption.flatMap(_.runtimeProfile) shouldBe Some("gemma")
+      simple.toOption.flatMap(_.requirement.provider) shouldBe Some("gemma")
+      simple.toOption.flatMap(_.requirement.mode) shouldBe Some("local")
+      simple.toOption.flatMap(_.requirement.engine) shouldBe Some("ollama")
+      simple.toOption.flatMap(_.requirement.model) shouldBe Some("gemma:2b")
+      standard.toOption.flatMap(_.requirement.model) shouldBe Some("gemma3:4b")
+    }
+
+    "resolve built-in simple-work Gemma composite profiles" in {
+      Given("the supplied Gemma-simple composite profiles")
+      val gemini = _profiles("textus.ai.profile" -> "gemma-simple-gemini")
+      val codex = _profiles("textus.ai.profile" -> "gemma-simple-codex-cli")
+
+      When("simple and standard purposes are resolved")
+      val geminisimple = gemini.resolveRequired(AiRunnerRequirement(purpose = Some("simple-work")))
+      val geministandard = gemini.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+      val codexsimple = codex.resolveRequired(AiRunnerRequirement(purpose = Some("simple-work")))
+      val codexstandard = codex.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+
+      Then("only simple-work is local Gemma and the remaining classes use the named provider")
+      geminisimple.toOption.flatMap(_.requirement.provider) shouldBe Some("gemma")
+      geminisimple.toOption.flatMap(_.requirement.model) shouldBe Some("gemma:2b")
+      geministandard.toOption.flatMap(_.requirement.provider) shouldBe Some("google")
+      geministandard.toOption.flatMap(_.requirement.model) shouldBe Some("gemini-2.5-flash")
+      codexsimple.toOption.flatMap(_.requirement.provider) shouldBe Some("gemma")
+      codexstandard.toOption.flatMap(_.requirement.provider) shouldBe Some("codex")
+      codexstandard.toOption.flatMap(_.reasoningLevel) shouldBe Some("low")
+    }
+
+    "resolve the built-in Claude Code profile through fixed model aliases" in {
+      Given("the Claude Code runtime profile")
+      val profiles = _profiles("textus.ai.profile" -> "claude-code")
+
+      When("standard and deep purposes are resolved")
+      val standard = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+      val deep = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("deep-consideration")))
+
+      Then("the profile owns local Claude Code selection and model aliases")
+      standard.toOption.flatMap(_.requirement.provider) shouldBe Some("claude")
+      standard.toOption.flatMap(_.requirement.engine) shouldBe Some("claude-code")
+      standard.toOption.flatMap(_.requirement.model) shouldBe Some("sonnet")
+      deep.toOption.flatMap(_.requirement.model) shouldBe Some("opus")
+    }
+
+    "keep direct Anthropic API and Claude Code CLI profiles distinct" in {
+      Given("the built-in direct API and managed CLI profiles")
+      val api = _profiles("textus.ai.profile" -> "anthropic")
+      val cli = _profiles("textus.ai.profile" -> "claude-code")
+
+      When("the same deep-consideration purpose is resolved")
+      val apiResolution = api.resolveRequired(AiRunnerRequirement(purpose = Some("deep-consideration")))
+      val cliResolution = cli.resolveRequired(AiRunnerRequirement(purpose = Some("deep-consideration")))
+
+      Then("the API uses remote Anthropic while the CLI uses a managed local Claude Code runtime")
+      apiResolution.toOption.flatMap(_.requirement.provider) shouldBe Some("anthropic")
+      apiResolution.toOption.flatMap(_.requirement.mode) shouldBe Some("remote")
+      apiResolution.toOption.flatMap(_.requirement.engine) shouldBe Some("claude")
+      apiResolution.toOption.flatMap(_.requirement.model) shouldBe Some("claude-opus-4-20250514")
+      cliResolution.toOption.flatMap(_.requirement.provider) shouldBe Some("claude")
+      cliResolution.toOption.flatMap(_.requirement.mode) shouldBe Some("local")
+      cliResolution.toOption.flatMap(_.requirement.engine) shouldBe Some("claude-code")
+      cliResolution.toOption.flatMap(_.requirement.model) shouldBe Some("opus")
     }
 
     "map an application purpose to its standard purpose without granting caller selection" in {

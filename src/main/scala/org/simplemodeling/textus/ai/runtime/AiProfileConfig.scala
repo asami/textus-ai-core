@@ -21,7 +21,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.application-purposes.<application-purpose>.<policy>
  *
  * @since   Jul.  4, 2026
- * @version Jul. 19, 2026
+ * @version Jul. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 /**
@@ -40,6 +40,8 @@ private[textus] final case class AiRuntimeExecution(
   tools: Vector[AiTool] = Vector.empty
 ) {
   def codexExecutionProfile: String = s"runtime-${executionClass.id}"
+
+  def claudeCodeExecutionProfile: String = s"runtime-${executionClass.id}"
 }
 
 private[textus] final case class AiRuntimeProfile(
@@ -77,6 +79,42 @@ private[textus] object AiRuntimeProfileCatalog {
       model = model
     )
 
+  private def _gemma(
+    executionclass: AiExecutionClass,
+    model: String
+  ): AiRuntimeExecution =
+    AiRuntimeExecution(
+      executionclass,
+      provider = "gemma",
+      mode = "local",
+      engine = "ollama",
+      model = model
+    )
+
+  private def _claude_code(
+    executionclass: AiExecutionClass,
+    model: String
+  ): AiRuntimeExecution =
+    AiRuntimeExecution(
+      executionclass,
+      provider = "claude",
+      mode = "local",
+      engine = "claude-code",
+      model = model
+    )
+
+  private def _anthropic(
+    executionclass: AiExecutionClass,
+    model: String
+  ): AiRuntimeExecution =
+    AiRuntimeExecution(
+      executionclass,
+      provider = "anthropic",
+      mode = "remote",
+      engine = "claude",
+      model = model
+    )
+
   val codexCli: AiRuntimeProfile = AiRuntimeProfile(
     "codex-cli",
     Map(
@@ -97,7 +135,61 @@ private[textus] object AiRuntimeProfileCatalog {
     )
   )
 
-  val profiles: Map[String, AiRuntimeProfile] = Vector(codexCli, gemini).map { profile =>
+  val gemma: AiRuntimeProfile = AiRuntimeProfile(
+    "gemma",
+    Map(
+      AiExecutionClass.SimpleWork -> _gemma(AiExecutionClass.SimpleWork, "gemma:2b"),
+      AiExecutionClass.StandardWork -> _gemma(AiExecutionClass.StandardWork, "gemma:2b"),
+      AiExecutionClass.StandardConsideration -> _gemma(AiExecutionClass.StandardConsideration, "gemma:2b"),
+      AiExecutionClass.DeepConsideration -> _gemma(AiExecutionClass.DeepConsideration, "gemma:2b")
+    )
+  )
+
+  val gemmaSimpleGemini: AiRuntimeProfile = AiRuntimeProfile(
+    "gemma-simple-gemini",
+    gemini.executions.updated(
+      AiExecutionClass.SimpleWork,
+      _gemma(AiExecutionClass.SimpleWork, "gemma:2b")
+    )
+  )
+
+  val gemmaSimpleCodexCli: AiRuntimeProfile = AiRuntimeProfile(
+    "gemma-simple-codex-cli",
+    codexCli.executions.updated(
+      AiExecutionClass.SimpleWork,
+      _gemma(AiExecutionClass.SimpleWork, "gemma:2b")
+    )
+  )
+
+  val claudeCode: AiRuntimeProfile = AiRuntimeProfile(
+    "claude-code",
+    Map(
+      AiExecutionClass.SimpleWork -> _claude_code(AiExecutionClass.SimpleWork, "sonnet"),
+      AiExecutionClass.StandardWork -> _claude_code(AiExecutionClass.StandardWork, "sonnet"),
+      AiExecutionClass.StandardConsideration -> _claude_code(AiExecutionClass.StandardConsideration, "opus"),
+      AiExecutionClass.DeepConsideration -> _claude_code(AiExecutionClass.DeepConsideration, "opus")
+    )
+  )
+
+  val anthropic: AiRuntimeProfile = AiRuntimeProfile(
+    "anthropic",
+    Map(
+      AiExecutionClass.SimpleWork -> _anthropic(AiExecutionClass.SimpleWork, "claude-sonnet-4-20250514"),
+      AiExecutionClass.StandardWork -> _anthropic(AiExecutionClass.StandardWork, "claude-sonnet-4-20250514"),
+      AiExecutionClass.StandardConsideration -> _anthropic(AiExecutionClass.StandardConsideration, "claude-sonnet-4-20250514"),
+      AiExecutionClass.DeepConsideration -> _anthropic(AiExecutionClass.DeepConsideration, "claude-opus-4-20250514")
+    )
+  )
+
+  val profiles: Map[String, AiRuntimeProfile] = Vector(
+    codexCli,
+    gemini,
+    gemma,
+    gemmaSimpleGemini,
+    gemmaSimpleCodexCli,
+    claudeCode,
+    anthropic
+  ).map { profile =>
     profile.name -> profile
   }.toMap
 
@@ -299,16 +391,25 @@ private[textus] final case class AiProfileResolution(
   def requestProperties(
     properties: Vector[org.goldenport.protocol.Property]
   ): Vector[org.goldenport.protocol.Property] =
-    properties ++ policy.requestProperties ++ _codex_execution_profile_property ++ _openai_reasoning_property
+    properties ++ policy.requestProperties ++ _codex_execution_profile_property ++ _claude_code_execution_profile_property ++ _openai_reasoning_property
 
   def isCodexProfile: Boolean =
     requirement.provider.exists(_is_codex)
+
+  def isClaudeCodeProfile: Boolean =
+    requirement.provider.exists(_is_claude)
+
+  def isManagedCliProfile: Boolean =
+    isCodexProfile || isClaudeCodeProfile
 
   def controlsOpenAiReasoning: Boolean =
     requirement.provider.exists(_is_openai) && reasoningLevel.nonEmpty
 
   def codexExecutionProfile: Option[String] =
     Option.when(isCodexProfile)(runtimeExecution.map(_.codexExecutionProfile)).flatten
+
+  def claudeCodeExecutionProfile: Option[String] =
+    Option.when(isClaudeCodeProfile)(runtimeExecution.map(_.claudeCodeExecutionProfile)).flatten
 
   def reasoningLevel: Option[String] =
     runtimeExecution.flatMap(_.reasoningLevel)
@@ -397,6 +498,11 @@ private[textus] final case class AiProfileResolution(
       org.goldenport.protocol.Property(AiRequestProperties.CODEX_EXECUTION_PROFILE, value, None)
     }.toVector
 
+  private def _claude_code_execution_profile_property: Vector[org.goldenport.protocol.Property] =
+    claudeCodeExecutionProfile.map { value =>
+      org.goldenport.protocol.Property(AiRequestProperties.CLAUDE_CODE_EXECUTION_PROFILE, value, None)
+    }.toVector
+
   private def _openai_reasoning_property: Vector[org.goldenport.protocol.Property] =
     Option.when(requirement.provider.exists(_is_openai))(reasoningLevel).flatten.map { value =>
       org.goldenport.protocol.Property("ai.openai.reasoning.effort", value, None)
@@ -404,6 +510,9 @@ private[textus] final case class AiProfileResolution(
 
   private def _is_codex(value: String): Boolean =
     value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")
+
+  private def _is_claude(value: String): Boolean =
+    value.trim.equalsIgnoreCase("claude") || value.trim.equalsIgnoreCase("claude-code")
 
   private def _is_openai(value: String): Boolean =
     value.trim.equalsIgnoreCase("openai")
@@ -567,6 +676,39 @@ private[textus] final class AiProfileConfig(
       }
     } yield executions
 
+  def claudeCodeExecutionsC: Consequence[Map[String, AiRuntimeExecution]] =
+    for {
+      _ <- _reject_legacy_configuration
+      profile <- _runtime_profile_c
+      executions <- profile.executions.keys.toVector.foldLeft(
+        Consequence.success(Map.empty[String, AiRuntimeExecution])
+      ) { (z, executionclass) =>
+        z.flatMap { values =>
+          _runtime_execution_c(profile, executionclass).map { execution =>
+            if (_is_claude(Some(execution.provider)))
+              values.updated(execution.claudeCodeExecutionProfile, execution)
+            else
+              values
+          }
+        }
+      }
+    } yield executions
+
+  def gemmaModelsC: Consequence[Option[Vector[String]]] =
+    for {
+      _ <- _reject_legacy_configuration
+      profile <- _runtime_profile_c
+      models <- {
+        profile.executions.keys.toVector.foldLeft(Consequence.success(Vector.empty[String])) { (z, executionclass) =>
+          z.flatMap { values =>
+            _runtime_execution_c(profile, executionclass).map { execution =>
+              if (_is_gemma(Some(execution.provider))) values :+ execution.model else values
+            }
+          }
+        }.map(values => Option.when(values.nonEmpty)(values.distinct.sorted))
+      }
+    } yield models
+
   private def _resolve_runtime_requirement(
     requirement: AiRunnerRequirement
   ): Consequence[AiProfileResolution] =
@@ -655,6 +797,12 @@ private[textus] final class AiProfileConfig(
       }
       case None => Consequence.configurationInvalid("AI runtime profile is required: textus.ai.profile")
     }
+
+  private def _is_gemma(provider: Option[String]): Boolean =
+    provider.exists(_.trim.equalsIgnoreCase("gemma"))
+
+  private def _is_claude(provider: Option[String]): Boolean =
+    provider.exists(value => Set("claude", "claude-code").contains(value.trim.toLowerCase(java.util.Locale.ROOT)))
 
   private def _runtime_execution_c(
     profile: AiRuntimeProfile,

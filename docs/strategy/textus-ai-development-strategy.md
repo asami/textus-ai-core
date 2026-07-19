@@ -168,6 +168,34 @@ Artifacts:
 - [Phase 4 Checklist](../phase/phase-4-checklist.md)
 - [Runtime Profile and Application Purpose Specification](../journal/2026/07/2026-07-18-runtime-profile-and-application-purpose-specification.md)
 
+### Phase 5: Local Gemma/Ollama Runtime Activation
+
+Goal: expose the existing Gemma/Ollama adapter as a first-class, profile-owned
+local runtime for application-purpose execution.
+
+Scope:
+
+- add the built-in `gemma` runtime profile with explicit defaults for every
+  standard execution class;
+- bind the selected profile to the existing CNCF HTTP adapter without exposing
+  provider or model selection to application callers;
+- provision the profile-owned Ollama Docker container and required models through
+  fixed CNCF managed-process capabilities, unless an endpoint is configured;
+- document external endpoint precedence, Docker configuration, and
+  execution-class model tuning; and
+- add deterministic profile, process-binding, and provider evidence, with an
+  optional local Docker smoke verification.
+
+Non-goals:
+
+- no local-to-commercial provider fallback; and
+- no CML operation or CNCF `AiRunner` contract change.
+
+Artifacts:
+
+- [Phase 5 Dashboard](../phase/phase-5.md)
+- [Phase 5 Checklist](../phase/phase-5-checklist.md)
+
 ## Phase Ordering
 
 Phase 1 was reopened on 2026-07-16 after the user clarified that Codex CLI is
@@ -194,9 +222,10 @@ completed on 2026-07-18.
   Google provider assembly became dependent only on merged CNCF configuration.
   The phase remains closed because this removes an ambient bootstrap fallback
   without changing its public contracts.
+- Phase 5: active on 2026-07-20 for local Gemma/Ollama runtime activation.
 - Latest phase closure: `docs/phase/phase-4-closure.md`
-- Current next task: define the next runtime expansion phase before adding a
-  runtime profile, workflow, or public operation.
+- Current next task: complete the Gemma/Ollama Docker provisioning evidence and
+  validate it against an available Docker daemon when available.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
