@@ -95,6 +95,9 @@ textus:
 
 Textus AI compiles the profile into CNCF managed-process capabilities. Callers
 do not invoke a shell or pass Codex model, reasoning, or Web flags directly.
+Profiles selecting `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` require
+Codex CLI `0.144.0` or later. Textus AI verifies that requirement through a
+separate managed `codex --version` capability before it submits a prompt.
 
 Provider-local request options use `Property` values. Runtime-owned provider
 selection and logical tools remain resolved from the selected profile for an

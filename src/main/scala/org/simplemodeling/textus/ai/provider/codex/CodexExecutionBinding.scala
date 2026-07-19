@@ -28,17 +28,51 @@ object CodexExecutionBinding {
         Consequence.success(Vector(default))
       ) { (z, profile) =>
         z.flatMap { definitions =>
-          _definition_c(profile.plainCapability, _profile_arguments(profile, web = false), config).flatMap { plain =>
-            if (profile.supportsWeb)
-              _definition_c(profile.webCapability, _profile_arguments(profile, web = true), config).map { web =>
-                definitions ++ Vector(plain, web)
-              }
-            else
-              Consequence.success(definitions :+ plain)
+          _profile_definitions_c(profile, config).map { profiledefinitions =>
+            definitions ++ profiledefinitions
           }
         }
       }
     }
+
+  private def _profile_definitions_c(
+    profile: CodexExecutionProfile,
+    config: CodexRuntimeConfig
+  ): Consequence[Vector[ProcessProgramDefinition]] = {
+    val versiondefinitions = profile.requiredMinimumCliVersion match {
+      case Some(_) => _version_definition_c(profile, config).map(Vector(_))
+      case None => Consequence.success(Vector.empty)
+    }
+    versiondefinitions.flatMap { version =>
+      _definition_c(profile.plainCapability, _profile_arguments(profile, web = false), config).flatMap { plain =>
+        if (profile.supportsWeb)
+          _definition_c(profile.webCapability, _profile_arguments(profile, web = true), config).map { web =>
+            version ++ Vector(plain, web)
+          }
+        else
+          Consequence.success(version :+ plain)
+      }
+    }
+  }
+
+  private def _version_definition_c(
+    profile: CodexExecutionProfile,
+    config: CodexRuntimeConfig
+  ): Consequence[ProcessProgramDefinition] =
+    for {
+      capability <- ProcessCapabilityId.parseC(profile.versionCapability)
+      definition <- ProcessProgramDefinition.fromRuntimeC(
+        capability = capability,
+        safeprogramidentity = profile.versionCapability,
+        executablelocation = config.executable,
+        fixedarguments = Vector("--version"),
+        argumentpolicy = ProcessArgumentPolicy(Vector("--version"), Set.empty, Set(Vector.empty)),
+        maximumlimits = config.executionLimits,
+        allowedartifacts = Set.empty,
+        allowedinputfiles = Set.empty,
+        environment = Map.empty
+      )
+    } yield definition
 
   private def _definition_c(
     capabilityname: String,

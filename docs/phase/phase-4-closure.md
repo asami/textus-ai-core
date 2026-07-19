@@ -26,12 +26,13 @@ this closure adds the registration correction without reverting it.
 | Application isolation | `AiRuntimeProfileSpec`, `ComponentFactorySpec`, and `TextusAiRunnerSpec` verify registration defaults, tuning, policy narrowing, and rejection of caller/application concrete selection. |
 | Strict migration | `AiProfileConfig` rejects canonical and alias legacy key families before provider execution. |
 | Runtime binding | `ComponentFactorySpec` and `CodexRuntimeProviderSpec` verify profile-derived defaults and managed Codex capability compilation. |
+| GPT-5.6 CLI compatibility | `CodexRuntimeProviderSpec` verifies `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` require an admitted `codex --version` result of `0.144.0` or later before prompt execution. |
 | Safe attribution | `AiExecutionFactsSpec` and `TextusAiRunnerSpec` verify application-purpose, effective-standard-purpose, runtime-profile, and effective-class facts without model-profile identity. |
 | Downstream adoption | [Application-purpose registration handoff](../journal/2026/07/2026-07-18-application-purpose-registration-handoff.md) defines Sanpomap and GeoResolver boundaries. |
 
 ## Validation
 
-- `sbt --batch test`: 90 Textus AI tests passed.
+- `sbt --batch test`: 93 Textus AI tests passed.
 - `sbt --batch test` in `cloud-native-component-framework` passed with the new
   AiRunner registration SPI specification.
 - CAR lint completed without `FAIL` entries.
@@ -41,6 +42,8 @@ this closure adds the registration correction without reverting it.
 - The Jul. 19 release follow-up strengthened executable evidence for the
   bootstrap ordering boundary. It does not reopen Phase 4 or change the
   application-purpose contract.
+- The Jul. 20 release follow-up adds the managed Codex CLI compatibility gate
+  for GPT-5.6 profiles. It does not reopen Phase 4 or change its contracts.
 
 ## Deferred Work
 

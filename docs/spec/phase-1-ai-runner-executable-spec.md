@@ -80,6 +80,13 @@ workers are shared daemon runtime infrastructure. Tests use
 `ProcessExecutionTestProfile`;
 they never start a live Codex CLI or call a network service.
 
+Profiles that select `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` also
+receive a separate, fixed `codex --version` capability. Before submitting a
+prompt, the provider runs that admitted capability and requires Codex CLI
+version `0.144.0` or later. A missing, malformed, failing, or older version is
+a structured configuration failure; it never falls back to another model or
+executes the prompt capability.
+
 The provider binding retains the caller-facing public `create` and Codex
 extension-point construction contracts. During Textus AI component assembly it
 records the owning component internally. The provider therefore uses that

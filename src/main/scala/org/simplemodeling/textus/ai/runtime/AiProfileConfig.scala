@@ -61,7 +61,7 @@ private[textus] object AiRuntimeProfileCatalog {
       provider = "codex",
       mode = "local",
       engine = "codex-cli",
-      model = "gpt-5-codex",
+      model = "gpt-5.6-sol",
       reasoningLevel = Some(reasoning)
     )
 

@@ -2,7 +2,7 @@
 
 status=draft
 scope=internal development strategy
-updated_at=2026-07-18
+updated_at=2026-07-20
 
 ## Purpose
 
@@ -186,6 +186,10 @@ completed on 2026-07-18.
 - Phase 4 release follow-up: on 2026-07-19, executable evidence confirmed
   late application Port binding after runtime scope creation retains the
   registered concurrency policy; the phase remains closed.
+- Phase 4 runtime compatibility follow-up: on 2026-07-20, Codex profiles for
+  the GPT-5.6 model family gained a managed CLI version gate. The phase remains
+  closed because this hardens the existing runtime binding without changing the
+  runtime-profile, standard-purpose, or application-purpose contracts.
 - Latest phase closure: `docs/phase/phase-4-closure.md`
 - Current next task: define the next runtime expansion phase before adding a
   runtime profile, workflow, or public operation.

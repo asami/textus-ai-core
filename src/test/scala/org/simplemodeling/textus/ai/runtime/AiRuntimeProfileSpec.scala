@@ -8,7 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 18, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 19, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiRuntimeProfileSpec
@@ -36,7 +36,7 @@ final class AiRuntimeProfileSpec
         resolution.toOption.flatMap(_.runtimeProfile) shouldBe Some("codex-cli")
         resolution.toOption.flatMap(_.requirement.executionClass) shouldBe Some(executionclass)
         resolution.toOption.flatMap(_.requirement.provider) shouldBe Some("codex")
-        resolution.toOption.flatMap(_.requirement.model) shouldBe Some("gpt-5-codex")
+        resolution.toOption.flatMap(_.requirement.model) shouldBe Some("gpt-5.6-sol")
       }
       resolutions.head._1.toOption.flatMap(_.reasoningLevel) shouldBe Some("minimal")
       resolutions.last._1.toOption.flatMap(_.reasoningLevel) shouldBe Some("xhigh")

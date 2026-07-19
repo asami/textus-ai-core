@@ -20,10 +20,14 @@ final case class CodexExecutionProfile(
   name: String,
   model: String,
   reasoningLevel: Option[CodexReasoningLevel] = None,
-  tools: Set[AiTool] = Set.empty
+  tools: Set[AiTool] = Set.empty,
+  minimumCliVersion: Option[CodexCliVersion] = None
 ) {
   def plainCapability: String = s"codex-cli-profile-$name"
   def webCapability: String = s"${plainCapability}-web"
+  def versionCapability: String = s"${plainCapability}-version"
+  def requiredMinimumCliVersion: Option[CodexCliVersion] =
+    (CodexCliVersion.minimumForModel(model).toVector ++ minimumCliVersion.toVector).maxOption
 
   def supports(requested: Set[AiTool]): Boolean =
     requested.subsetOf(tools) &&
@@ -31,6 +35,46 @@ final case class CodexExecutionProfile(
 
   def supportsWeb: Boolean =
     tools.contains(AiTool.WebSearch)
+}
+
+final case class CodexCliVersion(
+  major: Int,
+  minor: Int,
+  patch: Int
+) extends Ordered[CodexCliVersion] {
+  override def compare(that: CodexCliVersion): Int =
+    val majorcomparison = Integer.compare(major, that.major)
+    if (majorcomparison != 0)
+      majorcomparison
+    else {
+      val minorcomparison = Integer.compare(minor, that.minor)
+      if (minorcomparison != 0)
+        minorcomparison
+      else
+        Integer.compare(patch, that.patch)
+    }
+
+  def render: String = s"$major.$minor.$patch"
+}
+
+object CodexCliVersion {
+  val Gpt56Minimum: CodexCliVersion = CodexCliVersion(0, 144, 0)
+
+  def minimumForModel(model: String): Option[CodexCliVersion] =
+    Option.when(Set("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna").contains(
+      model.trim.toLowerCase(java.util.Locale.ROOT)
+    ))(Gpt56Minimum)
+
+  def parse(value: String): Option[CodexCliVersion] =
+    """(?:^|\D)(\d+)\.(\d+)\.(\d+)(?:\D|$)""".r
+      .findFirstMatchIn(value)
+      .flatMap { matched =>
+        for {
+          major <- matched.group(1).toIntOption
+          minor <- matched.group(2).toIntOption
+          patch <- matched.group(3).toIntOption
+        } yield CodexCliVersion(major, minor, patch)
+      }
 }
 
 enum CodexReasoningLevel(val id: String) {
@@ -132,6 +176,7 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
       _ <- AiRequestProperties.requireNoModelOverride("codex", req.properties)
       _ <- _require_no_output_token_limit(req.maxTokens)
       executionprofile <- _execution_profile_c(req.properties)
+      _ <- _validate_cli_version_c(executionprofile)
       request <- _request_c(req.prompt, req.recordSchema, req.properties, executionprofile)
       result <- _execute_c(request)
       response <- _response_c(result, executionprofile)
@@ -235,6 +280,44 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
         Consequence.configurationInvalid("AI maximum output tokens are not supported by provider 'codex'")
       case None =>
         Consequence.unit
+
+  private def _validate_cli_version_c(
+    executionprofile: _ExecutionProfile
+  ): Consequence[Unit] =
+    executionprofile.profile match {
+      case Some(profile) =>
+        profile.requiredMinimumCliVersion match {
+          case Some(minimum) =>
+            for {
+              capability <- ProcessCapabilityId.parseC(profile.versionCapability)
+              result <- _execute_c(ProcessExecutionRequest(capability))
+              actual <- _cli_version_c(result)
+              _ <- if (actual >= minimum)
+                Consequence.unit
+              else
+                Consequence.configurationInvalid(
+                  s"Codex CLI ${actual.render} does not satisfy required version ${minimum.render}"
+                )
+            } yield ()
+          case None =>
+            Consequence.unit
+        }
+      case None =>
+        Consequence.unit
+    }
+
+  private def _cli_version_c(
+    result: ProcessExecutionResult
+  ): Consequence[CodexCliVersion] =
+    result.termination match {
+      case ProcessExecutionTermination.Exited(0) =>
+        CodexCliVersion.parse(new String(result.stdout.content.toArray, StandardCharsets.UTF_8)) match {
+          case Some(version) => Consequence.success(version)
+          case None => Consequence.serviceUnavailable("Codex CLI version output is invalid")
+        }
+      case _ =>
+        Consequence.serviceUnavailable("Codex CLI version check failed")
+    }
 
   private def _execute_c(request: ProcessExecutionRequest): Consequence[ProcessExecutionResult] =
     given ExecutionContext = context
@@ -350,26 +433,60 @@ private object CodexJsonSchema {
     Json.fromJsonObject(_object_schema(schema)).noSpaces
 
   private def _object_schema(schema: org.goldenport.record.Record): JsonObject = {
-    val required = _strings(schema.getAny("required"))
+    val domainrequired = _strings(schema.getAny("required"))
+    val fields = _records(schema.getAny("fields")).flatMap { value =>
+      _string(value.getAny("name")).orElse(_string(value.getAny("field"))).map { name =>
+        name -> _field_schema(value, domainrequired.contains(name))
+      }
+    }
     val arrays = _records(schema.getAny("arrays")).flatMap { value =>
       _string(value.getAny("name")).orElse(_string(value.getAny("field"))).map { name =>
-        name -> Json.fromJsonObject(JsonObject(
+        val array = Json.fromJsonObject(JsonObject(
           "type" -> Json.fromString("array"),
-          "items" -> Json.fromJsonObject(JsonObject(
-            "type" -> Json.fromString("object"),
-            "required" -> Json.fromValues(_strings(value.getAny("required")).map(Json.fromString))
-          ))
+          "items" -> Json.fromJsonObject(_object_schema(value))
         ))
+        name -> _nullable(array, _boolean(value.getAny("optional")).contains(true) || !domainrequired.contains(name))
       }
+    }
+    val declared = (fields ++ arrays).toMap
+    val names = (domainrequired ++ fields.map(_._1) ++ arrays.map(_._1)).distinct
+    val properties = names.map { name =>
+      name -> declared.getOrElse(name, Json.obj("type" -> Json.fromString("string")))
     }
     JsonObject(
       "type" -> Json.fromString("object"),
-      "required" -> Json.fromValues(required.map(Json.fromString)),
-      "properties" -> Json.fromJsonObject(JsonObject.fromIterable(
-        required.map(_ -> Json.obj()) ++ arrays
-      ))
+      "additionalProperties" -> Json.fromBoolean(false),
+      // Codex strict output requires every declared property to be required;
+      // domain-optional fields are represented as nullable instead.
+      "required" -> Json.fromValues(names.map(Json.fromString)),
+      "properties" -> Json.fromJsonObject(JsonObject.fromIterable(properties))
     )
   }
+
+  private def _field_schema(
+    field: org.goldenport.record.Record,
+    domainrequired: Boolean
+  ): Json = {
+    val datatype = _string(field.getAny("type")).getOrElse("string").toLowerCase(java.util.Locale.ROOT) match {
+      case "int" | "integer" | "long" => "integer"
+      case "double" | "float" | "decimal" | "number" => "number"
+      case "bool" | "boolean" => "boolean"
+      case _ => "string"
+    }
+    val base = Json.obj("type" -> Json.fromString(datatype))
+    _nullable(base, _boolean(field.getAny("optional")).contains(true) || !domainrequired)
+  }
+
+  private def _nullable(schema: Json, nullable: Boolean): Json =
+    if (!nullable)
+      schema
+    else
+      schema.mapObject { value =>
+        value.add("type", Json.fromValues(Vector(
+          value("type").getOrElse(Json.fromString("string")),
+          Json.fromString("null")
+        )))
+      }
 
   private def _records(value: Any): Vector[org.goldenport.record.Record] =
     value match {
@@ -393,4 +510,13 @@ private object CodexJsonSchema {
 
   private def _string(value: Any): Option[String] =
     _strings(value).headOption
+
+  private def _boolean(value: Any): Option[Boolean] =
+    value match {
+      case null => None
+      case Some(x) => _boolean(x)
+      case value: Boolean => Some(value)
+      case value: String => value.trim.toBooleanOption
+      case _ => None
+    }
 }

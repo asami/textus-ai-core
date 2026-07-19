@@ -17,14 +17,14 @@ import org.goldenport.record.Record
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexExecutionProfile, CodexReasoningLevel, CodexRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.codex.{CodexCliVersion, CodexConfig, CodexExecutionProfile, CodexReasoningLevel, CodexRuntimeConfig}
 
 /*
  * Executable specification for the managed Codex CLI provider. The test
  * profile proves adapter intent without a Codex binary, account, or network.
  *
  * @since   Jul. 17, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -59,6 +59,9 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       enabledconfig.flatMap(_.executionProfiles.get("runtime-standard-consideration")).map(_.reasoningLevel) shouldBe Some(Some(CodexReasoningLevel.High))
       unsafeconfig shouldBe None
       legacy.schemaMaximumBytes shouldBe 4096L
+      CodexCliVersion.minimumForModel("gpt-5.6-sol") shouldBe Some(CodexCliVersion.Gpt56Minimum)
+      CodexCliVersion.minimumForModel("gpt-5.6-terra") shouldBe Some(CodexCliVersion.Gpt56Minimum)
+      CodexCliVersion.minimumForModel("gpt-5.6-luna") shouldBe Some(CodexCliVersion.Gpt56Minimum)
     }
 
     "run generate and record requests through the admitted CNCF process capability" in {
@@ -104,7 +107,10 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       new String(plain.input.asInstanceOf[ProcessExecutionInput.Bytes].value.toArray, StandardCharsets.UTF_8) shouldBe "plain prompt"
       val record = fixture.profile.driver.executions(1).request
       record.inputFiles.map(_.name.print) shouldBe Vector("schema")
-      new String(record.inputFiles.head.content.toArray, StandardCharsets.UTF_8) should include ("\"title\"")
+      val recordschema = new String(record.inputFiles.head.content.toArray, StandardCharsets.UTF_8)
+      recordschema should include ("\"title\"")
+      recordschema should include ("\"additionalProperties\":false")
+      recordschema should include ("\"confidence\":{\"type\":[\"integer\",\"null\"]}")
       val chat = fixture.profile.driver.executions(2).request
       new String(chat.input.asInstanceOf[ProcessExecutionInput.Bytes].value.toArray, StandardCharsets.UTF_8) should include ("chat prompt")
     }
@@ -200,7 +206,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       val result = _runner().generate(
         AiGenerateRequest(
           "bounded prompt",
-          properties = Vector(Property("ai.timeout-seconds", "45", None))
+          properties = Vector(Property("ai.timeout-seconds", "121", None))
         )
       )
 
@@ -208,7 +214,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       result shouldBe a[Consequence.Failure[_]]
       result match
         case Consequence.Failure(conclusion) =>
-          conclusion.display should include ("45000")
+          conclusion.display should include ("121000")
         case _ =>
           fail("an over-broad process timeout must be rejected by admission")
       fixture.profile.driver.executions shouldBe Vector.empty
@@ -221,7 +227,11 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
         "textus.ai.execution-classes.deep-consideration.tools" -> "url_context,web_search"
       ))))
       val profile = _codex_executions(profiles)("runtime-deep-consideration")
-      val fixture = _fixture(_result("{\"title\":\"Web result\"}"), profile.webCapability)
+      val fixture = _fixture(
+        _result("{\"title\":\"Web result\"}"),
+        profile.webCapability,
+        versioncapabilityname = Some(profile.versionCapability)
+      )
       given ExecutionContext = _context(fixture)
 
       When("a caller names only the required purpose")
@@ -244,8 +254,40 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       result.toOption.flatMap(_.metadata.get(AiExecutionFacts.POLICY_RUNTIME_PROFILE)) shouldBe Some("codex-cli")
       result.toOption.flatMap(_.metadata.get(AiExecutionFacts.POLICY_REASONING_LEVEL)) shouldBe Some("high")
       result.toOption.flatMap(_.metadata.get(AiExecutionFacts.ENABLED_TOOLS)) shouldBe Some("url_context,web_search")
-      fixture.profile.driver.executions.map(_.request.capability.print) shouldBe Vector(profile.webCapability)
-      fixture.profile.driver.executions.map(_.request.arguments) shouldBe Vector(Vector("--output-schema", "schema.json", "-"))
+      fixture.profile.driver.executions.map(_.request.capability.print) shouldBe Vector(profile.versionCapability, profile.webCapability)
+      fixture.profile.driver.executions.map(_.request.arguments) shouldBe Vector(Vector.empty, Vector("--output-schema", "schema.json", "-"))
+    }
+
+    "reject a Codex runtime profile whose managed CLI is below its model requirement" in {
+      Given("a GPT-5.6 profile and a managed Codex CLI that reports version 0.143.0")
+      val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
+        "textus.ai.profile" -> "codex-cli"
+      ))))
+      val profile = _codex_executions(profiles)("runtime-standard-work")
+      val fixture = _fixture(
+        _result("{\"title\":\"unexpected\"}"),
+        profile.plainCapability,
+        Some(profile.versionCapability),
+        _result("codex-cli 0.143.0")
+      )
+      given ExecutionContext = _context(fixture)
+
+      When("a caller requests the standard-work purpose")
+      val result = _runner(
+        CodexRuntimeConfig(executionProfiles = Map(profile.name -> profile)),
+        profiles
+      ).generate(AiGenerateRequest(
+        "implement the requested change",
+        requirement = AiRunnerRequirement(
+          purpose = Some("standard-work"),
+          purposeRequired = true
+        )
+      ))
+
+      Then("the version probe rejects the runtime before the prompt reaches Codex")
+      result.isFaillure shouldBe true
+      result.toString should include ("0.144.0")
+      fixture.profile.driver.executions.map(_.request.capability.print) shouldBe Vector(profile.versionCapability)
     }
 
     "reject a Codex URL-context purpose without the admitted Web-search capability" in {
@@ -320,16 +362,35 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
 
   private def _fixture(
     result: ProcessExecutionResult,
-    capabilityname: String = "codex-cli"
+    capabilityname: String = "codex-cli",
+    versioncapabilityname: Option[String] = None,
+    versionresult: ProcessExecutionResult = _result("codex-cli 0.144.0")
   ): ProcessExecutionTestFixture = {
     val capability = ProcessCapabilityId.parseC(capabilityname).toOption.get
     val schema = ProcessArtifactName.parseC("schema").toOption.get
-    ProcessExecutionTestProfile.admittedC(
-      capability,
-      result,
-      permittedarguments = Set("-", "--output-schema", "schema.json"),
-      allowedinputfiles = Set(schema)
+    val capabilities = Map(capability -> result) ++ versioncapabilityname.map { name =>
+      ProcessCapabilityId.parseC(name).toOption.get -> versionresult
+    }
+    val profile = ProcessExecutionTestProfile(capabilities)
+    val definitions = capabilities.keys.toVector.map { key =>
+      ProcessProgramDefinition.fromRuntimeC(
+        key,
+        "deterministic-test-program",
+        "test-runtime-owned-location",
+        Vector.empty,
+        ProcessArgumentPolicy(Vector.empty, Set("-", "--output-schema", "schema.json")),
+        CodexRuntimeConfig.defaultExecutionLimits,
+        Set.empty,
+        allowedinputfiles = Set(schema)
+      ).toOption.get
+    }
+    val policy = ProcessExecutionPolicy.createC(definitions).toOption.get
+    val admission = ProcessExecutionAdmission.createC(
+      policy,
+      capabilities.keys.toVector.map(ProcessExecutionGrant(_))
     ).toOption.get
+    val execution = admission.admitC(ProcessExecutionRequest(capability)).toOption.get
+    ProcessExecutionTestFixture(profile, policy, admission, execution)
   }
 
   private def _result(
@@ -376,7 +437,13 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
     context
   }
 
-  private val _schema: Record = Record.dataAuto("required" -> Vector("title"))
+  private val _schema: Record = Record.dataAuto(
+    "required" -> Vector("title"),
+    "fields" -> Vector(
+      Record.dataAuto("name" -> "title", "type" -> "string"),
+      Record.dataAuto("name" -> "confidence", "type" -> "integer", "optional" -> true)
+    )
+  )
 
   private def _codex_executions(
     profiles: AiProfileConfig

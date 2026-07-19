@@ -24,7 +24,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 16, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ComponentFactorySpec
@@ -196,19 +196,25 @@ final class ComponentFactorySpec
         summon[ExecutionContext].observability
       ))
       val capability = ProcessCapabilityId.parseC("codex-cli-profile-runtime-deep-consideration-web").toOption.get
+      val versioncapability = ProcessCapabilityId.parseC("codex-cli-profile-runtime-deep-consideration-version").toOption.get
 
       When("the runtime-profile Web capability is resolved")
       val result = ProcessExecutionAdmission.resolveC(
         component.scopeContext,
         ProcessExecutionRequest(capability, Vector("-"))
       )
+      val version = ProcessExecutionAdmission.resolveC(
+        component.scopeContext,
+        ProcessExecutionRequest(versioncapability)
+      )
 
       Then("only the fixed approved model, reasoning, and global Web option are admitted")
       result.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
-        "--search", "exec", "--model", "gpt-5-codex",
+        "--search", "exec", "--model", "gpt-5.6-sol",
         "--config", "model_reasoning_effort=\"high\"",
         "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "-"
       ))
+      version.toOption.map(_.effectiveArguments) shouldBe Some(Vector("--version"))
     }
 
     "leave Codex process execution unavailable when the provider is disabled" in {
@@ -243,6 +249,7 @@ final class ComponentFactorySpec
       val executable = java.nio.file.Files.createTempFile("textus-ai-codex-spec", ".sh")
       java.nio.file.Files.writeString(executable,
         "#!/bin/sh\n" +
+          "if [ \"$1\" = \"--version\" ]; then printf 'codex-cli 0.144.0'; exit 0; fi\n" +
           "if [ -f schema.json ]; then marker=record; else marker=plain; fi\n" +
           "if [ -z \"$HOME\" ]; then home=empty; else home=set; fi\n" +
           "args=$(printf '%s' \"$*\" | tr -d '\"')\n" +
@@ -311,10 +318,10 @@ final class ComponentFactorySpec
 
       Then("the fixed command, empty environment, and bounded schema file are executed in provider-owned managed WorkAreas")
       withClue(generated.toString) {
-        generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5-codex --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+        generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5.6-sol --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
       }
-      recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --model gpt-5-codex --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
-      chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5-codex --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+      recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --model gpt-5.6-sol --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
+      chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5.6-sol --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
       callerscope.processExecutionDriverOption shouldBe None
       callerscope.processExecutionAdmissionOption shouldBe None
     }

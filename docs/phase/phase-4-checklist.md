@@ -103,6 +103,9 @@ Stage Status:
   defaults.
 - [x] Compile Codex managed-process capabilities from the resolved profile and
   execution class, not a model-profile name.
+- [x] Verify the managed Codex CLI version before GPT-5.6 profile prompt
+  execution, without bypassing process admission or falling back to another
+  model.
 - [x] Replace model-profile/generic-purpose/logical-level facts with safe
   runtime-profile and effective-class facts.
 
