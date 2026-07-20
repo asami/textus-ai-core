@@ -16,8 +16,7 @@ import org.goldenport.configuration.ConfigurationValue
 import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement}
 import org.goldenport.record.Record
 import org.simplemodeling.textus.ai.provider.codex.CodexRuntimeConfig
-import org.simplemodeling.textus.ai.provider.gemma.OllamaDockerExecutionBinding
-import org.simplemodeling.textus.ai.runtime.TextusAiRunnerProvider
+import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiProfileConfig, TextusAiRunnerProvider}
 import org.scalatest.GivenWhenThen
 import org.scalatest.OptionValues
 import org.scalatest.matchers.should.Matchers
@@ -219,19 +218,19 @@ final class ComponentFactorySpec
       component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
     }
 
-    "install Gemma/Ollama Docker capabilities when the Gemma profile has no endpoint override" in {
-      Given("a Gemma runtime profile with Docker image and container overrides")
+    "declare a managed Ollama service without installing Docker lifecycle process capabilities" in {
+      Given("a Gemma runtime profile with managed image and volume overrides")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
-          "textus.ai.gemma.docker.image" -> ConfigurationValue.StringValue("example/ollama:test"),
-          "textus.ai.gemma.docker.container-name" -> ConfigurationValue.StringValue("textus-ai-test-ollama"),
-          "textus.ai.gemma.docker.volume-name" -> ConfigurationValue.StringValue("textus-ai-test-models"),
-          "textus.ai.gemma.docker.port" -> ConfigurationValue.StringValue("12434")
+          "textus.ai.gemma.service.image" -> ConfigurationValue.StringValue("example/ollama:test"),
+          "textus.ai.gemma.service.volume-name" -> ConfigurationValue.StringValue("textus-ai-test-models")
         )),
         ConfigurationTrace.empty
       )
+      val profiles = AiProfileConfig.fromConfiguration(Some(configuration), AiApplicationPurposeCatalog.empty)
+      val managed = ComponentFactory.ollamaManagedServiceConfig(Some(configuration), profiles)
       val subsystem = new Subsystem(
         name = "textus-ai-ollama-scope-spec",
         configuration = configuration
@@ -244,32 +243,19 @@ final class ComponentFactorySpec
         summon[ExecutionContext].observability
       )
       component.withScopeContext(parent)
-      val inspect = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.inspectCapability).toOption.get
-      val run = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.runCapability).toOption.get
-      val pull = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.pullCapability(0)).toOption.get
+      When("the component and its managed service definition are resolved")
+      val definition = managed.map(_.definitionC)
 
-      When("the component scope admits its trusted Docker lifecycle commands")
-      val inspected = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(inspect))
-      val started = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(run))
-      val model = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(pull))
-      val unsafe = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(run, Vector("--privileged")))
-
-      Then("only the profile-owned image, container, volume, port, and model are admitted")
-      inspected.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
-        "container", "inspect", "--format", "{{.State.Running}}", "textus-ai-test-ollama"
-      ))
-      started.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
-        "run", "--detach", "--name", "textus-ai-test-ollama", "--publish", "127.0.0.1:12434:11434",
-        "--volume", "textus-ai-test-models:/root/.ollama", "example/ollama:test"
-      ))
-      model.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
-        "exec", "textus-ai-test-ollama", "ollama", "pull", "gemma:2b"
-      ))
-      unsafe.isFaillure shouldBe true
-      component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
+      Then("lifecycle intent is typed while the component scope has no Docker command capability")
+      managed should not be empty
+      definition.exists(_.isSuccess) shouldBe true
+      definition.flatMap(_.toOption).map(_.image.print) shouldBe Some("example/ollama:test")
+      definition.flatMap(_.toOption).map(_.serviceId.print) shouldBe Some("ollama")
+      component.scopeContext.processExecutionAdmissionOption shouldBe empty
+      component.scopeContext.processExecutionDriverOption shouldBe empty
     }
 
-    "skip Gemma/Ollama Docker capabilities for an explicit external endpoint" in {
+    "skip managed Ollama lifecycle for an explicit external endpoint" in {
       Given("a Gemma profile configured to use an externally managed Ollama endpoint")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
@@ -291,17 +277,17 @@ final class ComponentFactorySpec
         summon[ExecutionContext].observability
       )
       component.withScopeContext(parent)
-      val inspect = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.inspectCapability).toOption.get
+      val profiles = AiProfileConfig.fromConfiguration(Some(configuration), AiApplicationPurposeCatalog.empty)
 
-      When("the local Docker lifecycle capability is requested")
-      val result = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(inspect))
+      When("the managed service configuration and component scope are inspected")
+      val managed = ComponentFactory.ollamaManagedServiceConfig(Some(configuration), profiles)
 
-      Then("the external endpoint takes precedence and Docker is not installed")
-      result.isFaillure shouldBe true
+      Then("the external endpoint takes precedence and managed lifecycle is not installed")
+      managed shouldBe empty
       component.scopeContext.processExecutionDriverOption shouldBe empty
     }
 
-    "combine Gemma Docker and Codex CLI capabilities for a composite profile" in {
+    "combine managed Gemma lifecycle with the Codex CLI one-shot capability" in {
       Given("a Gemma-simple Codex profile with an enabled Codex CLI runtime")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
@@ -324,17 +310,12 @@ final class ComponentFactorySpec
         summon[ExecutionContext].observability
       )
       component.withScopeContext(parent)
-      val ollama = ProcessCapabilityId.parseC(OllamaDockerExecutionBinding.inspectCapability).toOption.get
       val codex = ProcessCapabilityId.parseC("codex-cli").toOption.get
 
-      When("the composite runtime admits both local backends")
-      val ollamaresult = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(ollama))
+      When("the composite runtime admits its one-shot Codex backend")
       val codexresult = ProcessExecutionAdmission.resolveC(component.scopeContext, ProcessExecutionRequest(codex, Vector("-")))
 
-      Then("the shared component scope retains each provider's fixed capability")
-      ollamaresult.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
-        "container", "inspect", "--format", "{{.State.Running}}", "textus-ai-ollama"
-      ))
+      Then("Ollama lifecycle remains outside Process Execution while Codex stays admitted")
       codexresult.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
         "exec", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "-"
       ))

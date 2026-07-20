@@ -179,9 +179,10 @@ Scope:
   standard execution class;
 - bind the selected profile to the existing CNCF HTTP adapter without exposing
   provider or model selection to application callers;
-- provision the profile-owned Ollama Docker container and required models through
-  fixed CNCF managed-process capabilities, unless an endpoint is configured;
-- document external endpoint precedence, Docker configuration, and
+- resolve the profile-owned Ollama service through CNCF's managed
+  service-container runtime and install required models after readiness, unless
+  an endpoint is configured;
+- document external endpoint precedence, managed-service configuration, and
   execution-class model tuning; and
 - add deterministic profile, process-binding, and provider evidence, with an
   optional local Docker smoke verification.
@@ -224,8 +225,9 @@ completed on 2026-07-18.
   without changing its public contracts.
 - Phase 5: active on 2026-07-20 for local Gemma/Ollama runtime activation.
 - Latest phase closure: `docs/phase/phase-4-closure.md`
-- Current next task: complete the Gemma/Ollama Docker provisioning evidence and
-  validate it against an available Docker daemon when available.
+- Current next task: validate the CNCF managed service-container Docker
+  transport and live Gemma provisioning against an available Docker daemon as
+  part of CNCF Phase 44 closure.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

@@ -15,8 +15,8 @@ Textus AI resolves the local provider, model, and limits.
 - Ship a `gemma` runtime profile for all four standard execution classes and
   common simple-work-only Gemma composite profiles.
 - Use the existing CNCF HTTP-bound Gemma/Ollama generate and chat services.
-- Provision a component-owned Ollama Docker container when no endpoint is
-  configured, through fixed CNCF managed-process capabilities.
+- Resolve a component-owned Ollama service when no endpoint is configured,
+  through CNCF's managed service-container runtime.
 - Prefer an explicitly configured Ollama endpoint over local Docker control.
 - Permit operator model tuning only through approved execution-class keys.
 - Preserve deterministic structured-record, timeout, and explicit endpoint
@@ -36,8 +36,21 @@ Textus AI resolves the local provider, model, and limits.
 | ID | Stage | Outcome | Status |
 | --- | --- | --- | --- |
 | GO-01 | Runtime profile | `gemma` and simple-work-only composite profiles resolve their local Ollama defaults. | complete |
-| GO-02 | Container contract | Docker provisioning is profile-owned; an endpoint override disables it. | complete |
-| GO-03 | Executable evidence | Deterministic profile, process binding, and provider specs pass; live Gemma provisioning is a heavy test. | in progress |
+| GO-02 | Container contract | Managed service resolution is profile-owned; an endpoint override disables it. | complete |
+| GO-03 | Executable evidence | Deterministic profile, fake-gateway consumer, and provider specs pass; live Gemma provisioning is a Phase 44 heavy test. | in progress |
+
+## Phase 44 Integration Update
+
+The earlier fixed Docker Process Execution binding is superseded by CNCF Phase
+44. Textus AI now submits one typed Ollama service definition to the Subsystem
+managed service-container runtime. Container lifecycle is no longer represented
+as component-owned inspect/start/run process capabilities. After readiness,
+profile model installation remains a separate provider-owned HTTP operation
+against the resolved Ollama endpoint.
+
+An explicit `textus.ai.gemma.endpoint` constructs no managed service definition
+and does not request a lifecycle runtime. Live Docker transport validation is
+owned by CNCF Phase 44 SC-08 rather than ordinary Textus AI executable specs.
 
 ## References
 

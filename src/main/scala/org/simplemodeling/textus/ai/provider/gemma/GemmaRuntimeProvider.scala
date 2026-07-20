@@ -23,7 +23,7 @@ final case class GemmaRuntimeConfig(
   model: String = "gemma:2b",
   timeoutSeconds: Long = 30L,
   maxConcurrency: Int = 2,
-  bootstrap: Option[OllamaDockerBootstrap] = None
+  bootstrap: Option[OllamaManagedServiceBootstrap] = None
 )
 
 object GemmaConfig:
@@ -81,10 +81,13 @@ object GemmaConfig:
       .find(_.nonEmpty)
 
 private object GemmaSupport:
-  def endpoints(config: GemmaRuntimeConfig): Vector[URI] =
+  def endpoints(
+    config: GemmaRuntimeConfig,
+    primary: URI
+  ): Vector[URI] =
     config.mode match
-      case "remote" => Vector(config.endpoint)
-      case _ => Vector(config.endpoint) ++ config.fallbackEndpoint.toVector
+      case "remote" => Vector(primary)
+      case _ => Vector(primary) ++ config.fallbackEndpoint.toVector.filterNot(_ == primary)
 
   def responseMetadata(json: Json): Map[String, String] = {
     val input = json.hcursor.get[Long]("prompt_eval_count").toOption
@@ -109,14 +112,14 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
     given ExecutionContext = context
     for
       _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
-      _ <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.unit)
+      endpoint <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.success(config.endpoint))
       model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
       body = Json.obj(
         "model" -> Json.fromString(model),
         "prompt" -> Json.fromString(req.prompt),
         "stream" -> Json.False
       ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
-      response <- _request_with_fallback(GemmaSupport.endpoints(config), "/api/generate", body, req.properties) { json =>
+      response <- _request_with_fallback(GemmaSupport.endpoints(config, endpoint), "/api/generate", body, req.properties) { json =>
         json.hcursor.get[String]("response") match
           case Right(text) => Consequence.success(GenerateResponse(text, Some(model), GemmaSupport.responseMetadata(json)))
           case Left(e) => Consequence.valueInvalid(e.getMessage)
@@ -148,7 +151,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
     given ExecutionContext = context
     for
       _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
-      _ <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.unit)
+      endpoint <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.success(config.endpoint))
       model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
       body = Json.obj(
         "model" -> Json.fromString(model),
@@ -162,7 +165,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
         ),
         "stream" -> Json.False
       ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
-      response <- _request_with_fallback(GemmaSupport.endpoints(config), "/api/chat", body, req.properties) { json =>
+      response <- _request_with_fallback(GemmaSupport.endpoints(config, endpoint), "/api/chat", body, req.properties) { json =>
         json.hcursor.downField("message").get[String]("content") match
           case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(model), GemmaSupport.responseMetadata(json)))
           case Left(e) => Consequence.valueInvalid(e.getMessage)

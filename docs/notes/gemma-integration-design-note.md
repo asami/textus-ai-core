@@ -128,30 +128,38 @@ Instead, it MUST delegate inference to:
 
 ## Runtime-Owned Docker Provisioning
 
-Selecting `textus.ai.profile: gemma` with no explicit Gemma endpoint installs
-component-owned CNCF managed-process capabilities for `docker container inspect`,
-`docker start`, `docker run`, and fixed `docker exec ... ollama pull` commands.
-Textus AI creates or starts its owned Ollama container and prepares every model
-selected by the profile's execution classes.
+Supersession note (Jul. 20, 2026): the initial fixed Docker Process Execution
+binding is replaced by CNCF Phase 44's managed service-container runtime.
 
-The default container uses `ollama/ollama:latest`, container and volume
-`textus-ai-ollama`, and `127.0.0.1:11434`. Operators can override the Docker
-executable, image, container name, volume name, host, port, and startup timeout
-through `textus.ai.gemma.docker.*`. Application callers cannot supply Docker
-arguments, image names, container names, or models.
+Selecting `textus.ai.profile: gemma` with no explicit Gemma endpoint creates a
+typed runtime-owned Ollama service definition. Textus AI supplies only logical
+owner/service identity, image, named persistence, container port, readiness,
+reuse, and cleanup policy. CNCF resolves the endpoint through the Subsystem
+lifecycle runtime; Textus AI receives neither Docker commands nor provider
+container identity.
+
+The default definition uses `ollama/ollama:latest`, named volume
+`textus-ai-ollama`, container port `11434`, and HTTP readiness at `/api/tags`.
+Operators may override the admitted image, volume, and bounded startup/model
+installation timeouts through `textus.ai.gemma.service.*`. Application callers
+cannot supply lifecycle settings, image names, volumes, endpoints, or models.
+
+After readiness, model installation is a separate provider-owned operation
+using Ollama's `/api/pull` HTTP API through the CNCF internal HTTP DSL. It is
+not part of generic service lifecycle and does not require a provider instance
+id.
 
 An explicit `textus.ai.gemma.endpoint` selects an externally managed Ollama
-service and disables Textus AI Docker provisioning.
+service and disables Textus AI managed-service resolution.
 
 ---
 
 ## Runtime Endpoint
 
-The runtime-owned local endpoint is:
-
-http://127.0.0.1:11434/api/generate
-
-An explicit endpoint configuration takes precedence over this default.
+The runtime-owned local endpoint is returned by CNCF after readiness and may
+use a deployment-selected host port. Textus AI appends `/api/generate`,
+`/api/chat`, or `/api/pull` only after that resolution. An explicit endpoint
+configuration takes precedence and bypasses managed lifecycle entirely.
 
 ---
 
@@ -197,15 +205,15 @@ textus:
   ai:
     profile: gemma
     gemma:
-      docker:
+      service:
         image: ollama/ollama:latest
-        container-name: textus-ai-ollama
         volume-name: textus-ai-ollama
 
 ## Mode Semantics
 
 An explicit `textus.ai.gemma.endpoint` controls endpoint selection behavior.
-When it is absent, the selected Gemma profile owns local Docker provisioning.
+When it is absent, the selected Gemma profile owns one local service definition
+resolved by CNCF's managed service-container runtime.
 
 ---
 

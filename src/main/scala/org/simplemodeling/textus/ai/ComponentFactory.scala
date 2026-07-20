@@ -11,7 +11,7 @@ import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.spi.ai.runner.AiRunnerApplicationPurposeRegistrationSocketSet
 import org.goldenport.cncf.subsystem.Subsystem
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ResolvedConfiguration}
-import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaRuntimeConfig, OllamaDockerBootstrap, OllamaDockerConfig, OllamaDockerExecutionBinding}
+import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaRuntimeConfig, OllamaManagedServiceBootstrap, OllamaManagedServiceConfig}
 import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexExecutionBinding, CodexExecutionProfile, CodexReasoningLevel, CodexRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeConfig, ClaudeCodeExecutionBinding, ClaudeCodeExecutionProfile, ClaudeCodeRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.anthropic.AnthropicConfig
@@ -38,8 +38,8 @@ class ComponentFactory extends TextusAiComponent.Factory:
     val codex = configuration.flatMap { value =>
       CodexConfig.fromConfiguration(value, ComponentFactory.codexExecutionProfiles(profiles))
     }
-    val gemma = ComponentFactory.gemmaRuntimeConfig(configuration, profiles)
-    val ollama = ComponentFactory.ollamaDockerConfig(configuration, profiles)
+    val gemma = ComponentFactory.gemmaRuntimeConfig(configuration, profiles, Some(bootstrapcontext))
+    val ollama = ComponentFactory.ollamaManagedServiceConfig(configuration, profiles)
     val claude = configuration.flatMap { value =>
       ClaudeCodeConfig.fromConfiguration(value, ComponentFactory.claudeCodeExecutionProfiles(profiles))
     }
@@ -102,7 +102,7 @@ object ComponentFactory:
       registrations,
       profiles,
       new AiConcurrencyAdmissionState(),
-      gemmaRuntimeConfig(configuration, profiles),
+      gemmaRuntimeConfig(configuration, profiles, component.subsystem),
       configuration.flatMap(value => ClaudeCodeConfig.fromConfiguration(value, claudeCodeExecutionProfiles(profiles)))
     )
   }
@@ -138,20 +138,22 @@ object ComponentFactory:
       .orElse(withchat.port)
     )
 
-  private[ai] def ollamaDockerConfig(
+  private[ai] def ollamaManagedServiceConfig(
     configuration: Option[ResolvedConfiguration],
     profiles: AiProfileConfig
-  ): Option[OllamaDockerConfig] =
-    OllamaDockerConfig.fromConfiguration(configuration, profiles)
+  ): Option[OllamaManagedServiceConfig] =
+    OllamaManagedServiceConfig.fromConfiguration(configuration, profiles)
 
   private[ai] def gemmaRuntimeConfig(
     configuration: Option[ResolvedConfiguration],
-    profiles: AiProfileConfig
+    profiles: AiProfileConfig,
+    subsystem: Option[Subsystem]
   ): GemmaRuntimeConfig = {
     val gemma = configuration.flatMap(GemmaConfig.fromConfiguration).getOrElse(GemmaConfig.default)
-    ollamaDockerConfig(configuration, profiles) match {
-      case Some(docker) => gemma.copy(endpoint = docker.endpoint, bootstrap = Some(new OllamaDockerBootstrap(docker)))
-      case None => gemma
+    (ollamaManagedServiceConfig(configuration, profiles), subsystem) match {
+      case (Some(config), Some(owner)) =>
+        gemma.copy(bootstrap = Some(new OllamaManagedServiceBootstrap(owner, config)))
+      case _ => gemma
     }
   }
 
@@ -177,7 +179,7 @@ object ComponentFactory:
 private final class TextusAiRuntimeComponent(
   codex: Option[CodexRuntimeConfig],
   claude: Option[ClaudeCodeRuntimeConfig],
-  ollama: Option[OllamaDockerConfig],
+  ollama: Option[OllamaManagedServiceConfig],
   profiles: AiProfileConfig,
   concurrencystate: AiConcurrencyAdmissionState
 ) extends TextusAiComponent {
@@ -185,18 +187,14 @@ private final class TextusAiRuntimeComponent(
     val codexbinding = codex.map(CodexExecutionBinding.definitionsAndGrantsC).getOrElse(
       Consequence.success(Vector.empty -> Vector.empty)
     )
-    val ollamabinding = ollama.map(OllamaDockerExecutionBinding.definitionsAndGrantsC).getOrElse(
-      Consequence.success(Vector.empty -> Vector.empty)
-    )
     val claudebinding = claude.map(ClaudeCodeExecutionBinding.definitionsAndGrantsC).getOrElse(
       Consequence.success(Vector.empty -> Vector.empty)
     )
     (for {
       codexparts <- codexbinding
-      ollamaparts <- ollamabinding
       claudeparts <- claudebinding
-      definitions = codexparts._1 ++ ollamaparts._1 ++ claudeparts._1
-      grants = codexparts._2 ++ ollamaparts._2 ++ claudeparts._2
+      definitions = codexparts._1 ++ claudeparts._1
+      grants = codexparts._2 ++ claudeparts._2
       runtime <- if (definitions.nonEmpty)
         for {
           policy <- ProcessExecutionPolicy.createC(definitions)

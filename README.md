@@ -86,9 +86,11 @@ OpenAI, Google Gemini, Anthropic Messages API, and opt-in Codex and Claude Code
 CLI runtimes.
 
 Gemma/Ollama uses the local `gemma` profile. With no endpoint configuration,
-Textus AI starts its owned Ollama Docker container and pulls the models required
-by that profile. The container lifecycle uses CNCF managed-process capabilities;
-callers cannot provide Docker arguments, images, or models.
+Textus AI declares its owned Ollama service through CNCF's managed
+service-container runtime and installs the models required by that profile after
+the service becomes ready. Container lifecycle is not exposed as component
+Process Execution capabilities; callers cannot provide Docker arguments,
+images, or models.
 
 ```yaml
 textus:
@@ -108,7 +110,7 @@ textus:
 ```
 
 Use an explicit endpoint for an externally managed Ollama service. It takes
-precedence over Docker provisioning:
+precedence over managed-service resolution:
 
 ```yaml
 textus:
@@ -118,10 +120,13 @@ textus:
       endpoint: http://ollama.example:11434
 ```
 
-The managed-container defaults are `ollama/ollama:latest`, container and volume
-`textus-ai-ollama`, and host port `11434`. Operators may override them with
-`textus.ai.gemma.docker.image`, `container-name`, `volume-name`, `host`, `port`,
-`executable`, and `startup-timeout-seconds`.
+The managed-service defaults are image `ollama/ollama:latest`, named volume
+`textus-ai-ollama`, and logical Ollama API port `11434`. Operators may override
+the image, volume, readiness timeout, and model-install timeout with
+`textus.ai.gemma.service.image`, `volume-name`, `startup-timeout-seconds`, and
+`model-install-timeout-seconds`. The runtime owns provider-specific container
+identity and host-port selection. Live Docker transport verification belongs to
+CNCF Phase 44 rather than the component's ordinary executable specifications.
 
 Codex CLI requires explicit enablement and an absolute executable path:
 
