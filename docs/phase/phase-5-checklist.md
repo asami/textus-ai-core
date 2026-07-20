@@ -1,6 +1,6 @@
 # Phase 5 Checklist - Local Gemma/Ollama Runtime Activation
 
-status=active
+status=complete
 phase=[Phase 5 - Local Gemma/Ollama Runtime Activation](phase-5.md)
 
 ## GO-01 Runtime Profile
@@ -30,6 +30,9 @@ phase=[Phase 5 - Local Gemma/Ollama Runtime Activation](phase-5.md)
 - [x] Verify a standard purpose selects the profile-owned model and reaches the
   registered Ollama HTTP binding.
 - [x] Verify fake-gateway lifecycle resolution, model-install convergence, and
-  external-endpoint precedence.
-- [ ] Run live Gemma provisioning as a heavy test with an available Docker
-  daemon and sufficient model-download capacity.
+      external-endpoint precedence.
+- [x] Add an opt-in `GemmaOllamaLiveSpec` that is cancelled during ordinary
+      test runs and exercises Docker service resolution, model installation,
+      and generation when explicitly enabled.
+- [x] Run live Gemma provisioning as a heavy test with an available Docker
+      daemon and sufficient model-download capacity.

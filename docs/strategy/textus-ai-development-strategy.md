@@ -223,11 +223,12 @@ completed on 2026-07-18.
   Google provider assembly became dependent only on merged CNCF configuration.
   The phase remains closed because this removes an ambient bootstrap fallback
   without changing its public contracts.
-- Phase 5: active on 2026-07-20 for local Gemma/Ollama runtime activation.
-- Latest phase closure: `docs/phase/phase-4-closure.md`
-- Current next task: validate the CNCF managed service-container Docker
-  transport and live Gemma provisioning against an available Docker daemon as
-  part of CNCF Phase 44 closure.
+- Phase 5: complete on 2026-07-21. The opt-in `GemmaOllamaLiveSpec` verified
+  the managed Docker service, retained model volume, `gemma:2b` generation,
+  and stop-on-shutdown cleanup through the component-facing runner path.
+- Latest phase closure: `docs/phase/phase-5-closure.md`
+- Current next task: begin Phase 6 only when CNCF Phase 45 has established the
+  MCP client contract.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

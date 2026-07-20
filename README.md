@@ -125,8 +125,23 @@ The managed-service defaults are image `ollama/ollama:latest`, named volume
 the image, volume, readiness timeout, and model-install timeout with
 `textus.ai.gemma.service.image`, `volume-name`, `startup-timeout-seconds`, and
 `model-install-timeout-seconds`. The runtime owns provider-specific container
-identity and host-port selection. Live Docker transport verification belongs to
-CNCF Phase 44 rather than the component's ordinary executable specifications.
+identity and host-port selection. CNCF Phase 44 verifies the generic Docker
+transport; the Textus AI consumer path is verified separately as an opt-in
+heavy test rather than an ordinary executable specification.
+
+Run the Textus AI consumer-path heavy test only on a machine with Docker, an
+available `ollama/ollama:latest` image, and enough capacity to download the
+`gemma:2b` model. The current CNCF service-container gateway resolves available
+images; image acquisition remains a deployment provisioning step:
+
+```bash
+TEXTUS_AI_LIVE_GEMMA_TEST=true \
+  sbt --batch 'testOnly org.simplemodeling.textus.ai.GemmaOllamaLiveSpec'
+```
+
+The test starts the runtime-owned service, installs the profile model, and
+submits one generation request. It stops the service on completion but retains
+the managed model volume for reuse.
 
 Codex CLI requires explicit enablement and an absolute executable path:
 
