@@ -37,7 +37,9 @@ final case class OllamaManagedServiceConfig(
       probe <- ServiceContainerReadinessProbe.httpC(portname, "/api/tags")
       readiness <- ServiceContainerReadinessPolicy.createC(probe, startupTimeoutMillis, 250L)
       volumename <- ServiceContainerVolumeName.parseC(volumeName)
-      persistence <- ServiceContainerPersistence.namedVolumesC(Vector(volumename))
+      volumetarget <- ServiceContainerMountPath.parseC("/root/.ollama")
+      volume <- ServiceContainerVolume.createC(volumename, volumetarget)
+      persistence <- ServiceContainerPersistence.namedVolumesC(Vector(volume))
       definition <- ServiceContainerDefinition.runtimeOwnedC(
         serviceid,
         ServiceContainerOwner(ServiceContainerOwnerKind.ComponentRuntime, ownerid),

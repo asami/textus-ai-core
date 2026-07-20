@@ -251,6 +251,10 @@ final class ComponentFactorySpec
       definition.exists(_.isSuccess) shouldBe true
       definition.flatMap(_.toOption).map(_.image.print) shouldBe Some("example/ollama:test")
       definition.flatMap(_.toOption).map(_.serviceId.print) shouldBe Some("ollama")
+      definition.flatMap(_.toOption).map(_.persistence).collect {
+        case x: org.goldenport.cncf.servicecontainer.ServiceContainerPersistence.NamedVolumes =>
+          x.volumes.map(volume => volume.name.print -> volume.target.print)
+      } shouldBe Some(Vector("textus-ai-test-models" -> "/root/.ollama"))
       component.scopeContext.processExecutionAdmissionOption shouldBe empty
       component.scopeContext.processExecutionDriverOption shouldBe empty
     }
