@@ -4,21 +4,22 @@ import org.goldenport.Consequence
 import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentOrigin, ExtensionPoint, Port, ServiceContract, VariationSelection}
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.mcp.client.*
-import org.goldenport.cncf.subsystem.Subsystem
+import org.goldenport.cncf.operationtool.*
+import org.goldenport.cncf.subsystem.DefaultSubsystemFactory
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 /*
- * Executable specification for the Textus AI MCP client consumer boundary.
+ * Executable specification for the Textus AI admitted tool-source consumer boundary.
  *
  * @since   Jul. 21, 2026
  * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
-final class McpClientConsumerSpec extends AnyWordSpec with Matchers with GivenWhenThen {
-  "Textus AI MCP client consumer" should {
+final class ToolSourceConsumerSpec extends AnyWordSpec with Matchers with GivenWhenThen {
+  "Textus AI admitted tool-source consumer" should {
     "receive only the runtime-admitted remote catalog through its logical input socket" in {
       Given("a Textus AI runtime profile naming one logical server set and a transport reporting an extra tool")
       given ExecutionContext = ExecutionContext.create()
@@ -26,17 +27,17 @@ final class McpClientConsumerSpec extends AnyWordSpec with Matchers with GivenWh
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
           "textus.ai.execution-classes.standard-work.mcp-server-set" ->
-            ConfigurationValue.StringValue("research")
+            ConfigurationValue.StringValue("research"),
+          "textus.ai.execution-classes.standard-work.operation-tool-set" ->
+            ConfigurationValue.StringValue("builtin-tools")
         )),
         ConfigurationTrace.empty
       )
-      val subsystem = new Subsystem(
-        name = "textus-ai-mcp-consumer-spec",
-        configuration = configuration
-      )
+      val subsystem = DefaultSubsystemFactory.default(configuration = configuration)
       val component = new ComponentFactory().create(
         ComponentCreate(subsystem, ComponentOrigin.Main)
       ).primary
+      subsystem.add(component)
       val serversetid = McpServerSetId.parseC("research").toOption.get
       val serverid = McpServerId.parseC("catalog").toOption.get
       val admittedname = McpToolName.parseC("paper.search").toOption.get
@@ -52,23 +53,54 @@ final class McpClientConsumerSpec extends AnyWordSpec with Matchers with GivenWh
         Vector(serverset),
         _transport_binding(transport)
       ).toOption.get
+      val operationtoolsetid = OperationToolSetId.parseC("builtin-tools").toOption.get
+      val operationidentity = OperationToolIdentity.parseC("admin.system.ping").toOption.get
+      val operationlimits = OperationToolLimits.createC(4, 4096, 4096, 1).toOption.get
+      val operationadmission = OperationToolAdmission.createC(
+        operationtoolsetid,
+        Vector(operationidentity),
+        operationlimits
+      ).toOption.get
+      val operationregistry = OperationToolRuntimeRegistry.createC(
+        subsystem,
+        Vector(operationadmission)
+      ).toOption.get
 
-      When("CNCF runtime assembly installs the admitted MCP client service into the Textus AI component")
+      When("CNCF runtime assembly installs both admitted services into the Textus AI component")
       val evidence = try {
-        val installed = registry.install(component)
+        val mcpinstalled = registry.install(component)
+        val operationinstalled = operationregistry.install(component)
         val socket = component.port.get[McpClientSocket]
+        val operationsocket = component.port.get[OperationToolSocket]
         val catalog = socket.flatMap(_.service(serversetid).toOption).flatMap(_.catalog.toOption)
-        (installed, socket, catalog)
+        val operationservice = operationsocket.flatMap(_.service(operationtoolsetid).toOption)
+        val operationcatalog = operationservice.flatMap(_.catalog.toOption)
+        val operationresult = operationservice.flatMap(_.withInvocation { invocation =>
+          invocation.invoke(OperationToolCall(operationidentity, org.goldenport.record.Record.empty))
+        }.toOption)
+        (
+          mcpinstalled,
+          operationinstalled,
+          socket,
+          operationsocket,
+          catalog,
+          operationcatalog,
+          operationresult
+        )
       } finally {
         registry.close()
         subsystem.shutdown()
       }
 
-      Then("the consumer sees only logical policy identity and the allowlisted provider-neutral tool")
+      Then("the consumer sees only logical policy identities and both runtime-admitted catalogs")
       evidence._1.isSuccess shouldBe true
-      evidence._2.map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("research"))
-      evidence._3.map(_.tools.map(_.identity.print)) shouldBe Some(Vector("catalog/paper.search"))
-      evidence._3.toVector.flatMap(_.tools).map(_.identity) should not contain deniedtool.identity
+      evidence._2.isSuccess shouldBe true
+      evidence._3.map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("research"))
+      evidence._4.map(_.toolSetIds) shouldBe Some(Vector(operationtoolsetid))
+      evidence._5.map(_.tools.map(_.identity.print)) shouldBe Some(Vector("catalog/paper.search"))
+      evidence._5.toVector.flatMap(_.tools).map(_.identity) should not contain deniedtool.identity
+      evidence._6.map(_.definitions.map(_.identity.print)) shouldBe Some(Vector("admin.system.ping"))
+      evidence._7 should not be empty
     }
   }
 

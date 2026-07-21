@@ -7,6 +7,7 @@ import org.goldenport.cncf.admission.ScopedConcurrencyAdmission
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.{ScopeContext, ScopeKind}
 import org.goldenport.cncf.mcp.client.McpClientSocket
+import org.goldenport.cncf.operationtool.OperationToolSocket
 import org.goldenport.cncf.processexecution.{LocalProcessExecutionDriver, ProcessExecutionAdmission, ProcessExecutionDriver, ProcessExecutionGrant, ProcessExecutionPolicy, ProcessProgramDefinition}
 import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.spi.ai.runner.AiRunnerApplicationPurposeRegistrationSocketSet
@@ -144,12 +145,18 @@ object ComponentFactory:
       case Consequence.Failure(conclusion) =>
         throw conclusion.getException.getOrElse(new IllegalArgumentException(conclusion.display))
     }
+    val operationtoolport = operationToolPortC(profiles) match {
+      case Consequence.Success(port) => port
+      case Consequence.Failure(conclusion) =>
+        throw conclusion.getException.getOrElse(new IllegalArgumentException(conclusion.display))
+    }
     withchat.withPort(
       Component.Port
         .of(
           runnerprovider
         )
       .orElse(mcpclientport)
+      .orElse(operationtoolport)
       .orElse(Component.Port.input(registrations))
       .orElse(withchat.port)
     )
@@ -161,6 +168,15 @@ object ComponentFactory:
       case Vector() => Consequence.success(Component.Port.empty)
       case requirements =>
         McpClientSocket.createC(requirements).map(Component.Port.input(_))
+    }
+
+  private[ai] def operationToolPortC(
+    profiles: AiProfileConfig
+  ): Consequence[Component.Port] =
+    profiles.operationToolRequirementsC.flatMap {
+      case Vector() => Consequence.success(Component.Port.empty)
+      case requirements =>
+        OperationToolSocket.createC(requirements).map(Component.Port.input(_))
     }
 
   private[ai] def ollamaManagedServiceConfig(

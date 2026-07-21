@@ -12,6 +12,7 @@ import org.goldenport.cncf.component.{Component, ExtensionPoint, Port}
 import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext, ScopeContext, ScopeKind}
 import org.goldenport.cncf.http.HttpDriver
 import org.goldenport.cncf.mcp.client.McpServerSetId
+import org.goldenport.cncf.operationtool.OperationToolSetId
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
 import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
@@ -407,6 +408,7 @@ final class TextusAiRunnerSpec
       Given("a Gemma-first web-analysis purpose with one operator-owned MCP server set")
       given ExecutionContext = ExecutionContext.create()
       var selectedserverset: Option[String] = None
+      var selectedoperationtoolset: Option[String] = None
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini"),
@@ -420,15 +422,17 @@ final class TextusAiRunnerSpec
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
         _profiles(configuration, "sanpomap-location-investigation" -> "web-analysis")
       ) {
-        override private[runtime] def generateWithMcpToolsC(
+        override private[runtime] def generateWithToolsC(
           selection: SpiSelection,
-          serverSet: McpServerSetId,
+          mcpServerSet: Option[McpServerSetId],
+          operationToolSet: Option[OperationToolSetId],
           prompt: String,
           temperature: Option[Double],
           maxTokens: Option[Int],
           properties: Vector[Property]
         )(using ExecutionContext): Consequence[GenerateResponse] = {
-          selectedserverset = Some(serverSet.print)
+          selectedserverset = mcpServerSet.map(_.print)
+          selectedoperationtoolset = operationToolSet.map(_.print)
           Consequence.success(GenerateResponse(
             "tool-grounded result",
             Some("gemma-fixture"),
@@ -436,7 +440,10 @@ final class TextusAiRunnerSpec
               "gemma.usage.input_tokens" -> "4",
               "gemma.usage.output_tokens" -> "2",
               "gemma.usage.total_tokens" -> "6",
+              "gemma.tool_calls" -> "1",
+              "gemma.tool_turns" -> "2",
               "gemma.mcp_calls" -> "1",
+              "gemma.operation_calls" -> "0",
               "gemma.mcp_turns" -> "2",
               "gemma.mcp_catalog_digest" -> "sha256:fixture"
             )
@@ -459,6 +466,7 @@ final class TextusAiRunnerSpec
 
       Then("the selected runtime path receives the resolved server set and publishes safe evidence")
       selectedserverset shouldBe Some("research-tools")
+      selectedoperationtoolset shouldBe None
       response.text shouldBe "tool-grounded result"
       response.metadata(AiExecutionFacts.OPERATIONAL_STRATEGY) shouldBe "tool-grounded"
       response.metadata(AiExecutionFacts.ATTEMPT_LINEAGE) shouldBe "1:gemma:tool-grounded:success"

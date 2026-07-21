@@ -1,4 +1,4 @@
-# Phase 6 - Gemma-First Strategy and MCP Tool Orchestration
+# Phase 6 - Gemma-First Strategy and Tool Orchestration
 
 status=active
 planned_at=2026-07-21
@@ -8,7 +8,9 @@ strategy=[Textus AI Development Strategy](../strategy/textus-ai-development-stra
 ## Purpose
 
 Execute bounded Gemma-first profiles and allow selected Textus AI runtime
-profiles to use an operator-owned MCP tool catalog through the existing
+profiles to use operator-owned internal Operation and remote MCP tool catalogs
+through separate CNCF input Ports and one Textus AI-owned provider catalog via
+the existing
 `generate` and `chat` operations. An application
 continues to select only its registered application purpose. Textus AI resolves
 the standard purpose, execution class, runtime profile, and admitted MCP server
@@ -26,10 +28,11 @@ set before it invokes a provider.
   payloads.
 - Account for each provider attempt with its own operator rate schedule; a
   commercial fallback is not admitted under the primary Gemma schedule.
-- Consume the CNCF Phase 45 MCP client Port and named server-set catalog.
+- Consume the CNCF Phase 45 MCP client Port and Phase 46 internal Operation
+  tool Port as separate admitted sources.
 - Bind MCP server-set selection to Textus AI runtime profile and execution
   class configuration only.
-- Convert the admitted MCP tools into provider-neutral function definitions and
+- Convert admitted internal and remote tools into provider-neutral function definitions and
   execute bounded function-call continuation loops.
 - Support Gemma/Ollama, OpenAI, and Google Gemini through their respective
   provider bindings while retaining current no-tool and built-in web-tool
@@ -79,17 +82,19 @@ release revision is `72ed97e`. OS-04 remains active until an assembled local
 Gemma repair is recorded.
 
 MO-01 is complete. An execution class may select one logical
-`mcp-server-set`; the selected runtime profile publishes the distinct logical
-requirements through a CNCF `McpClientSocket` input Port. Application-purpose
-configuration cannot select MCP connectivity, and the component sees neither
-Codex MCP source configuration nor endpoint, transport, or credential data.
+`operation-tool-set`, `mcp-server-set`, or both; the selected runtime profile
+publishes distinct logical requirements through CNCF `OperationToolSocket` and
+`McpClientSocket` input Ports. Application-purpose configuration cannot select
+Operation or MCP connectivity, and the component sees neither runtime policy,
+Codex MCP source configuration, endpoint, transport, nor credential data.
 Provider-neutral catalog adaptation and function-call continuation begin in
 MO-02.
 
-MO-02 and MO-03 are complete. `McpToolOrchestrator` projects only the catalog
-admitted by the assembled CNCF `McpClientSocket` into deterministic runtime
-function identifiers, validates returned arguments against the original typed
-schema, and invokes tools only through CNCF's scoped invocation. The loop is
+MO-02 and MO-03 are complete. `ToolOrchestrator` projects catalogs admitted by
+the assembled CNCF `OperationToolSocket` and `McpClientSocket` into
+deterministic runtime function identifiers, validates returned arguments
+against the original typed schema, and invokes each source only through its
+own CNCF scoped invocation. The loop is
 bounded by turn, call, catalog, projected-definition, argument, result, and
 elapsed-time limits. Gemma/Ollama implements the common `ToolCallingChatService`
 through `/api/chat`; ordinary generate/chat requests do not use that protocol.

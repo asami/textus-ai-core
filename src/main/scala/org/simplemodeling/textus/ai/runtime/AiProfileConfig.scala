@@ -5,6 +5,7 @@ import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.mcp.client.{McpClientRequirement, McpServerSetId}
+import org.goldenport.cncf.operationtool.{OperationToolRequirement, OperationToolSetId}
 import org.goldenport.cncf.spi.ai.runner.{AiExecutionClass, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiTool}
 import org.goldenport.configuration.ResolvedConfiguration
 
@@ -39,7 +40,8 @@ private[textus] final case class AiRuntimeExecution(
   model: String,
   reasoningLevel: Option[String] = None,
   tools: Vector[AiTool] = Vector.empty,
-  mcpServerSet: Option[McpServerSetId] = None
+  mcpServerSet: Option[McpServerSetId] = None,
+  operationToolSet: Option[OperationToolSetId] = None
 ) {
   def codexExecutionProfile: String = s"runtime-${executionClass.id}"
 
@@ -785,6 +787,26 @@ private[textus] final class AiProfileConfig(
         }
       } yield requirements.distinct
 
+  /** Runtime-owned in-process Operation tool requirements published separately from remote MCP. */
+  def operationToolRequirementsC: Consequence[Vector[OperationToolRequirement]] =
+    if (_config_string(Vector("textus.ai.profile")).isEmpty)
+      Consequence.success(Vector.empty)
+    else
+      for {
+        _ <- _reject_legacy_configuration
+        profile <- _runtime_profile_c
+        requirements <- profile.executions.keys.toVector.sortBy(_.id).foldLeft(
+          Consequence.success(Vector.empty[OperationToolRequirement])
+        ) { (z, executionclass) =>
+          for {
+            values <- z
+            execution <- _runtime_execution_c(profile, executionclass)
+          } yield execution.operationToolSet
+            .map(id => values :+ OperationToolRequirement(id))
+            .getOrElse(values)
+        }
+      } yield requirements.distinct
+
   def gemmaModelsC: Consequence[Option[Vector[String]]] =
     for {
       _ <- _reject_legacy_configuration
@@ -928,7 +950,17 @@ private[textus] final class AiProfileConfig(
           case Some(value) => McpServerSetId.parseC(value).map(Some(_))
           case None => Consequence.success(default.mcpServerSet)
         }
-        mcpserversetc.map { mcpserverset =>
+        val operationtoolsetc = _config_string(
+          _execution_class_keys(executionclass.id, "operation-tool-set") ++
+            _execution_class_keys(executionclass.id, "operationToolSet")
+        ) match {
+          case Some(value) => OperationToolSetId.parseC(value).map(Some(_))
+          case None => Consequence.success(default.operationToolSet)
+        }
+        for {
+          mcpserverset <- mcpserversetc
+          operationtoolset <- operationtoolsetc
+        } yield {
           default.copy(
             provider = provider,
             mode = mode,
@@ -936,7 +968,8 @@ private[textus] final class AiProfileConfig(
             model = model,
             reasoningLevel = reasoning,
             tools = tools,
-            mcpServerSet = mcpserverset
+            mcpServerSet = mcpserverset,
+            operationToolSet = operationtoolset
           )
         }
       case None =>

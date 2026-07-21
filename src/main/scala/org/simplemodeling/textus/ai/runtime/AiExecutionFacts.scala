@@ -304,7 +304,9 @@ private[textus] object AiExecutionFacts {
           "anthropic.usage.total_tokens" | "anthropic.usage.cached_input_tokens" => true
       case "gemma.finish_reason" |
           "gemma.usage.input_tokens" | "gemma.usage.output_tokens" | "gemma.usage.total_tokens" |
-          "gemma.mcp_calls" | "gemma.mcp_turns" | "gemma.mcp_catalog_digest" => true
+          "gemma.tool_calls" | "gemma.tool_turns" | "gemma.tool_catalog_digest" |
+          "gemma.mcp_calls" | "gemma.mcp_turns" | "gemma.mcp_catalog_digest" |
+          "gemma.operation_calls" => true
       case "codex.finish_reason" => true
       case "claude.finish_reason" | "claude.session_id" |
           "claude.duration_ms" | "claude.num_turns" | "claude.profile" => true
@@ -416,7 +418,7 @@ private[textus] object AiExecutionFacts {
         "url_citations"
       )
       case "openai" => Vector("web_search_calls")
-      case "gemma" => Vector("mcp_calls", "mcp_turns")
+      case "gemma" => Vector("tool_calls", "tool_turns", "mcp_calls", "operation_calls")
       case _ => Vector.empty
     }
     labels.flatMap { label =>

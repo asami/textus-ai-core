@@ -6,8 +6,11 @@ import org.goldenport.Consequence
 import org.goldenport.cncf.component.{Component, ExtensionPoint, Port, ServiceContract, VariationSelection}
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.mcp.client.*
+import org.goldenport.cncf.operationtool.*
 import org.goldenport.cncf.spi.SpiSelection
+import org.goldenport.cncf.subsystem.DefaultSubsystemFactory
 import org.goldenport.protocol.Property
+import org.goldenport.protocol.operation.OperationResponse
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -15,14 +18,15 @@ import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
 
 /*
- * Executable specification for provider-neutral MCP function orchestration.
+ * Executable specification for provider-neutral internal and remote tool
+ * function orchestration.
  *
  * @since   Jul. 21, 2026
  * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
-final class McpToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhenThen {
-  "McpToolOrchestrator" should {
+final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhenThen {
+  "ToolOrchestrator" should {
     "execute only an admitted tool and continue the model turn with its result" in {
       Given("one admitted MCP tool and a tool-capable model that requests it")
       given ExecutionContext = ExecutionContext.create()
@@ -30,7 +34,7 @@ final class McpToolOrchestratorSpec extends AnyWordSpec with Matchers with Given
       val service = new _ToolService
 
       When("the runtime runs the bounded tool loop")
-      val result = McpToolOrchestrator.generateC(
+      val result = ToolOrchestrator.generateC(
         service,
         fixture.invocation,
         "Find the route context.",
@@ -50,6 +54,44 @@ final class McpToolOrchestratorSpec extends AnyWordSpec with Matchers with Given
       result.toOption.toVector.flatMap(_.metadata.values).exists(_.contains("station context")) shouldBe false
     }
 
+    "compose internal Operation and remote MCP catalogs without identity collapse" in {
+      Given("separate admitted internal and remote catalogs containing one tool each")
+      given ExecutionContext = ExecutionContext.create()
+      val mcpfixture = _fixture()
+      val subsystem = DefaultSubsystemFactory.default(Some("textus-ai-operation-tool-composition"))
+      val identity = OperationToolIdentity.parseC("admin.system.ping").toOption.get
+      val setid = OperationToolSetId.parseC("builtin-tools").toOption.get
+      val limits = OperationToolLimits.createC(4, 4096, 4096, 1).toOption.get
+      val admission = OperationToolAdmission.createC(setid, Vector(identity), limits).toOption.get
+      val catalog = OperationToolCatalogBuilder.createC(subsystem, admission).toOption.get
+      val operationinvocation = new _OperationInvocation(catalog)
+      val service = new _TwoSourceToolService
+
+      When("Textus AI projects and executes both sources in one provider-neutral loop")
+      val result = ToolOrchestrator.generateC(
+        service,
+        Some(mcpfixture.invocation),
+        Some(operationinvocation),
+        "Use both admitted sources.",
+        None,
+        Some(128),
+        Vector.empty
+      )
+
+      Then("source-specific names remain distinct and each call uses its owning invocation boundary")
+      result.toOption.map(_.text) shouldBe Some("Grounded answer from both sources")
+      service.toolDefinitions.map(_.name).exists(_.startsWith("mcp_")) shouldBe true
+      service.toolDefinitions.map(_.name).exists(_.startsWith("operation_")) shouldBe true
+      service.toolDefinitions.map(_.name).distinct.size shouldBe service.toolDefinitions.size
+      operationinvocation.calls.map(_.identity.print) shouldBe Vector("admin.system.ping")
+      mcpfixture.calls.map(_.toolIdentity.print) shouldBe Vector("research/places.lookup")
+      result.toOption.flatMap(_.metadata.get("gemma.tool_catalog_digest")) should not be empty
+      result.toOption.flatMap(_.metadata.get("gemma.tool_calls")) shouldBe Some("2")
+      result.toOption.flatMap(_.metadata.get("gemma.mcp_calls")) shouldBe Some("1")
+      result.toOption.flatMap(_.metadata.get("gemma.operation_calls")) shouldBe Some("1")
+      subsystem.shutdown()
+    }
+
     "reject a model-requested function outside the admitted catalog" in {
       Given("a model response naming an unadmitted function")
       given ExecutionContext = ExecutionContext.create()
@@ -57,7 +99,7 @@ final class McpToolOrchestratorSpec extends AnyWordSpec with Matchers with Given
       val service = new _UnknownToolService
 
       When("the runtime resolves the response")
-      val result = McpToolOrchestrator.generateC(
+      val result = ToolOrchestrator.generateC(
         service,
         fixture.invocation,
         "Find the route context.",
@@ -78,7 +120,7 @@ final class McpToolOrchestratorSpec extends AnyWordSpec with Matchers with Given
       val service = new _TooManyCallsService
 
       When("the bounded loop processes the first model turn")
-      val result = McpToolOrchestrator.generateC(
+      val result = ToolOrchestrator.generateC(
         service,
         fixture.invocation,
         "Find the route context.",
@@ -97,8 +139,8 @@ final class McpToolOrchestratorSpec extends AnyWordSpec with Matchers with Given
       val initial = AiInputTokenEstimate(10L, 10L, 0, 0L)
 
       When("the tool-loop admission envelope is calculated")
-      val input = McpToolOrchestrator.admissionInputEstimate(initial, Some(100))
-      val output = McpToolOrchestrator.admissionMaxOutputTokensC(Some(100)).toOption.flatten
+      val input = ToolOrchestrator.admissionInputEstimate(initial, Some(100))
+      val output = ToolOrchestrator.admissionMaxOutputTokensC(Some(100)).toOption.flatten
 
       Then("all possible turns, catalog definitions, tool results, and continuation output are covered")
       input.tokens shouldBe 1049216L
@@ -112,7 +154,7 @@ final class McpToolOrchestratorSpec extends AnyWordSpec with Matchers with Given
       val service = new _ToolService
 
       When("the model continues after the admitted tool call")
-      val result = McpToolOrchestrator.generateC(
+      val result = ToolOrchestrator.generateC(
         service,
         fixture.invocation,
         "Find the route context.",
@@ -217,6 +259,52 @@ final class McpToolOrchestratorSpec extends AnyWordSpec with Matchers with Given
         Vector(McpClientContent.Text(resulttext)),
         None
       ))
+    }
+  }
+
+  private final class _OperationInvocation(
+    value: OperationToolCatalog
+  ) extends OperationToolInvocation {
+    var calls: Vector[OperationToolCall] = Vector.empty
+
+    def catalog: Consequence[OperationToolCatalog] = Consequence.success(value)
+
+    def invoke(call: OperationToolCall)(using ExecutionContext): Consequence[OperationToolResult] = {
+      calls = calls :+ call
+      Consequence.success(OperationToolResult(OperationResponse.Scalar("internal context")))
+    }
+  }
+
+  private final class _TwoSourceToolService extends ToolCallingChatService {
+    private var _turn = 0
+    var toolDefinitions: Vector[ToolDefinition] = Vector.empty
+
+    def chat(req: ChatRequest): Consequence[ChatResponse] =
+      Consequence.success(ChatResponse(Message(MessageRole.Assistant, "unused")))
+
+    def chatWithTools(req: ToolChatRequest): Consequence[ToolChatResponse] = {
+      _turn += 1
+      toolDefinitions = req.tools
+      if (_turn == 1) {
+        val function = req.tools.find(_.name.startsWith("operation_")).getOrElse(fail("Operation function missing"))
+        Consequence.success(ToolChatResponse(
+          ToolChatMessage("assistant", toolCalls = Vector(ToolCall(function.name, Json.obj()))),
+          Some("fixture")
+        ))
+      } else if (_turn == 2) {
+        val function = req.tools.find(_.name.startsWith("mcp_")).getOrElse(fail("MCP function missing"))
+        Consequence.success(ToolChatResponse(
+          ToolChatMessage(
+            "assistant",
+            toolCalls = Vector(ToolCall(function.name, Json.obj("query" -> Json.fromString("Nakano"))))
+          ),
+          Some("fixture")
+        ))
+      } else
+        Consequence.success(ToolChatResponse(
+          ToolChatMessage("assistant", "Grounded answer from both sources"),
+          Some("fixture")
+        ))
     }
   }
 

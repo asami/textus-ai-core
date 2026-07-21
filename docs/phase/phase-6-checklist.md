@@ -1,7 +1,7 @@
-# Phase 6 Checklist - Gemma-First Strategy and MCP Tool Orchestration
+# Phase 6 Checklist - Gemma-First Strategy and Tool Orchestration
 
 status=active
-phase=[Phase 6 - Gemma-First Strategy and MCP Tool Orchestration](phase-6.md)
+phase=[Phase 6 - Gemma-First Strategy and Tool Orchestration](phase-6.md)
 
 ## Stage OS-01 - Profile-Owned Strategy
 
@@ -79,10 +79,14 @@ Stage Status:
 
 - [x] Adapt the CNCF MCP client catalog to provider-neutral function
   definitions with stable tool identities.
+- [x] Consume the CNCF internal Operation-tool socket separately and compose
+  both sources only inside Textus AI, retaining `component.service.operation`
+  and `server/tool` source identities and invocation boundaries.
 - [x] Define bounded turns, calls, elapsed time, argument size, and result-size
   behavior with structured failure propagation.
-- [x] Record redacted MCP server-set/tool/summary facts in CallTree and response
-  metadata without endpoint, credential, prompt, argument, or raw-result data.
+- [x] Record redacted source identities and total/source-specific tool summary
+  facts in CallTree and response metadata without endpoint, credential, prompt,
+  argument, or raw-result data.
 
 ## Stage MO-03 - Local Provider Binding
 

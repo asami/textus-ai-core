@@ -45,6 +45,7 @@ textus:
       deep-consideration:
         strategy-max-repairs: 1
         strategy-max-provider-attempts: 2
+        operation-tool-set: builtin-tools
         mcp-server-set: admitted-research
 ```
 
@@ -84,18 +85,21 @@ CallTree attributes.
 ## Tool-Grounded Execution
 
 `tool-grounded` is available only when the resolved runtime execution names an
-operator-owned `mcp-server-set`. The application request and application-purpose
-registration cannot select an endpoint, transport, credential, server, or
-individual tool. Textus AI obtains that server set only through the assembled
-CNCF `McpClientSocket`, reads its admitted catalog, and invokes a selected tool
-only through CNCF's invocation scope.
+operator-owned `operation-tool-set`, `mcp-server-set`, or both. The application
+request and application-purpose registration cannot select an Operation,
+endpoint, transport, credential, server, or individual tool. Textus AI obtains
+the separately admitted sources only through the assembled CNCF
+`OperationToolSocket` and `McpClientSocket`, and invokes each selected tool only
+through its owning CNCF invocation scope.
 
-Textus AI exposes an admitted tool to a provider under a deterministic,
-runtime-owned `mcp_<sha256-prefix>` function name. It never exposes the
-provider-native MCP configuration or accepts a caller-supplied function name.
-Tool results are returned to the continuation as bounded text; only server-set
-identity, call count, turn count, and catalog digest can appear in safe
-execution facts.
+Textus AI exposes admitted tools under deterministic runtime-owned
+`operation_<sha256-prefix>` and `mcp_<sha256-prefix>` function names. It never
+collapses their source identities, exposes provider-native MCP configuration,
+or accepts a caller-supplied function name.
+Tool results are returned to the continuation as bounded text. Safe execution
+facts distinguish total tool calls and turns from source-specific MCP and
+Operation call counts, and may include only logical source identity and catalog
+digests. They never include arguments, results, endpoints, or provider payloads.
 
 The common loop is deliberately bounded: four model turns, eight total tool
 calls, 32 catalog tools, 4 KiB per projected function definition, 16 KiB per

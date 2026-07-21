@@ -5,17 +5,20 @@ import io.circe.{Json, JsonObject}
 import org.goldenport.Consequence
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.mcp.client.*
+import org.goldenport.cncf.operationtool.*
 import org.goldenport.protocol.Property
+import org.goldenport.record.Record
 import org.simplemodeling.textus.ai.ai.*
 
 /*
- * Bounded bridge from an admitted CNCF MCP catalog to a tool-capable model.
+ * Bounded bridge from admitted internal Operation and remote MCP catalogs to
+ * a tool-capable model. Source identities and invocation paths stay separate.
  *
  * @since   Jul. 21, 2026
  * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
-private[textus] object McpToolOrchestrator {
+private[textus] object ToolOrchestrator {
   private val MAXIMUM_TURNS = 4
   private val MAXIMUM_TOOL_CALLS = 8
   private val MAXIMUM_CATALOG_TOOLS = 32
@@ -48,7 +51,7 @@ private[textus] object McpToolOrchestrator {
       try Consequence.success(Some(Math.toIntExact(Math.multiplyExact(value.toLong, MAXIMUM_TURNS.toLong))))
       catch {
         case _: ArithmeticException => Consequence.configurationInvalid(
-          "MCP tool-loop output bound exceeds supported integer range"
+          "Tool-loop output bound exceeds supported integer range"
         )
       }
     case None => Consequence.success(None)
@@ -62,12 +65,25 @@ private[textus] object McpToolOrchestrator {
     maxTokens: Option[Int],
     properties: Vector[Property]
   )(using ExecutionContext): Consequence[GenerateResponse] =
+    generateC(service, Some(invocation), None, prompt, temperature, maxTokens, properties)
+
+  def generateC(
+    service: ToolCallingChatService,
+    mcpinvocation: Option[McpClientInvocation],
+    operationinvocation: Option[OperationToolInvocation],
+    prompt: String,
+    temperature: Option[Double],
+    maxTokens: Option[Int],
+    properties: Vector[Property]
+  )(using ExecutionContext): Consequence[GenerateResponse] =
     for {
-      catalog <- invocation.catalog
-      bindings <- _bindings_c(catalog)
+      mcpcatalog <- mcpinvocation.map(_.catalog.map(Some(_))).getOrElse(Consequence.success(None))
+      operationcatalog <- operationinvocation.map(_.catalog.map(Some(_))).getOrElse(Consequence.success(None))
+      bindings <- _bindings_c(mcpcatalog, operationcatalog)
       result <- _run_c(
         service,
-        invocation,
+        mcpinvocation,
+        operationinvocation,
         bindings,
         Vector(ToolChatMessage("user", prompt)),
         temperature,
@@ -75,6 +91,8 @@ private[textus] object McpToolOrchestrator {
         properties,
         turns = 0,
         calls = 0,
+        mcpCalls = 0,
+        operationCalls = 0,
         metadata = Map.empty,
         startedatnanos = System.nanoTime()
       )
@@ -82,47 +100,82 @@ private[textus] object McpToolOrchestrator {
       result.response.message.content,
       result.response.model,
       _aggregate_metadata(result.metadata, result.response.metadata) ++ Map(
-        "gemma.mcp_calls" -> result.calls.toString,
-        "gemma.mcp_turns" -> result.turns.toString,
-        "gemma.mcp_catalog_digest" -> AiExecutionFacts.digest(
-          bindings.map(_.tool.identity.print).mkString("\n")
+        "gemma.tool_calls" -> result.calls.toString,
+        "gemma.tool_turns" -> result.turns.toString,
+        "gemma.mcp_calls" -> result.mcpCalls.toString,
+        "gemma.operation_calls" -> result.operationCalls.toString,
+        "gemma.tool_catalog_digest" -> AiExecutionFacts.digest(
+          bindings.map(_.identity).mkString("\n")
         )
-      )
+      ) ++ _compatibility_metadata(bindings, result)
     )
 
-  private final case class _Binding(
+  private sealed abstract class _Binding {
+    def functionname: String
+    def identity: String
+    def definition: ToolDefinition
+  }
+
+  private final case class _McpBinding(
     functionname: String,
     tool: McpClientTool,
     definition: ToolDefinition
-  )
+  ) extends _Binding {
+    def identity: String = s"mcp:${tool.identity.print}"
+  }
+
+  private final case class _OperationBinding(
+    functionname: String,
+    tool: OperationToolDefinition,
+    definition: ToolDefinition
+  ) extends _Binding {
+    def identity: String = s"operation:${tool.identity.print}"
+  }
 
   private final case class _Result(
     response: ToolChatResponse,
     turns: Int,
     calls: Int,
+    mcpCalls: Int,
+    operationCalls: Int,
     metadata: Map[String, String]
   )
 
-  private def _bindings_c(catalog: McpClientCatalog): Consequence[Vector[_Binding]] = {
-    if (catalog.tools.size > MAXIMUM_CATALOG_TOOLS)
+  private def _bindings_c(
+    mcpcatalog: Option[McpClientCatalog],
+    operationcatalog: Option[OperationToolCatalog]
+  ): Consequence[Vector[_Binding]] = {
+    val mcptools = mcpcatalog.toVector.flatMap(_.tools)
+    val operationtools = operationcatalog.toVector.flatMap(_.definitions)
+    if (mcptools.size + operationtools.size > MAXIMUM_CATALOG_TOOLS)
       Consequence.operationIllegal(
-        "ai.mcp-tool-catalog",
-        s"MCP resource limit: catalog tool count ${catalog.tools.size} exceeds $MAXIMUM_CATALOG_TOOLS"
+        "ai.tool-catalog",
+        s"Tool resource limit: catalog tool count ${mcptools.size + operationtools.size} exceeds $MAXIMUM_CATALOG_TOOLS"
       )
     else {
-      val bindings = catalog.tools.map { tool =>
+      val mcpbindings = mcptools.map { tool =>
         val suffix = AiExecutionFacts.digest(tool.identity.print).stripPrefix("sha256:").take(24)
         val description = _description(tool)
         val definition = ToolDefinition(s"mcp_$suffix", description, _schema_json(tool.inputSchema))
-        _Binding(definition.name, tool, definition)
+        _McpBinding(definition.name, tool, definition)
       }
+      val operationbindings = operationtools.map { tool =>
+        val suffix = AiExecutionFacts.digest(tool.identity.print).stripPrefix("sha256:").take(24)
+        val definition = ToolDefinition(
+          s"operation_$suffix",
+          Option(tool.description).map(_.trim).filter(_.nonEmpty),
+          _operation_schema_json(tool.inputSchema)
+        )
+        _OperationBinding(definition.name, tool, definition)
+      }
+      val bindings: Vector[_Binding] = mcpbindings ++ operationbindings
       if (bindings.map(_.functionname).distinct.size != bindings.size)
-        Consequence.configurationInvalid("MCP function-name mapping collision")
+        Consequence.configurationInvalid("Tool function-name mapping collision")
       else {
         bindings.find(binding => _definition_bytes(binding.definition) > MAXIMUM_FUNCTION_DEFINITION_BYTES) match {
           case Some(binding) => Consequence.operationIllegal(
-            "ai.mcp-tool-catalog",
-            s"MCP resource limit: function definition exceeds byte bound for ${binding.tool.identity.print}"
+            "ai.tool-catalog",
+            s"Tool resource limit: function definition exceeds byte bound for ${binding.identity}"
           )
           case None => Consequence.success(bindings)
         }
@@ -132,7 +185,8 @@ private[textus] object McpToolOrchestrator {
 
   private def _run_c(
     service: ToolCallingChatService,
-    invocation: McpClientInvocation,
+    mcpinvocation: Option[McpClientInvocation],
+    operationinvocation: Option[OperationToolInvocation],
     bindings: Vector[_Binding],
     messages: Vector[ToolChatMessage],
     temperature: Option[Double],
@@ -140,29 +194,43 @@ private[textus] object McpToolOrchestrator {
     properties: Vector[Property],
     turns: Int,
     calls: Int,
+    mcpCalls: Int,
+    operationCalls: Int,
     metadata: Map[String, String],
     startedatnanos: Long
   )(using ExecutionContext): Consequence[_Result] =
     if (_elapsed_millis(startedatnanos) > MAXIMUM_ELAPSED_MILLIS)
       Consequence.operationIllegal(
-        "ai.mcp-tool-loop",
-        s"MCP resource limit: tool loop exceeded elapsed-time bound: $MAXIMUM_ELAPSED_MILLIS ms"
+        "ai.tool-loop",
+        s"Tool resource limit: tool loop exceeded elapsed-time bound: $MAXIMUM_ELAPSED_MILLIS ms"
       )
     else if (turns >= MAXIMUM_TURNS)
       Consequence.operationIllegal(
-        "ai.mcp-tool-loop",
-        s"MCP tool loop exhausted bounded turns: $MAXIMUM_TURNS"
+        "ai.tool-loop",
+        s"Tool loop exhausted bounded turns: $MAXIMUM_TURNS"
       )
     else {
       val definitions = bindings.map(_.definition)
       service.chatWithTools(ToolChatRequest(messages, definitions, temperature, maxTokens, properties)).flatMap { response =>
         val mergedmetadata = _aggregate_metadata(metadata, response.metadata)
         if (response.message.toolCalls.isEmpty)
-          Consequence.success(_Result(response, turns + 1, calls, mergedmetadata))
+          Consequence.success(_Result(
+            response,
+            turns + 1,
+            calls,
+            mcpCalls,
+            operationCalls,
+            mergedmetadata
+          ))
         else {
           val byname = bindings.map(x => x.functionname -> x).toMap
+          val sourcecounts = response.message.toolCalls.flatMap(call => byname.get(call.name)).foldLeft((0, 0)) {
+            case ((mcp, operation), _: _McpBinding) => (mcp + 1, operation)
+            case ((mcp, operation), _: _OperationBinding) => (mcp, operation + 1)
+          }
           _invoke_calls_c(
-            invocation,
+            mcpinvocation,
+            operationinvocation,
             byname,
             response.message.toolCalls,
             calls,
@@ -170,7 +238,8 @@ private[textus] object McpToolOrchestrator {
           ).flatMap { toolmessages =>
             _run_c(
               service,
-              invocation,
+              mcpinvocation,
+              operationinvocation,
               bindings,
               messages ++ Vector(response.message) ++ toolmessages,
               temperature,
@@ -178,6 +247,8 @@ private[textus] object McpToolOrchestrator {
               properties,
               turns + 1,
               calls + response.message.toolCalls.size,
+              mcpCalls + sourcecounts._1,
+              operationCalls + sourcecounts._2,
               mergedmetadata,
               startedatnanos
             )
@@ -187,7 +258,8 @@ private[textus] object McpToolOrchestrator {
     }
 
   private def _invoke_calls_c(
-    invocation: McpClientInvocation,
+    mcpinvocation: Option[McpClientInvocation],
+    operationinvocation: Option[OperationToolInvocation],
     bindings: Map[String, _Binding],
     calls: Vector[ToolCall],
     priorcalls: Int,
@@ -195,34 +267,57 @@ private[textus] object McpToolOrchestrator {
   )(using ExecutionContext): Consequence[Vector[ToolChatMessage]] =
     if (calls.size + priorcalls > MAXIMUM_TOOL_CALLS)
       Consequence.operationIllegal(
-        "ai.mcp-tool-loop",
-        s"MCP resource limit: tool-loop call count ${calls.size + priorcalls} exceeds $MAXIMUM_TOOL_CALLS"
+        "ai.tool-loop",
+        s"Tool resource limit: tool-loop call count ${calls.size + priorcalls} exceeds $MAXIMUM_TOOL_CALLS"
       )
     else calls.foldLeft(Consequence.success(Vector.empty[ToolChatMessage])) { case (z, call) =>
       for {
         messages <- z
         _ <- if (_elapsed_millis(startedatnanos) <= MAXIMUM_ELAPSED_MILLIS) Consequence.unit else
           Consequence.operationIllegal(
-            "ai.mcp-tool-loop",
-            s"MCP resource limit: tool loop exceeded elapsed-time bound: $MAXIMUM_ELAPSED_MILLIS ms"
+            "ai.tool-loop",
+            s"Tool resource limit: tool loop exceeded elapsed-time bound: $MAXIMUM_ELAPSED_MILLIS ms"
           )
         binding <- bindings.get(call.name).map(Consequence.success).getOrElse(
-          Consequence.configurationInvalid("Model requested an unadmitted MCP function")
+          Consequence.configurationInvalid("Model requested an unadmitted tool function")
         )
         _ <- if (_utf8_bytes(call.arguments) <= MAXIMUM_TOOL_ARGUMENT_BYTES) Consequence.unit else
           Consequence.operationIllegal(
-            "ai.mcp-tool-loop",
-            s"MCP resource limit: tool arguments exceed byte bound: $MAXIMUM_TOOL_ARGUMENT_BYTES"
+            "ai.tool-loop",
+            s"Tool resource limit: tool arguments exceed byte bound: $MAXIMUM_TOOL_ARGUMENT_BYTES"
           )
-        arguments <- _mcp_object_c(call.arguments)
-        request <- McpClientCall.createC(binding.tool.identity, arguments)
-        result <- invocation.invoke(request)
+        result <- _invoke_binding_c(binding, call.arguments, mcpinvocation, operationinvocation)
       } yield messages :+ ToolChatMessage(
         role = "tool",
         toolName = Some(call.name),
-        content = _render_result(result)
+        content = result
       )
     }
+
+  private def _invoke_binding_c(
+    binding: _Binding,
+    arguments: Json,
+    mcpinvocation: Option[McpClientInvocation],
+    operationinvocation: Option[OperationToolInvocation]
+  )(using ExecutionContext): Consequence[String] = binding match {
+    case value: _McpBinding =>
+      for {
+        invocation <- mcpinvocation.map(Consequence.success).getOrElse(
+          Consequence.serviceUnavailable("Remote MCP invocation is unavailable")
+        )
+        converted <- _mcp_object_c(arguments)
+        request <- McpClientCall.createC(value.tool.identity, converted)
+        result <- invocation.invoke(request)
+      } yield _render_result(result)
+    case value: _OperationBinding =>
+      for {
+        invocation <- operationinvocation.map(Consequence.success).getOrElse(
+          Consequence.serviceUnavailable("Internal Operation tool invocation is unavailable")
+        )
+        converted <- _operation_record_c(arguments)
+        result <- invocation.invoke(OperationToolCall(value.tool.identity, converted))
+      } yield _truncate_utf8(result.response.print, MAXIMUM_TOOL_RESULT_BYTES)
+  }
 
   private def _schema_json(schema: McpInputSchema): Json = schema match {
     case McpInputSchema.AnyValue => Json.obj()
@@ -248,6 +343,44 @@ private[textus] object McpToolOrchestrator {
         "additionalProperties" -> Json.fromBoolean(additional)
       )
   }
+
+  private def _operation_schema_json(schema: OperationToolInputSchema): Json = schema match {
+    case OperationToolInputSchema.AnyValue => Json.obj()
+    case OperationToolInputSchema.StringValue => Json.obj("type" -> Json.fromString("string"))
+    case OperationToolInputSchema.BooleanValue => Json.obj("type" -> Json.fromString("boolean"))
+    case OperationToolInputSchema.IntegerValue => Json.obj("type" -> Json.fromString("integer"))
+    case OperationToolInputSchema.NumberValue => Json.obj("type" -> Json.fromString("number"))
+    case OperationToolInputSchema.ArrayValue(items) => Json.obj(
+      "type" -> Json.fromString("array"),
+      "items" -> _operation_schema_json(items)
+    )
+    case OperationToolInputSchema.ObjectValue(fields) =>
+      Json.obj(
+        "type" -> Json.fromString("object"),
+        "properties" -> Json.fromJsonObject(JsonObject.fromIterable(fields.map { field =>
+          field.name -> _operation_schema_json(field.schema)
+        })),
+        "required" -> Json.fromValues(fields.filter(_.required).map(x => Json.fromString(x.name))),
+        "additionalProperties" -> Json.False
+      )
+  }
+
+  private def _operation_record_c(value: Json): Consequence[Record] =
+    value.asObject.map { fields =>
+      Consequence.success(Record.data(fields.toVector.map { case (name, child) =>
+        name -> _json_value(child)
+      }: _*))
+    }.getOrElse(Consequence.valueInvalid("Operation tool arguments must be a JSON object"))
+
+  private def _json_value(value: Json): Any =
+    value.fold(
+      null,
+      identity,
+      number => number.toBigInt.orElse(number.toBigDecimal).getOrElse(number.toString),
+      identity,
+      values => values.map(_json_value),
+      fields => Record.data(fields.toVector.map { case (name, child) => name -> _json_value(child) }: _*)
+    )
 
   private def _mcp_object_c(value: Json): Consequence[McpValue.ObjectValue] =
     value.asObject.map { fields =>
@@ -354,5 +487,19 @@ private[textus] object McpToolOrchestrator {
       else after.getOrElse(key, before.getOrElse(key, ""))
       key -> value
     }.toMap
+  }
+
+  private def _compatibility_metadata(
+    bindings: Vector[_Binding],
+    result: _Result
+  ): Map[String, String] = {
+    val mcpidentities = bindings.collect { case binding: _McpBinding => binding.tool.identity.print }
+    if (mcpidentities.isEmpty)
+      Map.empty
+    else
+      Map(
+        "gemma.mcp_turns" -> result.turns.toString,
+        "gemma.mcp_catalog_digest" -> AiExecutionFacts.digest(mcpidentities.mkString("\n"))
+      )
   }
 }

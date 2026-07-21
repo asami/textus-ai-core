@@ -8,7 +8,8 @@ import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.component.Component
 import org.goldenport.cncf.context.ExecutionContext
-import org.goldenport.cncf.mcp.client.{McpClientSocket, McpServerSetId}
+import org.goldenport.cncf.mcp.client.{McpClientInvocation, McpClientService, McpClientSocket, McpServerSetId}
+import org.goldenport.cncf.operationtool.{OperationToolInvocation, OperationToolService, OperationToolSetId, OperationToolSocket}
 import org.goldenport.cncf.spi.{SpiContract, SpiProvider, SpiSelection}
 import org.goldenport.cncf.spi.ai.runner.*
 import org.goldenport.protocol.{Property, Request}
@@ -265,12 +266,12 @@ final class TextusAiRunner(
               )
             } yield ranked
           case AiOperationalStrategyKind.ToolGrounded
-              if strategy.primary.mcpServerSet.nonEmpty =>
+              if strategy.primary.mcpServerSet.nonEmpty || strategy.primary.operationToolSet.nonEmpty =>
             invokeToolGrounded(strategy.primary, "tool-grounded", prompt)
           case AiOperationalStrategyKind.ToolGrounded
               if strategy.primary.tools.isEmpty =>
             Consequence.configurationInvalid(
-              "Tool-grounded AI strategy requires a runtime-owned logical tool or MCP server set."
+              "Tool-grounded AI strategy requires a runtime-owned Operation tool set or MCP server set."
             )
           case _ =>
             invoke(strategy.primary, "initial", prompt)
@@ -284,11 +285,11 @@ final class TextusAiRunner(
       attemptindex += 1
       val executionresolution = resolution.forExecution(execution)
       val admission = for {
-        aggregateoutput <- McpToolOrchestrator.admissionMaxOutputTokensC(
+        aggregateoutput <- ToolOrchestrator.admissionMaxOutputTokensC(
           executionresolution.maxTokens(req.maxTokens)
         )
         value <- executionresolution.costAdmissionC(
-          McpToolOrchestrator.admissionInputEstimate(
+          ToolOrchestrator.admissionInputEstimate(
             inputEstimate,
             executionresolution.maxTokens(req.maxTokens)
           ),
@@ -302,15 +303,16 @@ final class TextusAiRunner(
           attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
           Consequence.Failure(conclusion)
         case Consequence.Success(costadmission) =>
-          execution.mcpServerSet match {
-            case None =>
+          (execution.mcpServerSet, execution.operationToolSet) match {
+            case (None, None) =>
               lastfailure = AiAttemptFailureClass.Capability
               attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
-              Consequence.configurationInvalid("Tool-grounded execution has no MCP server set")
-            case Some(serverset) =>
-              provider.generateWithMcpToolsC(
+              Consequence.configurationInvalid("Tool-grounded execution has no admitted tool set")
+            case (mcpserverset, operationtoolset) =>
+              provider.generateWithToolsC(
                 _effective_selection(executionresolution.requirement),
-                serverset,
+                mcpserverset,
+                operationtoolset,
                 prompt,
                 req.temperature,
                 executionresolution.maxTokens(req.maxTokens),
@@ -1408,33 +1410,80 @@ class TextusAiRunnerProvider(
     maxTokens: Option[Int],
     properties: Vector[Property]
   )(using ExecutionContext): Consequence[GenerateResponse] =
+    generateWithToolsC(selection, Some(serverSet), None, prompt, temperature, maxTokens, properties)
+
+  private[runtime] def generateWithToolsC(
+    selection: SpiSelection,
+    mcpServerSet: Option[McpServerSetId],
+    operationToolSet: Option[OperationToolSetId],
+    prompt: String,
+    temperature: Option[Double],
+    maxTokens: Option[Int],
+    properties: Vector[Property]
+  )(using ExecutionContext): Consequence[GenerateResponse] =
     for {
       effective <- Consequence.success(_effective_selection(selection))
       _ <- AiProviderAdmission.validate(effective, properties)
-      socket <- component.port.get[McpClientSocket].map(Consequence.success).getOrElse(
-        Consequence.serviceUnavailable("Textus AI MCP client socket is not installed")
-      )
-      service <- socket.service(serverSet)
+      mcpservice <- _mcp_service_c(mcpServerSet)
+      operationservice <- _operation_tool_service_c(operationToolSet)
       chat <- chatService(effective)
       toolservice <- chat match {
         case value: ToolCallingChatService => Consequence.success(value)
         case _ => Consequence.configurationInvalid(
-          "Selected AI provider does not support the runtime-owned MCP function protocol"
+          "Selected AI provider does not support the runtime-owned tool function protocol"
         )
       }
-      response <- service.withInvocation { invocation =>
-        McpToolOrchestrator.generateC(
+      response <- _with_tool_invocations_c(mcpservice, operationservice) { (mcpinvocation, operationinvocation) =>
+        ToolOrchestrator.generateC(
           toolservice,
-          invocation,
+          mcpinvocation,
+          operationinvocation,
           prompt,
           temperature,
           maxTokens,
           properties
         )
       }
-      aggregateoutput <- McpToolOrchestrator.admissionMaxOutputTokensC(maxTokens)
+      aggregateoutput <- ToolOrchestrator.admissionMaxOutputTokensC(maxTokens)
       _ <- AiExecutionFacts.validateMaxOutputTokens(effective, aggregateoutput, response.metadata)
     } yield response
+
+  private def _mcp_service_c(
+    serverSet: Option[McpServerSetId]
+  ): Consequence[Option[McpClientService]] = serverSet match {
+    case None => Consequence.success(None)
+    case Some(value) =>
+      component.port.get[McpClientSocket].map(Consequence.success).getOrElse(
+        Consequence.serviceUnavailable("Textus AI MCP client socket is not installed")
+      ).flatMap(_.service(value)).map(Some(_))
+  }
+
+  private def _operation_tool_service_c(
+    toolSet: Option[OperationToolSetId]
+  ): Consequence[Option[OperationToolService]] = toolSet match {
+    case None => Consequence.success(None)
+    case Some(value) =>
+      component.port.get[OperationToolSocket].map(Consequence.success).getOrElse(
+        Consequence.serviceUnavailable("Textus AI Operation tool socket is not installed")
+      ).flatMap(_.service(value)).map(Some(_))
+  }
+
+  private def _with_tool_invocations_c[A](
+    mcpservice: Option[McpClientService],
+    operationservice: Option[OperationToolService]
+  )(
+    body: (Option[McpClientInvocation], Option[OperationToolInvocation]) => Consequence[A]
+  )(using ExecutionContext): Consequence[A] = (mcpservice, operationservice) match {
+    case (Some(mcp), Some(operation)) =>
+      mcp.withInvocation { mcpinvocation =>
+        operation.withInvocation { operationinvocation =>
+          body(Some(mcpinvocation), Some(operationinvocation))
+        }
+      }
+    case (Some(mcp), None) => mcp.withInvocation(invocation => body(Some(invocation), None))
+    case (None, Some(operation)) => operation.withInvocation(invocation => body(None, Some(invocation)))
+    case (None, None) => Consequence.configurationInvalid("Tool-grounded execution has no admitted tool service")
+  }
 
   private def _effective_selection(
     selection: SpiSelection
