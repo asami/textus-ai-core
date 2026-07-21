@@ -70,8 +70,8 @@ set before it invokes a provider.
 | MO-01 | Profile-owned MCP policy | Runtime profiles and execution classes resolve an admitted MCP server set without caller configuration. | done |
 | MO-02 | Common orchestration | One bounded, redacted tool catalog and function-call execution path bridges Textus AI to the CNCF MCP client Port. | done |
 | MO-03 | Local provider binding | Gemma/Ollama emits and receives tool calls through `/api/chat`; no-tool generation remains unchanged. | done |
-| MO-04 | Commercial provider bindings | OpenAI Responses, Gemini Interactions, and Anthropic Messages execute the same admitted MCP tools through their native function continuation formats. | active |
-| MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | planned |
+| MO-04 | Commercial provider bindings | OpenAI Responses, Gemini Interactions, and Anthropic Messages execute the same admitted MCP tools through their native function continuation formats. | done |
+| MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | active |
 
 ## Implementation Status
 
@@ -106,9 +106,17 @@ Gemma usage is aggregated across turns. Anthropic Messages uses the same
 function catalog through `tool_use` / `tool_result` continuation. OpenAI
 Responses uses `function_call` / `function_call_output` continuation and keeps
 the logical web-search mapping alongside Textus-owned function definitions.
-Google Gemini native continuation remains MO-04 work. Codex CLI and Claude
+Google Gemini Interactions uses `function_call` / `function_result` continuation
+with its runtime-private `previous_interaction_id`; only the latest tool results
+are sent to each resumed interaction. Existing logical URL/search mappings and
+no-tool paths remain verified. Codex CLI and Claude
 Code CLI remain fixed managed-process providers rather than participants in
 this runtime-owned function loop.
+
+MO-04 is complete. MO-05 is active for cross-provider fake MCP failure and
+continuation evidence, named-server-set admission evidence, full no-tool and
+provider-failure regression evidence, and separately opt-in live MCP/Gemma
+evidence.
 
 ## Dependencies
 

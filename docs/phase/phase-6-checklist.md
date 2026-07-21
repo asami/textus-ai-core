@@ -105,16 +105,16 @@ Stage Status:
 ## Stage MO-04 - Commercial Provider Bindings
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark DONE only after OpenAI, Gemini, and Anthropic Messages
   continue the common MCP tool loop through their documented native function
   formats.
 
 - [x] Implement OpenAI Responses function-call output continuation.
-- [ ] Implement Gemini Interactions function-result continuation.
+- [x] Implement Gemini Interactions function-result continuation.
 - [x] Implement Anthropic Messages `tool_use` / `tool_result` continuation.
-- [ ] Preserve existing logical URL/search tool mapping and no-tool behavior.
+- [x] Preserve existing logical URL/search tool mapping and no-tool behavior.
 - [x] Keep Codex CLI and Claude Code CLI as fixed runtime-owned managed-process
   providers; do not project the Textus AI function catalog or caller-provided
   CLI/MCP settings into either CLI.

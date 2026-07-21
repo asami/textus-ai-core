@@ -12,7 +12,7 @@ import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
-import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport}
+import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport, ToolCallingChatService}
 
 final case class GoogleRuntimeConfig(
   provider: String = "google",
@@ -136,6 +136,58 @@ private object GoogleJson:
       case Right(s) if s.trim.nonEmpty => Consequence.success(s)
       case _ => _interaction_model_output_text(json)
 
+  def toolChatRequest(request: ToolChatRequest, model: String): Consequence[Json] =
+    _tool_input_c(request.messages).map { case (input, previousinteractionid) =>
+      val base = JsonObject(
+        "model" -> Json.fromString(model),
+        "input" -> input,
+        "tools" -> Json.fromValues(
+          _provider_tools(AiRequestProperties.tools(request.properties)).map(_._2) ++
+            request.tools.map(_function_tool)
+        ),
+        "generation_config" -> Json.fromJsonObject(_interaction_generation_config(request.temperature, request.maxTokens))
+      )
+      Json.fromJsonObject(previousinteractionid.map(id =>
+        base.add("previous_interaction_id", Json.fromString(id))
+      ).getOrElse(base))
+    }
+
+  def extractToolResponse(json: Json): Consequence[ToolChatResponse] = {
+    val steps = json.hcursor.downField("steps").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    steps.foldLeft(Consequence.success(Vector.empty[ToolCall])) { (z, step) =>
+      if (!step.hcursor.get[String]("type").toOption.contains("function_call"))
+        z
+      else
+        for {
+          calls <- z
+          id <- _required_string_c(step, "id", "Gemini function call has no id")
+          name <- _required_string_c(step, "name", "Gemini function call has no function name")
+          arguments <- step.hcursor.get[Json]("arguments") match {
+            case Right(value) => Consequence.success(value)
+            case Left(_) => Consequence.valueInvalid("Gemini function call has no arguments")
+          }
+        } yield calls :+ ToolCall(name, arguments)._with_provider_call_id(Some(id))
+    }.flatMap { calls =>
+      if (calls.isEmpty)
+        extractInteractionText(json).map { text =>
+          ToolChatResponse(
+            ToolChatMessage("assistant", text),
+            json.hcursor.get[String]("model").toOption,
+            responseMetadata(json, Vector.empty)
+          )
+        }
+      else
+        _required_string_c(json, "id", "Gemini interaction has no id").map { interactionid =>
+          ToolChatResponse(
+            ToolChatMessage("assistant", _interaction_output_text(steps), calls)
+              ._with_provider_continuation(Some(Json.fromString(interactionid))),
+            json.hcursor.get[String]("model").toOption,
+            responseMetadata(json, Vector.empty)
+          )
+        }
+    }
+  }
+
   def responseMetadata(json: Json, properties: Vector[org.goldenport.protocol.Property]): Map[String, String] =
     val tools = AiRequestProperties.tools(properties)
     val steps = json.hcursor.downField("steps").focus.flatMap(_.asArray).getOrElse(Vector.empty)
@@ -188,6 +240,74 @@ private object GoogleJson:
       "generation_config" -> Json.fromJsonObject(_interaction_generation_config(temperature, maxTokens))
     )
   }
+
+  private def _tool_input_c(messages: Vector[ToolChatMessage]): Consequence[(Json, Option[String])] =
+    _latest_interaction(messages) match {
+      case Some((index, id)) => _function_results_c(messages.drop(index + 1)).map(results => Json.fromValues(results) -> Some(id))
+      case None => _initial_tool_input_c(messages).map(input => input -> None)
+    }
+
+  private def _latest_interaction(messages: Vector[ToolChatMessage]): Option[(Int, String)] =
+    messages.zipWithIndex.reverseIterator.flatMap { case (message, index) =>
+      message._provider_continuation_option.flatMap(_.asString).map(_.trim).filter(_.nonEmpty).map(index -> _)
+    }.toSeq.headOption
+
+  private def _initial_tool_input_c(messages: Vector[ToolChatMessage]): Consequence[Json] =
+    messages.foldLeft(Consequence.success(Vector.empty[Json])) { (z, message) =>
+      for {
+        values <- z
+        rendered <- _initial_tool_message_c(message)
+      } yield values :+ rendered
+    }.map(Json.fromValues)
+
+  private def _initial_tool_message_c(message: ToolChatMessage): Consequence[Json] = message.role match {
+    case "user" => Consequence.success(Json.obj(
+      "type" -> Json.fromString("user_input"),
+      "content" -> Json.arr(Json.obj("type" -> Json.fromString("text"), "text" -> Json.fromString(_safe_string(message.content))))
+    ))
+    case value => Consequence.valueInvalid(s"Gemini initial tool message role is unsupported: $value")
+  }
+
+  private def _function_results_c(messages: Vector[ToolChatMessage]): Consequence[Vector[Json]] =
+    messages.filter(_.role == "tool").foldLeft(Consequence.success(Vector.empty[Json])) { (z, message) =>
+      for {
+        values <- z
+        name <- message.toolName.map(Consequence.success).getOrElse(
+          Consequence.valueInvalid("Gemini function result has no function name")
+        )
+        callid <- message._provider_call_id_option.map(Consequence.success).getOrElse(
+          Consequence.valueInvalid(s"Gemini function result has no provider call id for $name")
+        )
+      } yield values :+ Json.obj(
+        "type" -> Json.fromString("function_result"),
+        "name" -> Json.fromString(name),
+        "call_id" -> Json.fromString(callid),
+        "result" -> Json.arr(Json.obj("type" -> Json.fromString("text"), "text" -> Json.fromString(_safe_string(message.content))))
+      )
+    }
+
+  private def _function_tool(tool: ToolDefinition): Json = {
+    val base = JsonObject(
+      "type" -> Json.fromString("function"),
+      "name" -> Json.fromString(tool.name),
+      "parameters" -> tool.inputSchema
+    )
+    Json.fromJsonObject(tool.description.map(value => base.add("description", Json.fromString(value))).getOrElse(base))
+  }
+
+  private def _interaction_output_text(steps: Vector[Json]): String =
+    steps.flatMap { step =>
+      if (step.hcursor.get[String]("type").toOption.contains("model_output"))
+        step.hcursor.downField("content").focus.flatMap(_.asArray).getOrElse(Vector.empty).flatMap(_content_texts)
+      else
+        Vector.empty
+    }.map(_.trim).filter(_.nonEmpty).mkString
+
+  private def _required_string_c(value: Json, field: String, message: String): Consequence[String] =
+    value.hcursor.get[String](field) match {
+      case Right(result) if result.trim.nonEmpty => Consequence.success(result.trim)
+      case _ => Consequence.valueInvalid(message)
+    }
 
   private def _interaction_generation_config(
     temperature: Option[Double],
@@ -344,7 +464,7 @@ final class GoogleGenerateService(config: GoogleRuntimeConfig, context: Executio
       }
     }
 
-final class GoogleChatService(config: GoogleRuntimeConfig, context: ExecutionContext) extends ChatService:
+final class GoogleChatService(config: GoogleRuntimeConfig, context: ExecutionContext) extends ToolCallingChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
     given ExecutionContext = context
     val model = AiRequestProperties.effectiveModel(config.model, req.properties, "google")
@@ -376,6 +496,24 @@ final class GoogleChatService(config: GoogleRuntimeConfig, context: ExecutionCon
           }
         }
       }
+    }
+
+  override def chatWithTools(req: ToolChatRequest): Consequence[ToolChatResponse] =
+    given ExecutionContext = context
+    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "google")
+    GoogleRuntimeException.guard("google tool chat") {
+      for {
+        body <- GoogleJson.toolChatRequest(req, model)
+        json <- HttpSupport.post(
+          config.endpoint,
+          "/v1beta/interactions",
+          body,
+          AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+          headers = Vector("x-goog-api-key" -> Option(config.apiKey).getOrElse("")),
+          properties = req.properties
+        )
+        response <- GoogleJson.extractToolResponse(json)
+      } yield response.copy(model = Some(model), metadata = response.metadata ++ GoogleJson.responseMetadata(json, req.properties))
     }
 
 private object GoogleRuntimeException:
