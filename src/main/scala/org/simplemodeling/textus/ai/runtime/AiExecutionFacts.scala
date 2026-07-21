@@ -83,7 +83,7 @@ private[textus] object AiAccountingFacts {
  * Provider-neutral execution metadata normalization for Textus AI responses.
  *
  * @since   Jul. 16, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] object AiExecutionFacts {
@@ -301,12 +301,21 @@ private[textus] object AiExecutionFacts {
           "openai.web_search_calls" => true
       case "anthropic.response_id" | "anthropic.finish_reason" |
           "anthropic.usage.input_tokens" | "anthropic.usage.output_tokens" |
-          "anthropic.usage.total_tokens" | "anthropic.usage.cached_input_tokens" => true
+          "anthropic.usage.total_tokens" | "anthropic.usage.cached_input_tokens" |
+          "anthropic.tool_calls" | "anthropic.tool_turns" |
+          "anthropic.tool_catalog_digest" | "anthropic.mcp_calls" |
+          "anthropic.operation_calls" => true
       case "gemma.finish_reason" |
           "gemma.usage.input_tokens" | "gemma.usage.output_tokens" | "gemma.usage.total_tokens" |
           "gemma.tool_calls" | "gemma.tool_turns" | "gemma.tool_catalog_digest" |
           "gemma.mcp_calls" | "gemma.mcp_turns" | "gemma.mcp_catalog_digest" |
           "gemma.operation_calls" => true
+      case "google.tool_calls" | "google.tool_turns" |
+          "google.tool_catalog_digest" | "google.mcp_calls" |
+          "google.operation_calls" => true
+      case "openai.tool_calls" | "openai.tool_turns" |
+          "openai.tool_catalog_digest" | "openai.mcp_calls" |
+          "openai.operation_calls" => true
       case "codex.finish_reason" => true
       case "claude.finish_reason" | "claude.session_id" |
           "claude.duration_ms" | "claude.num_turns" | "claude.profile" => true

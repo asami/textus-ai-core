@@ -48,7 +48,17 @@ final case class ToolDefinition(
 final case class ToolCall(
   name: String,
   arguments: Json
-)
+) {
+  // Provider-only continuation identity must not alter this public value type's ABI.
+  private var _provider_call_id: Option[String] = None
+
+  private[textus] def _with_provider_call_id(value: Option[String]): ToolCall = {
+    _provider_call_id = value.filter(_.nonEmpty)
+    this
+  }
+
+  private[textus] def _provider_call_id_option: Option[String] = _provider_call_id
+}
 
 /** A tool-loop message. Only the runtime constructs assistant/tool messages. */
 final case class ToolChatMessage(
@@ -56,7 +66,17 @@ final case class ToolChatMessage(
   content: String = "",
   toolCalls: Vector[ToolCall] = Vector.empty,
   toolName: Option[String] = None
-)
+) {
+  // Kept outside the constructor to preserve the existing public message ABI.
+  private var _provider_call_id: Option[String] = None
+
+  private[textus] def _with_provider_call_id(value: Option[String]): ToolChatMessage = {
+    _provider_call_id = value.filter(_.nonEmpty)
+    this
+  }
+
+  private[textus] def _provider_call_id_option: Option[String] = _provider_call_id
+}
 
 final case class ToolChatRequest(
   messages: Vector[ToolChatMessage],

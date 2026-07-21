@@ -41,7 +41,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -1308,7 +1308,7 @@ final class TextusAiRunnerSpec
       driver.calls should have size 1
     }
 
-    "reject Claude Code structured records before process admission" in {
+    "keep Claude Code as a fixed managed CLI without runtime-owned tool catalog access" in {
       Given("a Claude Code service without an admitted execution profile")
       given ExecutionContext = ExecutionContext.create()
       val service = new ClaudeCodeGenerateService(
@@ -1316,15 +1316,21 @@ final class TextusAiRunnerSpec
         summon[ExecutionContext]
       )
 
-      When("a structured record request is made")
-      val result = service.generate(GenerateRequest(
+      When("a structured record or function-tool request is made")
+      val structured = service.generate(GenerateRequest(
         "structured prompt",
         recordSchema = Some(Record.dataAuto("type" -> "object"))
       ))
+      val tools = service.generate(GenerateRequest(
+        "tool prompt",
+        properties = Vector(Property("ai.tools", "web_search", None))
+      ))
 
       Then("it fails before attempting a local process execution")
-      result.isFaillure shouldBe true
-      result.toString should include ("AI structured record generation is not supported by provider 'claude'")
+      structured.isFaillure shouldBe true
+      structured.toString should include ("AI structured record generation is not supported by provider 'claude'")
+      tools.isFaillure shouldBe true
+      tools.toString should include ("AI tools are not supported by provider 'claude'")
     }
 
     "map Gemma output and timeout policies to the CNCF HTTP boundary" in {

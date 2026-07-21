@@ -34,9 +34,12 @@ set before it invokes a provider.
   class configuration only.
 - Convert admitted internal and remote tools into provider-neutral function definitions and
   execute bounded function-call continuation loops.
-- Support Gemma/Ollama, OpenAI, and Google Gemini through their respective
-  provider bindings while retaining current no-tool and built-in web-tool
-  behavior.
+- Support Gemma/Ollama, OpenAI, Google Gemini, and Anthropic Messages through
+  their respective provider bindings while retaining current no-tool and
+  built-in web-tool behavior.
+- Keep Codex CLI and Claude Code CLI as separate runtime-owned managed-process
+  bindings. They may use only their fixed profile capability; they do not
+  receive the Textus AI function catalog or caller-provided CLI/MCP options.
 - Record application purpose, standard purpose, runtime profile, execution
   class, selected server-set identity, tool names, bounded result summaries,
   and structured failures without exposing endpoint, credential, prompt,
@@ -67,7 +70,7 @@ set before it invokes a provider.
 | MO-01 | Profile-owned MCP policy | Runtime profiles and execution classes resolve an admitted MCP server set without caller configuration. | done |
 | MO-02 | Common orchestration | One bounded, redacted tool catalog and function-call execution path bridges Textus AI to the CNCF MCP client Port. | done |
 | MO-03 | Local provider binding | Gemma/Ollama emits and receives tool calls through `/api/chat`; no-tool generation remains unchanged. | done |
-| MO-04 | Commercial provider bindings | OpenAI Responses and Gemini Interactions execute the same admitted MCP tools through their native function continuation formats. | planned |
+| MO-04 | Commercial provider bindings | OpenAI Responses, Gemini Interactions, and Anthropic Messages execute the same admitted MCP tools through their native function continuation formats. | active |
 | MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | planned |
 
 ## Implementation Status
@@ -99,8 +102,11 @@ bounded by turn, call, catalog, projected-definition, argument, result, and
 elapsed-time limits. Gemma/Ollama implements the common `ToolCallingChatService`
 through `/api/chat`; ordinary generate/chat requests do not use that protocol.
 The admission estimate covers the maximum continuation envelope, and reported
-Gemma usage is aggregated across turns. OpenAI and Google Gemini native
-continuations remain MO-04 work.
+Gemma usage is aggregated across turns. Anthropic Messages uses the same
+function catalog through `tool_use` / `tool_result` continuation. OpenAI and
+Google Gemini native continuations remain MO-04 work. Codex CLI and Claude
+Code CLI remain fixed managed-process providers rather than participants in
+this runtime-owned function loop.
 
 ## Dependencies
 

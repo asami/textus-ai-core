@@ -27,7 +27,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -1438,7 +1438,8 @@ class TextusAiRunnerProvider(
           prompt,
           temperature,
           maxTokens,
-          properties
+          properties,
+          effective.provider.map(_.trim.toLowerCase(Locale.ROOT)).filter(_.nonEmpty).getOrElse("ai")
         )
       }
       aggregateoutput <- ToolOrchestrator.admissionMaxOutputTokensC(maxTokens)

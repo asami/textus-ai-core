@@ -8,7 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 16, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiExecutionFactsSpec
@@ -107,6 +107,32 @@ final class AiExecutionFactsSpec
         "google_search_calls=2;google_search_results=5;url_context_calls=1;url_citations=4"
       metadata("google.google_search_calls") shouldBe "2"
       metadata should not contain "google.raw_tool_result"
+    }
+
+    "retain Anthropic continuation summaries without provider payloads" in {
+      Given("an Anthropic tool-loop response with safe counters and an unsafe result")
+      val selection = SpiSelection(provider = Some("anthropic"))
+
+      When("Textus AI normalizes the provider metadata")
+      val metadata = AiExecutionFacts.normalize(
+        selection,
+        AiRunnerRequirement(),
+        None,
+        Map(
+          "anthropic.tool_calls" -> "2",
+          "anthropic.tool_turns" -> "2",
+          "anthropic.mcp_calls" -> "1",
+          "anthropic.operation_calls" -> "1",
+          "anthropic.raw_tool_result" -> "sensitive result"
+        )
+      )
+
+      Then("only safe continuation facts remain available")
+      metadata("anthropic.tool_calls") shouldBe "2"
+      metadata("anthropic.tool_turns") shouldBe "2"
+      metadata("anthropic.mcp_calls") shouldBe "1"
+      metadata("anthropic.operation_calls") shouldBe "1"
+      metadata should not contain "anthropic.raw_tool_result"
     }
 
     "omit malformed or negative provider usage values" in {

@@ -15,7 +15,7 @@ import org.simplemodeling.textus.ai.ai.*
  * a tool-capable model. Source identities and invocation paths stay separate.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] object ToolOrchestrator {
@@ -63,9 +63,10 @@ private[textus] object ToolOrchestrator {
     prompt: String,
     temperature: Option[Double],
     maxTokens: Option[Int],
-    properties: Vector[Property]
+    properties: Vector[Property],
+    provider: String
   )(using ExecutionContext): Consequence[GenerateResponse] =
-    generateC(service, Some(invocation), None, prompt, temperature, maxTokens, properties)
+    generateC(service, Some(invocation), None, prompt, temperature, maxTokens, properties, provider)
 
   def generateC(
     service: ToolCallingChatService,
@@ -74,7 +75,8 @@ private[textus] object ToolOrchestrator {
     prompt: String,
     temperature: Option[Double],
     maxTokens: Option[Int],
-    properties: Vector[Property]
+    properties: Vector[Property],
+    provider: String
   )(using ExecutionContext): Consequence[GenerateResponse] =
     for {
       mcpcatalog <- mcpinvocation.map(_.catalog.map(Some(_))).getOrElse(Consequence.success(None))
@@ -100,11 +102,11 @@ private[textus] object ToolOrchestrator {
       result.response.message.content,
       result.response.model,
       _aggregate_metadata(result.metadata, result.response.metadata) ++ Map(
-        "gemma.tool_calls" -> result.calls.toString,
-        "gemma.tool_turns" -> result.turns.toString,
-        "gemma.mcp_calls" -> result.mcpCalls.toString,
-        "gemma.operation_calls" -> result.operationCalls.toString,
-        "gemma.tool_catalog_digest" -> AiExecutionFacts.digest(
+        s"$provider.tool_calls" -> result.calls.toString,
+        s"$provider.tool_turns" -> result.turns.toString,
+        s"$provider.mcp_calls" -> result.mcpCalls.toString,
+        s"$provider.operation_calls" -> result.operationCalls.toString,
+        s"$provider.tool_catalog_digest" -> AiExecutionFacts.digest(
           bindings.map(_.identity).mkString("\n")
         )
       ) ++ _compatibility_metadata(bindings, result)
@@ -291,7 +293,7 @@ private[textus] object ToolOrchestrator {
         role = "tool",
         toolName = Some(call.name),
         content = result
-      )
+      )._with_provider_call_id(call._provider_call_id_option)
     }
 
   private def _invoke_binding_c(

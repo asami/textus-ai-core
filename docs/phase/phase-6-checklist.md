@@ -107,12 +107,17 @@ Stage Status:
 Stage Status:
 - Current status: OPEN
 - Owner: Textus AI maintainers
-- Update rule: Mark DONE only after OpenAI and Gemini continue the common MCP
-  tool loop through their documented native function formats.
+- Update rule: Mark DONE only after OpenAI, Gemini, and Anthropic Messages
+  continue the common MCP tool loop through their documented native function
+  formats.
 
 - [ ] Implement OpenAI Responses function-call output continuation.
 - [ ] Implement Gemini Interactions function-result continuation.
+- [x] Implement Anthropic Messages `tool_use` / `tool_result` continuation.
 - [ ] Preserve existing logical URL/search tool mapping and no-tool behavior.
+- [x] Keep Codex CLI and Claude Code CLI as fixed runtime-owned managed-process
+  providers; do not project the Textus AI function catalog or caller-provided
+  CLI/MCP settings into either CLI.
 
 ## Stage MO-05 - Executable Evidence And Closure
 

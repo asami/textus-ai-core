@@ -22,7 +22,7 @@ import org.simplemodeling.textus.ai.ai.*
  * function orchestration.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -40,7 +40,8 @@ final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhe
         "Find the route context.",
         None,
         Some(128),
-        Vector.empty
+        Vector.empty,
+        "gemma"
       )
 
       Then("the model receives a runtime-owned tool result and only safe facts escape")
@@ -75,7 +76,8 @@ final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhe
         "Use both admitted sources.",
         None,
         Some(128),
-        Vector.empty
+        Vector.empty,
+        "anthropic"
       )
 
       Then("source-specific names remain distinct and each call uses its owning invocation boundary")
@@ -85,10 +87,10 @@ final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhe
       service.toolDefinitions.map(_.name).distinct.size shouldBe service.toolDefinitions.size
       operationinvocation.calls.map(_.identity.print) shouldBe Vector("admin.system.ping")
       mcpfixture.calls.map(_.toolIdentity.print) shouldBe Vector("research/places.lookup")
-      result.toOption.flatMap(_.metadata.get("gemma.tool_catalog_digest")) should not be empty
-      result.toOption.flatMap(_.metadata.get("gemma.tool_calls")) shouldBe Some("2")
-      result.toOption.flatMap(_.metadata.get("gemma.mcp_calls")) shouldBe Some("1")
-      result.toOption.flatMap(_.metadata.get("gemma.operation_calls")) shouldBe Some("1")
+      result.toOption.flatMap(_.metadata.get("anthropic.tool_catalog_digest")) should not be empty
+      result.toOption.flatMap(_.metadata.get("anthropic.tool_calls")) shouldBe Some("2")
+      result.toOption.flatMap(_.metadata.get("anthropic.mcp_calls")) shouldBe Some("1")
+      result.toOption.flatMap(_.metadata.get("anthropic.operation_calls")) shouldBe Some("1")
       subsystem.shutdown()
     }
 
@@ -105,7 +107,8 @@ final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhe
         "Find the route context.",
         None,
         Some(128),
-        Vector.empty
+        Vector.empty,
+        "gemma"
       )
 
       Then("the function is rejected before MCP invocation")
@@ -126,7 +129,8 @@ final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhe
         "Find the route context.",
         None,
         Some(128),
-        Vector.empty
+        Vector.empty,
+        "gemma"
       )
 
       Then("the request is rejected without invoking any MCP tool")
@@ -160,7 +164,8 @@ final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhe
         "Find the route context.",
         None,
         Some(128),
-        Vector.empty
+        Vector.empty,
+        "gemma"
       )
 
       Then("the tool message remains valid UTF-8 within its fixed byte limit")

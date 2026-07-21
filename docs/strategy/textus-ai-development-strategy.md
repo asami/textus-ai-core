@@ -218,8 +218,11 @@ Scope:
   and transport settings under operator/runtime ownership;
 - resolve MCP tool availability only from the selected runtime profile and
   execution class;
-- run bounded provider function-call continuations for Gemma/Ollama, OpenAI,
-  and Google Gemini while preserving each provider's built-in web tools; and
+- run bounded provider function-call continuations for Gemma/Ollama, Anthropic
+  Messages, OpenAI, and Google Gemini while preserving each provider's built-in
+  web tools;
+- keep Codex CLI and Claude Code CLI as profile-fixed managed-process providers
+  outside the runtime-owned function loop; and
 - publish redacted tool execution facts, limits, and structured failures to
   response metadata and CallTree records.
 
@@ -269,12 +272,13 @@ completed on 2026-07-18.
 - Phase 5: complete on 2026-07-21. The opt-in `GemmaOllamaLiveSpec` verified
   the managed Docker service, retained model volume, `gemma:2b` generation,
   and stop-on-shutdown cleanup through the component-facing runner path.
-- Phase 6: active from 2026-07-21. MO-01 now resolves a logical MCP server set
-  only from runtime execution-class policy and publishes only the normalized
-  CNCF client input socket; common catalog orchestration remains next.
+- Phase 6: active from 2026-07-21. MO-01 through MO-03 resolve profile-owned
+  Operation/MCP inputs, perform bounded common orchestration, and bind
+  Gemma/Ollama tool calls. Anthropic Messages now implements native
+  `tool_use` / `tool_result` continuation as the first MO-04 provider binding.
 - Latest phase closure: `docs/phase/phase-5-closure.md`
-- Current next task: implement Phase 6 MO-02 common admitted-catalog and
-  function-call orchestration after CNCF Phase 45 closes its builtin baseline.
+- Current next task: implement OpenAI Responses and Google Gemini native
+  function continuations for Phase 6 MO-04, then complete MO-05 evidence.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
