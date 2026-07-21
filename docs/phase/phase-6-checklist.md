@@ -71,30 +71,31 @@ Stage Status:
 ## Stage MO-02 - Common Orchestration
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
-- Update rule: Mark DONE only after every provider binding receives the same
-  admitted catalog and all tool calls pass through CNCF limits and diagnostics.
+- Update rule: Mark DONE only after Textus AI has one provider-neutral admitted
+  catalog/function-call contract and every execution passes through CNCF limits
+  and diagnostics. Provider-native protocol bindings are tracked separately.
 
-- [ ] Adapt the CNCF MCP client catalog to provider-neutral function
+- [x] Adapt the CNCF MCP client catalog to provider-neutral function
   definitions with stable tool identities.
-- [ ] Define bounded turns, calls, elapsed time, argument size, and result-size
+- [x] Define bounded turns, calls, elapsed time, argument size, and result-size
   behavior with structured failure propagation.
-- [ ] Record redacted MCP server-set/tool/summary facts in CallTree and response
+- [x] Record redacted MCP server-set/tool/summary facts in CallTree and response
   metadata without endpoint, credential, prompt, argument, or raw-result data.
 
 ## Stage MO-03 - Local Provider Binding
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Mark DONE only after Gemma/Ollama tool-call continuations are
   deterministically verified and no-tool generate/chat behavior is unchanged.
 
-- [ ] Emit admitted function definitions through the Ollama chat protocol.
-- [ ] Execute returned tool calls through the common bounded orchestration path
+- [x] Emit admitted function definitions through the Ollama chat protocol.
+- [x] Execute returned tool calls through the common bounded orchestration path
   and return tool results in the required follow-up messages.
-- [ ] Reject a selected tool workflow when the resolved local model/provider
+- [x] Reject a selected tool workflow when the resolved local model/provider
   cannot support the required function protocol.
 
 ## Stage MO-04 - Commercial Provider Bindings
@@ -120,8 +121,10 @@ Stage Status:
 
 - [ ] Verify profile and application-purpose resolution admits only the named
   server set.
-- [ ] Verify fake MCP tool success, tool failure, limit exhaustion, and
-  redacted observability for every provider binding.
+- [x] Verify fake MCP tool success, rejection, limit exhaustion, and redacted
+  observability for the completed Gemma provider binding.
+- [ ] Verify fake MCP tool failure and native continuation behavior for each
+  future commercial provider binding.
 - [ ] Verify existing no-tool generate, chat, structured-record, URL/search,
   and provider failure regressions.
 - [ ] Record opt-in live MCP and tool-capable Gemma/Ollama heavy-test evidence.

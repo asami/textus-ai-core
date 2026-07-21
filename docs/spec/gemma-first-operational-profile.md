@@ -81,6 +81,31 @@ Prompt text, candidate text, validation payloads, credentials, endpoints, and
 raw provider or tool payloads are prohibited from response metadata and
 CallTree attributes.
 
+## Tool-Grounded Execution
+
+`tool-grounded` is available only when the resolved runtime execution names an
+operator-owned `mcp-server-set`. The application request and application-purpose
+registration cannot select an endpoint, transport, credential, server, or
+individual tool. Textus AI obtains that server set only through the assembled
+CNCF `McpClientSocket`, reads its admitted catalog, and invokes a selected tool
+only through CNCF's invocation scope.
+
+Textus AI exposes an admitted tool to a provider under a deterministic,
+runtime-owned `mcp_<sha256-prefix>` function name. It never exposes the
+provider-native MCP configuration or accepts a caller-supplied function name.
+Tool results are returned to the continuation as bounded text; only server-set
+identity, call count, turn count, and catalog digest can appear in safe
+execution facts.
+
+The common loop is deliberately bounded: four model turns, eight total tool
+calls, 32 catalog tools, 4 KiB per projected function definition, 16 KiB per
+tool argument payload, 16 KiB per tool result, and 120 seconds elapsed time.
+Exhausting any bound is a terminal resource-limit outcome, not a reason to use
+a commercial fallback. Cost admission uses the full worst-case continuation
+envelope: every possible model turn, catalog projection, bounded tool results,
+and accumulated assistant continuation output. Reported provider usage is
+aggregated across completed turns for final accounting.
+
 ## Acceptance Operation Shape
 
 Textus AI calls the configured operation through the assembled subsystem with

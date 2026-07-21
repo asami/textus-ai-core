@@ -17,6 +17,10 @@ trait GenerateService:
 trait ChatService:
   def chat(req: ChatRequest): Consequence[ChatResponse]
 
+/** Optional internal capability for bounded runtime-owned function loops. */
+trait ToolCallingChatService extends ChatService:
+  def chatWithTools(req: ToolChatRequest): Consequence[ToolChatResponse]
+
 trait GeneratePortApi extends PortApi[GenerateRequirement, GenerateService]:
   private val _contract =
     ServiceContract[GenerateService](

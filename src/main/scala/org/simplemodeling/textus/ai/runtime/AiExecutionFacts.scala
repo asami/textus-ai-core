@@ -96,6 +96,7 @@ private[textus] object AiExecutionFacts {
   val LOCATION = "ai.execution.location"
   val TOOLS = "ai.execution.tools"
   val ENABLED_TOOLS = "ai.execution.enabled_tools"
+  val MCP_SERVER_SET = "ai.execution.mcp_server_set"
   val TOOL_RESULT_SUMMARY = "ai.execution.tool_result_summary"
   val NORMALIZATION_MODE = "ai.execution.normalization_mode"
   val RESPONSE_ID = "ai.execution.response_id"
@@ -302,7 +303,8 @@ private[textus] object AiExecutionFacts {
           "anthropic.usage.input_tokens" | "anthropic.usage.output_tokens" |
           "anthropic.usage.total_tokens" | "anthropic.usage.cached_input_tokens" => true
       case "gemma.finish_reason" |
-          "gemma.usage.input_tokens" | "gemma.usage.output_tokens" | "gemma.usage.total_tokens" => true
+          "gemma.usage.input_tokens" | "gemma.usage.output_tokens" | "gemma.usage.total_tokens" |
+          "gemma.mcp_calls" | "gemma.mcp_turns" | "gemma.mcp_catalog_digest" => true
       case "codex.finish_reason" => true
       case "claude.finish_reason" | "claude.session_id" |
           "claude.duration_ms" | "claude.num_turns" | "claude.profile" => true
@@ -414,6 +416,7 @@ private[textus] object AiExecutionFacts {
         "url_citations"
       )
       case "openai" => Vector("web_search_calls")
+      case "gemma" => Vector("mcp_calls", "mcp_turns")
       case _ => Vector.empty
     }
     labels.flatMap { label =>

@@ -8,6 +8,7 @@ import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.component.Component
 import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.cncf.mcp.client.{McpClientSocket, McpServerSetId}
 import org.goldenport.cncf.spi.{SpiContract, SpiProvider, SpiSelection}
 import org.goldenport.cncf.spi.ai.runner.*
 import org.goldenport.protocol.{Property, Request}
@@ -265,9 +266,7 @@ final class TextusAiRunner(
             } yield ranked
           case AiOperationalStrategyKind.ToolGrounded
               if strategy.primary.mcpServerSet.nonEmpty =>
-            Consequence.configurationInvalid(
-              "Tool-grounded MCP strategy requires the Textus AI function-call orchestrator."
-            )
+            invokeToolGrounded(strategy.primary, "tool-grounded", prompt)
           case AiOperationalStrategyKind.ToolGrounded
               if strategy.primary.tools.isEmpty =>
             Consequence.configurationInvalid(
@@ -276,6 +275,58 @@ final class TextusAiRunner(
           case _ =>
             invoke(strategy.primary, "initial", prompt)
         }
+
+    def invokeToolGrounded(
+      execution: AiRuntimeExecution,
+      stage: String,
+      prompt: String
+    ): Consequence[(GenerateResponse, AiProfileResolution, Option[AiCostAdmission])] = {
+      attemptindex += 1
+      val executionresolution = resolution.forExecution(execution)
+      val admission = for {
+        aggregateoutput <- McpToolOrchestrator.admissionMaxOutputTokensC(
+          executionresolution.maxTokens(req.maxTokens)
+        )
+        value <- executionresolution.costAdmissionC(
+          McpToolOrchestrator.admissionInputEstimate(
+            inputEstimate,
+            executionresolution.maxTokens(req.maxTokens)
+          ),
+          aggregateoutput
+        )
+        _ <- executionresolution.policy.validateCostBudget(value)
+      } yield value
+      admission match {
+        case Consequence.Failure(conclusion) =>
+          lastfailure = AiAttemptFailureClass.Admission
+          attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
+          Consequence.Failure(conclusion)
+        case Consequence.Success(costadmission) =>
+          execution.mcpServerSet match {
+            case None =>
+              lastfailure = AiAttemptFailureClass.Capability
+              attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
+              Consequence.configurationInvalid("Tool-grounded execution has no MCP server set")
+            case Some(serverset) =>
+              provider.generateWithMcpToolsC(
+                _effective_selection(executionresolution.requirement),
+                serverset,
+                prompt,
+                req.temperature,
+                executionresolution.maxTokens(req.maxTokens),
+                _request_properties(req.properties, executionresolution)
+              ) match {
+                case Consequence.Success(response) =>
+                  attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "success")
+                  Consequence.success((response, executionresolution, costadmission))
+                case Consequence.Failure(conclusion) =>
+                  lastfailure = AiAttemptFailureClass.fromConclusion(conclusion)
+                  attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
+                  Consequence.Failure(conclusion)
+              }
+          }
+      }
+    }
 
     def finish(
       response: GenerateResponse,
@@ -1348,6 +1399,42 @@ class TextusAiRunnerProvider(
       case None =>
         Consequence.serviceUnavailable("chat binding not found")
     }
+
+  private[runtime] def generateWithMcpToolsC(
+    selection: SpiSelection,
+    serverSet: McpServerSetId,
+    prompt: String,
+    temperature: Option[Double],
+    maxTokens: Option[Int],
+    properties: Vector[Property]
+  )(using ExecutionContext): Consequence[GenerateResponse] =
+    for {
+      effective <- Consequence.success(_effective_selection(selection))
+      _ <- AiProviderAdmission.validate(effective, properties)
+      socket <- component.port.get[McpClientSocket].map(Consequence.success).getOrElse(
+        Consequence.serviceUnavailable("Textus AI MCP client socket is not installed")
+      )
+      service <- socket.service(serverSet)
+      chat <- chatService(effective)
+      toolservice <- chat match {
+        case value: ToolCallingChatService => Consequence.success(value)
+        case _ => Consequence.configurationInvalid(
+          "Selected AI provider does not support the runtime-owned MCP function protocol"
+        )
+      }
+      response <- service.withInvocation { invocation =>
+        McpToolOrchestrator.generateC(
+          toolservice,
+          invocation,
+          prompt,
+          temperature,
+          maxTokens,
+          properties
+        )
+      }
+      aggregateoutput <- McpToolOrchestrator.admissionMaxOutputTokensC(maxTokens)
+      _ <- AiExecutionFacts.validateMaxOutputTokens(effective, aggregateoutput, response.metadata)
+    } yield response
 
   private def _effective_selection(
     selection: SpiSelection

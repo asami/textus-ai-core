@@ -12,7 +12,7 @@ import org.goldenport.configuration.ResolvedConfiguration
 import org.goldenport.protocol.Property
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
-import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport}
+import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport, ToolCallingChatService}
 
 final case class GemmaRuntimeConfig(
   provider: String = "gemma",
@@ -146,7 +146,7 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
           case conclusion => Consequence.Failure(conclusion)
         }
 
-final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: ExecutionContext) extends ChatService:
+final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: ExecutionContext) extends ToolCallingChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
     given ExecutionContext = context
     for
@@ -171,6 +171,67 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
           case Left(e) => Consequence.valueInvalid(e.getMessage)
       }
     yield response
+
+  override def chatWithTools(req: ToolChatRequest): Consequence[ToolChatResponse] =
+    given ExecutionContext = context
+    for
+      endpoint <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.success(config.endpoint))
+      model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
+      body = Json.obj(
+        "model" -> Json.fromString(model),
+        "messages" -> Json.fromValues(req.messages.map(_tool_message_json)),
+        "tools" -> Json.fromValues(req.tools.map { tool =>
+          Json.obj("type" -> Json.fromString("function"), "function" -> Json.obj(
+            "name" -> Json.fromString(tool.name),
+            "description" -> tool.description.map(Json.fromString).getOrElse(Json.Null),
+            "parameters" -> tool.inputSchema
+          ))
+        }),
+        "stream" -> Json.False
+      ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
+      response <- _request_with_fallback(GemmaSupport.endpoints(config, endpoint), "/api/chat", body, req.properties) { json =>
+        val cursor = json.hcursor.downField("message")
+        for
+          content <- cursor.get[String]("content").orElse(Right("")) match
+            case Right(value) => Consequence.success(value)
+            case Left(error) => Consequence.valueInvalid(error.getMessage)
+          calls <- cursor.get[Vector[Json]]("tool_calls").getOrElse(Vector.empty).foldLeft(
+            Consequence.success(Vector.empty[ToolCall])
+          ) { (z, call) =>
+            for
+              values <- z
+              function <- call.hcursor.downField("function").focus.map(Consequence.success).getOrElse(
+                Consequence.valueInvalid("Gemma tool call has no function")
+              )
+              name <- function.hcursor.get[String]("name") match
+                case Right(value) if value.trim.nonEmpty => Consequence.success(value.trim)
+                case _ => Consequence.valueInvalid("Gemma tool call has no function name")
+              arguments <- function.hcursor.get[Json]("arguments") match
+                case Right(value) => Consequence.success(value)
+                case Left(_) => Consequence.valueInvalid("Gemma tool call has no arguments")
+            yield values :+ ToolCall(name, arguments)
+          }
+        yield ToolChatResponse(
+          ToolChatMessage("assistant", content, calls),
+          Some(model),
+          GemmaSupport.responseMetadata(json)
+        )
+      }
+    yield response
+
+  private def _tool_message_json(message: ToolChatMessage): Json = {
+    val base = Json.obj(
+      "role" -> Json.fromString(message.role),
+      "content" -> Json.fromString(message.content)
+    )
+    val withcalls = Option.when(message.toolCalls.nonEmpty)(Json.fromValues(message.toolCalls.map { call =>
+      Json.obj("function" -> Json.obj(
+        "name" -> Json.fromString(call.name),
+        "arguments" -> call.arguments
+      ))
+    })).map(value => base.deepMerge(Json.obj("tool_calls" -> value))).getOrElse(base)
+    message.toolName.map(value => withcalls.deepMerge(Json.obj("tool_name" -> Json.fromString(value)))).getOrElse(withcalls)
+  }
 
   private def _request_with_fallback[A](
     endpoints: Vector[URI],

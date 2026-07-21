@@ -62,8 +62,8 @@ set before it invokes a provider.
 | OS-03 | Acceptance integration | A configured application Operation controls candidate decisions without provider selection. | done |
 | OS-04 | Cross-component evidence | Sanpomap deterministic and guarded production evidence verifies the strategy end to end. | active |
 | MO-01 | Profile-owned MCP policy | Runtime profiles and execution classes resolve an admitted MCP server set without caller configuration. | done |
-| MO-02 | Common orchestration | One bounded, redacted tool catalog and function-call execution path bridges Textus AI to the CNCF MCP client Port. | planned |
-| MO-03 | Local provider binding | Gemma/Ollama emits and receives tool calls through `/api/chat`; no-tool generation remains unchanged. | planned |
+| MO-02 | Common orchestration | One bounded, redacted tool catalog and function-call execution path bridges Textus AI to the CNCF MCP client Port. | done |
+| MO-03 | Local provider binding | Gemma/Ollama emits and receives tool calls through `/api/chat`; no-tool generation remains unchanged. | done |
 | MO-04 | Commercial provider bindings | OpenAI Responses and Gemini Interactions execute the same admitted MCP tools through their native function continuation formats. | planned |
 | MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | planned |
 
@@ -85,6 +85,17 @@ configuration cannot select MCP connectivity, and the component sees neither
 Codex MCP source configuration nor endpoint, transport, or credential data.
 Provider-neutral catalog adaptation and function-call continuation begin in
 MO-02.
+
+MO-02 and MO-03 are complete. `McpToolOrchestrator` projects only the catalog
+admitted by the assembled CNCF `McpClientSocket` into deterministic runtime
+function identifiers, validates returned arguments against the original typed
+schema, and invokes tools only through CNCF's scoped invocation. The loop is
+bounded by turn, call, catalog, projected-definition, argument, result, and
+elapsed-time limits. Gemma/Ollama implements the common `ToolCallingChatService`
+through `/api/chat`; ordinary generate/chat requests do not use that protocol.
+The admission estimate covers the maximum continuation envelope, and reported
+Gemma usage is aggregated across turns. OpenAI and Google Gemini native
+continuations remain MO-04 work.
 
 ## Dependencies
 

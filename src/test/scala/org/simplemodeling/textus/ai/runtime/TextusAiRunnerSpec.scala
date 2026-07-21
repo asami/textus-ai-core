@@ -11,6 +11,7 @@ import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, Scop
 import org.goldenport.cncf.component.{Component, ExtensionPoint, Port}
 import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext, ScopeContext, ScopeKind}
 import org.goldenport.cncf.http.HttpDriver
+import org.goldenport.cncf.mcp.client.McpServerSetId
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
 import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
@@ -400,6 +401,70 @@ final class TextusAiRunnerSpec
       ) shouldBe false
       response.metadata.values.exists(_.contains(prompt)) shouldBe false
       _GenerateServiceState.count(prompt) shouldBe 2
+    }
+
+    "execute a tool-grounded strategy through the runtime-owned MCP path" in {
+      Given("a Gemma-first web-analysis purpose with one operator-owned MCP server set")
+      given ExecutionContext = ExecutionContext.create()
+      var selectedserverset: Option[String] = None
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini"),
+          "textus.ai.execution-classes.deep-consideration.mcp-server-set" ->
+            ConfigurationValue.StringValue("research-tools")
+        )),
+        ConfigurationTrace.empty
+      )
+      val provider = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-location-investigation" -> "web-analysis")
+      ) {
+        override private[runtime] def generateWithMcpToolsC(
+          selection: SpiSelection,
+          serverSet: McpServerSetId,
+          prompt: String,
+          temperature: Option[Double],
+          maxTokens: Option[Int],
+          properties: Vector[Property]
+        )(using ExecutionContext): Consequence[GenerateResponse] = {
+          selectedserverset = Some(serverSet.print)
+          Consequence.success(GenerateResponse(
+            "tool-grounded result",
+            Some("gemma-fixture"),
+            Map(
+              "gemma.usage.input_tokens" -> "4",
+              "gemma.usage.output_tokens" -> "2",
+              "gemma.usage.total_tokens" -> "6",
+              "gemma.mcp_calls" -> "1",
+              "gemma.mcp_turns" -> "2",
+              "gemma.mcp_catalog_digest" -> "sha256:fixture"
+            )
+          ))
+        }
+      }
+      val runner = provider.provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.value
+
+      When("the application requests only its registered investigation purpose")
+      val response = runner.generate(AiGenerateRequest(
+        "research a station",
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-location-investigation"),
+          purposeRequired = true
+        )
+      )).toOption.value
+
+      Then("the selected runtime path receives the resolved server set and publishes safe evidence")
+      selectedserverset shouldBe Some("research-tools")
+      response.text shouldBe "tool-grounded result"
+      response.metadata(AiExecutionFacts.OPERATIONAL_STRATEGY) shouldBe "tool-grounded"
+      response.metadata(AiExecutionFacts.ATTEMPT_LINEAGE) shouldBe "1:gemma:tool-grounded:success"
+      response.metadata("gemma.mcp_calls") shouldBe "1"
+      response.metadata("gemma.mcp_turns") shouldBe "2"
+      response.metadata.values.exists(_.contains("research a station")) shouldBe false
     }
 
     "never convert an input or policy failure into commercial fallback" in {

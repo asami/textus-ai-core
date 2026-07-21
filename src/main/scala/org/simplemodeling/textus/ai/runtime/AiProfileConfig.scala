@@ -540,6 +540,7 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.OPERATIONAL_STRATEGY -> operationalStrategy.map(_.id),
       AiExecutionFacts.STRATEGY_MAX_REPAIRS -> operationalStrategy.map(_.maxRepairs.toString),
       AiExecutionFacts.STRATEGY_MAX_PROVIDER_ATTEMPTS -> operationalStrategy.map(_.maxProviderAttempts.toString),
+      AiExecutionFacts.MCP_SERVER_SET -> runtimeExecution.flatMap(_.mcpServerSet).map(_.print),
       AiExecutionFacts.ENABLED_TOOLS -> Option.when(codexExecutionProfile.nonEmpty && requirement.tools.nonEmpty)(
         requirement.tools.map(_.id).mkString(",")
       ),
