@@ -2,7 +2,7 @@
 
 status=draft
 scope=internal development strategy
-updated_at=2026-07-20
+updated_at=2026-07-22
 
 ## Purpose
 

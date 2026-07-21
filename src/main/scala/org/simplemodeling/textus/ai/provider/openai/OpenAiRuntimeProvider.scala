@@ -12,7 +12,7 @@ import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.*
-import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport}
+import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport, ToolCallingChatService}
 
 final case class OpenAiRuntimeConfig(
   provider: String = "openai",
@@ -125,11 +125,53 @@ private object OpenAiJson:
     )
     _response_request(model, input, request.properties, request.maxTokens)
 
+  def toolChatRequest(request: ToolChatRequest, model: String): Consequence[Json] =
+    _tool_messages_c(request.messages).map { input =>
+      val base = JsonObject(
+        "model" -> Json.fromString(model),
+        "input" -> Json.fromValues(input),
+        "tools" -> Json.fromValues(
+          _provider_tools(AiRequestProperties.tools(request.properties), request.properties).map(_._2) ++
+            request.tools.map(_function_tool)
+        )
+      )
+      Json.fromJsonObject(_with_response_options(base, request.properties, request.maxTokens))
+    }
+
   def extractResponseText(json: Json): Consequence[String] =
     json.hcursor.get[String]("output_text") match
       case Right(s) => Consequence.success(s)
       case Left(_) =>
         _string_at(json.hcursor, List("output", "0", "content", "0", "text"))
+
+  def extractToolResponse(json: Json): Consequence[ToolChatResponse] = {
+    val output = json.hcursor.downField("output").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    val text = _response_output_text(output)
+    output.foldLeft(Consequence.success(Vector.empty[ToolCall])) { (z, item) =>
+      if (!item.hcursor.get[String]("type").toOption.contains("function_call"))
+        z
+      else
+        for {
+          calls <- z
+          callid <- _required_string_c(item, "call_id", "OpenAI function call has no call_id")
+          name <- _required_string_c(item, "name", "OpenAI function call has no function name")
+          arguments <- item.hcursor.get[String]("arguments") match {
+            case Right(value) => io.circe.parser.parse(value).fold(
+              _ => Consequence.valueInvalid("OpenAI function call has invalid JSON arguments"),
+              Consequence.success
+            )
+            case Left(_) => Consequence.valueInvalid("OpenAI function call has no arguments")
+          }
+        } yield calls :+ ToolCall(name, arguments)._with_provider_call_id(Some(callid))
+    }.map { calls =>
+      ToolChatResponse(
+        ToolChatMessage("assistant", text, calls)
+          ._with_provider_continuation(Some(Json.fromValues(output))),
+        json.hcursor.get[String]("model").toOption,
+        responseMetadata(json, Vector.empty)
+      )
+    }
+  }
 
   def responseMetadata(json: Json, properties: Vector[org.goldenport.protocol.Property]): Map[String, String] =
     val tools = AiRequestProperties.tools(properties)
@@ -164,6 +206,85 @@ private object OpenAiJson:
         _with_openai_web_search_options(JsonObject("type" -> Json.fromString("web_search")), properties)
       )
     }.toVector
+
+  private def _function_tool(tool: ToolDefinition): Json = {
+    val base = JsonObject(
+      "type" -> Json.fromString("function"),
+      "name" -> Json.fromString(tool.name),
+      "parameters" -> tool.inputSchema
+    )
+    Json.fromJsonObject(tool.description.map(value => base.add("description", Json.fromString(value))).getOrElse(base))
+  }
+
+  private def _tool_messages_c(messages: Vector[ToolChatMessage]): Consequence[Vector[Json]] =
+    messages.foldLeft(Consequence.success(Vector.empty[Json])) { (z, message) =>
+      for {
+        values <- z
+        rendered <- _tool_message_c(message)
+      } yield values ++ rendered
+    }
+
+  private def _tool_message_c(message: ToolChatMessage): Consequence[Vector[Json]] = message.role match {
+    case "user" => Consequence.success(Vector(Json.obj(
+      "role" -> Json.fromString("user"),
+      "content" -> Json.fromString(message.content)
+    )))
+    case "assistant" =>
+      message._provider_continuation_option.flatMap(_.asArray) match {
+        case Some(output) => Consequence.success(output)
+        case None => _render_assistant_calls_c(message)
+      }
+    case "tool" =>
+      for {
+        name <- message.toolName.map(Consequence.success).getOrElse(
+          Consequence.valueInvalid("OpenAI function result has no function name")
+        )
+        callid <- message._provider_call_id_option.map(Consequence.success).getOrElse(
+          Consequence.valueInvalid(s"OpenAI function result has no provider call id for $name")
+        )
+      } yield Vector(Json.obj(
+        "type" -> Json.fromString("function_call_output"),
+        "call_id" -> Json.fromString(callid),
+        "output" -> Json.fromString(message.content)
+      ))
+    case value => Consequence.valueInvalid(s"OpenAI tool message role is unsupported: $value")
+  }
+
+  private def _render_assistant_calls_c(message: ToolChatMessage): Consequence[Vector[Json]] =
+    message.toolCalls.foldLeft(Consequence.success(Vector.empty[Json])) { (z, call) =>
+        for {
+          values <- z
+          callid <- call._provider_call_id_option.map(Consequence.success).getOrElse(
+            Consequence.valueInvalid(s"OpenAI function continuation has no provider call id for ${call.name}")
+          )
+        } yield values :+ Json.obj(
+          "type" -> Json.fromString("function_call"),
+          "call_id" -> Json.fromString(callid),
+          "name" -> Json.fromString(call.name),
+          "arguments" -> Json.fromString(call.arguments.noSpaces)
+        )
+      }.map { calls =>
+        val text = Option(message.content).map(_.trim).filter(_.nonEmpty).toVector.map { value =>
+          Json.obj("role" -> Json.fromString("assistant"), "content" -> Json.fromString(value))
+        }
+        text ++ calls
+      }
+
+  private def _response_output_text(output: Vector[Json]): String =
+    output.flatMap { item =>
+      if (item.hcursor.get[String]("type").toOption.contains("message"))
+        item.hcursor.downField("content").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+          .filter(_.hcursor.get[String]("type").toOption.contains("output_text"))
+          .flatMap(_.hcursor.get[String]("text").toOption)
+      else
+        Vector.empty
+    }.mkString
+
+  private def _required_string_c(item: Json, field: String, message: String): Consequence[String] =
+    item.hcursor.get[String](field) match {
+      case Right(value) if value.trim.nonEmpty => Consequence.success(value.trim)
+      case _ => Consequence.valueInvalid(message)
+    }
 
   private def _with_response_options(
     base: JsonObject,
@@ -307,7 +428,7 @@ final class OpenAiGenerateService(config: OpenAiRuntimeConfig, context: Executio
       }
     }
 
-final class OpenAiChatService(config: OpenAiRuntimeConfig, context: ExecutionContext) extends ChatService:
+final class OpenAiChatService(config: OpenAiRuntimeConfig, context: ExecutionContext) extends ToolCallingChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
     given ExecutionContext = context
     val model = AiRequestProperties.effectiveModel(config.model, req.properties, "openai")
@@ -339,6 +460,22 @@ final class OpenAiChatService(config: OpenAiRuntimeConfig, context: ExecutionCon
         }
       }
     }
+
+  override def chatWithTools(req: ToolChatRequest): Consequence[ToolChatResponse] =
+    given ExecutionContext = context
+    val model = AiRequestProperties.effectiveModel(config.model, req.properties, "openai")
+    for {
+      body <- OpenAiJson.toolChatRequest(req, model)
+      json <- HttpSupport.post(
+        config.endpoint,
+        "/v1/responses",
+        body,
+        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+        headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
+        properties = req.properties
+      )
+      response <- OpenAiJson.extractToolResponse(json)
+    } yield response.copy(model = Some(model), metadata = response.metadata ++ OpenAiJson.responseMetadata(json, req.properties))
 
 final class OpenAiGenerateExtensionPoint(config: OpenAiRuntimeConfig)
   extends ExtensionPoint[GenerateService]:

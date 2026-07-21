@@ -111,7 +111,7 @@ Stage Status:
   continue the common MCP tool loop through their documented native function
   formats.
 
-- [ ] Implement OpenAI Responses function-call output continuation.
+- [x] Implement OpenAI Responses function-call output continuation.
 - [ ] Implement Gemini Interactions function-result continuation.
 - [x] Implement Anthropic Messages `tool_use` / `tool_result` continuation.
 - [ ] Preserve existing logical URL/search tool mapping and no-tool behavior.

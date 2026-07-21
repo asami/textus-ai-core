@@ -103,8 +103,10 @@ elapsed-time limits. Gemma/Ollama implements the common `ToolCallingChatService`
 through `/api/chat`; ordinary generate/chat requests do not use that protocol.
 The admission estimate covers the maximum continuation envelope, and reported
 Gemma usage is aggregated across turns. Anthropic Messages uses the same
-function catalog through `tool_use` / `tool_result` continuation. OpenAI and
-Google Gemini native continuations remain MO-04 work. Codex CLI and Claude
+function catalog through `tool_use` / `tool_result` continuation. OpenAI
+Responses uses `function_call` / `function_call_output` continuation and keeps
+the logical web-search mapping alongside Textus-owned function definitions.
+Google Gemini native continuation remains MO-04 work. Codex CLI and Claude
 Code CLI remain fixed managed-process providers rather than participants in
 this runtime-owned function loop.
 

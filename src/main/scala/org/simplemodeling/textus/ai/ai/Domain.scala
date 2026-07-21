@@ -69,6 +69,8 @@ final case class ToolChatMessage(
 ) {
   // Kept outside the constructor to preserve the existing public message ABI.
   private var _provider_call_id: Option[String] = None
+  // Opaque provider state keeps native continuation items out of public metadata.
+  private var _provider_continuation: Option[Json] = None
 
   private[textus] def _with_provider_call_id(value: Option[String]): ToolChatMessage = {
     _provider_call_id = value.filter(_.nonEmpty)
@@ -76,6 +78,13 @@ final case class ToolChatMessage(
   }
 
   private[textus] def _provider_call_id_option: Option[String] = _provider_call_id
+
+  private[textus] def _with_provider_continuation(value: Option[Json]): ToolChatMessage = {
+    _provider_continuation = value
+    this
+  }
+
+  private[textus] def _provider_continuation_option: Option[Json] = _provider_continuation
 }
 
 final case class ToolChatRequest(
