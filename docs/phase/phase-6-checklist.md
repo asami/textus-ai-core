@@ -51,7 +51,8 @@ Stage Status:
   The controlled escalation is accepted in Sanpomap
   `docs/evidence/phase-2-assembled-live-evidence.yaml`; an assembled local
   Gemma repair remains open.
-- [ ] Record the accepted Textus AI revision in the Sanpomap Phase 2 ledger.
+- [x] Record accepted Textus AI revision `72ed97e` in the Sanpomap Phase 2
+  ledger.
 
 ## Stage MO-01 - Profile-Owned MCP Policy
 

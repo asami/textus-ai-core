@@ -74,9 +74,9 @@ registered application purposes. The first assembled guarded record exercises
 a classified Gemma availability failure, one Codex CLI fallback, and the
 Sanpomap acceptance operation before final Scenario DSL adoption. The accepted
 record is maintained by Sanpomap at
-`docs/evidence/phase-2-assembled-live-evidence.yaml`. OS-04 remains active until
-an assembled local Gemma repair and the accepted Textus AI release revision are
-recorded.
+`docs/evidence/phase-2-assembled-live-evidence.yaml`. The accepted Textus AI
+release revision is `72ed97e`. OS-04 remains active until an assembled local
+Gemma repair is recorded.
 
 MO-01 is complete. An execution class may select one logical
 `mcp-server-set`; the selected runtime profile publishes the distinct logical
