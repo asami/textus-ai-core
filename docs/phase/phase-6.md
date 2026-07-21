@@ -113,8 +113,11 @@ no-tool paths remain verified. Codex CLI and Claude
 Code CLI remain fixed managed-process providers rather than participants in
 this runtime-owned function loop.
 
-MO-04 is complete. MO-05 is active for cross-provider fake MCP failure and
-continuation evidence, named-server-set admission evidence, full no-tool and
+MO-04 is complete. MO-05 confirms named-server-set admission: profile and
+execution-class policy publish the logical requirement, application-purpose
+MCP selection fails before Port activation, and the installed catalog excludes
+transport-reported tools outside the admitted set. The remaining work is
+cross-provider fake MCP failure and continuation evidence, full no-tool and
 provider-failure regression evidence, and separately opt-in live MCP/Gemma
 evidence.
 

@@ -128,8 +128,11 @@ Stage Status:
   admitted and rejected path; live provider/MCP verification remains explicitly
   optional heavy-test evidence.
 
-- [ ] Verify profile and application-purpose resolution admits only the named
-  server set.
+- [x] Verify profile and application-purpose resolution admits only the named
+  server set. `AiRuntimeProfileSpec` rejects application-purpose MCP selection
+  before Port activation; `ComponentFactorySpec` and
+  `ToolSourceConsumerSpec` expose only the runtime-owned logical set and its
+  admitted catalog.
 - [x] Verify fake MCP tool success, rejection, limit exhaustion, and redacted
   observability for the completed Gemma provider binding.
 - [ ] Verify fake MCP tool failure and native continuation behavior for each
