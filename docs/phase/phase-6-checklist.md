@@ -140,6 +140,10 @@ Stage Status:
   Gemini, and Anthropic through the common MCP invocation boundary, verifies
   their native correlated continuation after success, and verifies that a
   failed invocation stops before a synthetic provider result is sent.
-- [ ] Verify existing no-tool generate, chat, structured-record, URL/search,
-  and provider failure regressions.
+- [x] Verify existing no-tool generate, chat, structured-record, URL/search,
+  and provider failure regressions. `TextusAiRunnerSpec` covers plain
+  generate/chat bindings, strict and recovered structured records, and
+  redacted provider failures; `AiProviderAdmissionSpec` and the Google/OpenAI
+  runner specifications cover logical URL/search admission and provider
+  mapping.
 - [ ] Record opt-in live MCP and tool-capable Gemma/Ollama heavy-test evidence.

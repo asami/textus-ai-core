@@ -124,6 +124,13 @@ Gemini Interactions, and Anthropic Messages continue only with native
 correlation after an admitted result and stop before another provider request
 when the MCP invocation fails.
 
+The deterministic regression baseline is complete: `TextusAiRunnerSpec`
+verifies plain generate/chat, structured-record normalization and failure
+handling, and redacted provider failures. `AiProviderAdmissionSpec` verifies
+logical URL/search admission and rejection; the Google and OpenAI runner
+specifications verify their corresponding provider mappings. The remaining
+MO-05 closure evidence is opt-in live MCP and tool-capable Gemma/Ollama.
+
 ## Dependencies
 
 - CNCF Phase 45 must define and implement the MCP client Port, transport
