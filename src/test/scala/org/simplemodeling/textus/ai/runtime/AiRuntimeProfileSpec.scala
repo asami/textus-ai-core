@@ -8,7 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 18, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiRuntimeProfileSpec
@@ -17,6 +17,47 @@ final class AiRuntimeProfileSpec
   with GivenWhenThen {
 
   "AiProfileConfig runtime profiles" should {
+    "derive MCP connectivity only from runtime execution-class policy" in {
+      Given("a runtime profile whose execution classes select one logical MCP server set")
+      val profiles = _profiles(
+        "textus.ai.profile" -> "gemini",
+        "textus.ai.execution-classes.standard-work.mcp-server-set" -> "research.tools",
+        "textus.ai.execution-classes.deep-consideration.mcp-server-set" -> "research.tools"
+      )
+
+      When("the runtime resolves its MCP client requirements")
+      val requirements = profiles.mcpClientRequirementsC
+      val resolution = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+
+      Then("only the normalized logical server-set identity crosses into the CNCF Port contract")
+      requirements.toOption.toVector.flatten.map(_.serverSetId.print) shouldBe Vector("research.tools")
+      resolution.toOption.flatMap(_.runtimeExecution).flatMap(_.mcpServerSet).map(_.print) shouldBe Some("research.tools")
+    }
+
+    "reject application-purpose MCP connectivity selection" in {
+      Given("a registered purpose that attempts to select MCP connectivity")
+      val profiles = _profiles(Vector(_registration(
+        "sanpomap-location-investigation",
+        "web-analysis"
+      )),
+        "textus.ai.profile" -> "gemini",
+        "textus.ai.application-purposes.sanpomap-location-investigation.mcp-server-set" -> "research"
+      )
+
+      When("the runtime validates both request resolution and component requirements")
+      val resolution = profiles.resolveRequired(AiRunnerRequirement(
+        purpose = Some("sanpomap-location-investigation"),
+        purposeRequired = true
+      ))
+      val requirements = profiles.mcpClientRequirementsC
+
+      Then("application-owned MCP selection is rejected before Port activation")
+      resolution.isFaillure shouldBe true
+      requirements.isFaillure shouldBe true
+      resolution.toString should include ("AI application purpose may not configure this key")
+      requirements.toString should include ("AI application purpose may not configure this key")
+    }
+
     "resolve every standard purpose through the built-in Codex CLI defaults" in {
       Given("a Codex CLI runtime profile with no model-profile configuration")
       val profiles = _profiles("textus.ai.profile" -> "codex-cli")

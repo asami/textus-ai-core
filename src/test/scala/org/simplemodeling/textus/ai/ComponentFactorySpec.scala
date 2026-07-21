@@ -6,6 +6,7 @@ import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentOrigi
 import org.goldenport.cncf.admission.ConcurrencyScopeId
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.{ExecutionContext, GlobalContext, RuntimeContext, ScopeContext, ScopeKind}
+import org.goldenport.cncf.mcp.client.McpClientSocket
 import org.goldenport.cncf.processexecution.{LocalProcessExecutionDriver, ProcessArtifactName, ProcessCapabilityId, ProcessExecutionAdmission, ProcessExecutionInputFile, ProcessExecutionRequest, WorkAreaRelativePath}
 import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
 import org.goldenport.cncf.subsystem.Subsystem
@@ -24,7 +25,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 16, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ComponentFactorySpec
@@ -33,6 +34,26 @@ final class ComponentFactorySpec
   with GivenWhenThen
   with OptionValues {
   "ComponentFactory" should {
+    "publish only a normalized MCP client input socket for runtime-owned server sets" in {
+      Given("a Textus AI execution class configured with one logical MCP server set")
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+          "textus.ai.execution-classes.standard-work.mcp-server-set" -> ConfigurationValue.StringValue("research")
+        )),
+        ConfigurationTrace.empty
+      )
+
+      When("the component factory constructs its CNCF Port")
+      val component = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(configuration))
+      val socket = component.port.get[McpClientSocket]
+
+      Then("the consumer exposes only the logical requirement and no installed provider details")
+      socket.map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("research"))
+      socket.exists(_.isInstalled) shouldBe false
+      component.port.inputEntries.collect { case value: McpClientSocket => value }.size shouldBe 1
+    }
+
     "install configured purpose concurrency admission in the provider component scope" in {
       Given("a Textus AI runtime with one bootstrap-registered bounded ArtScene purpose")
       given ExecutionContext = ExecutionContext.create()

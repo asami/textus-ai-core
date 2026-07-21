@@ -6,6 +6,7 @@ import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentId, C
 import org.goldenport.cncf.admission.ScopedConcurrencyAdmission
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.{ScopeContext, ScopeKind}
+import org.goldenport.cncf.mcp.client.McpClientSocket
 import org.goldenport.cncf.processexecution.{LocalProcessExecutionDriver, ProcessExecutionAdmission, ProcessExecutionDriver, ProcessExecutionGrant, ProcessExecutionPolicy, ProcessProgramDefinition}
 import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.spi.ai.runner.AiRunnerApplicationPurposeRegistrationSocketSet
@@ -21,7 +22,7 @@ import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConc
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -129,14 +130,29 @@ object ComponentFactory:
     val withgenerate = AiRuntimeGenerateBinding.register(component, Some(gemmaconfig), openai, google, codex, claudeconfig, anthropic)
     val withchat = AiRuntimeChatBinding.register(withgenerate, Some(gemmaconfig), openai, google, codex, claudeconfig, anthropic)
     val runnerprovider = new TextusAiRunnerProvider(withchat, defaultselection, profiles, concurrencystate)
+    val mcpclientport = mcpClientPortC(profiles) match {
+      case Consequence.Success(port) => port
+      case Consequence.Failure(conclusion) =>
+        throw conclusion.getException.getOrElse(new IllegalArgumentException(conclusion.display))
+    }
     withchat.withPort(
       Component.Port
         .of(
           runnerprovider
         )
+      .orElse(mcpclientport)
       .orElse(Component.Port.input(registrations))
       .orElse(withchat.port)
     )
+
+  private[ai] def mcpClientPortC(
+    profiles: AiProfileConfig
+  ): Consequence[Component.Port] =
+    profiles.mcpClientRequirementsC.flatMap {
+      case Vector() => Consequence.success(Component.Port.empty)
+      case requirements =>
+        McpClientSocket.createC(requirements).map(Component.Port.input(_))
+    }
 
   private[ai] def ollamaManagedServiceConfig(
     configuration: Option[ResolvedConfiguration],

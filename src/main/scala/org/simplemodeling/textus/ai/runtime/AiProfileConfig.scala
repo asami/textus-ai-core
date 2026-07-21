@@ -4,6 +4,7 @@ import scala.util.Try
 import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.config.RuntimeConfig
+import org.goldenport.cncf.mcp.client.{McpClientRequirement, McpServerSetId}
 import org.goldenport.cncf.spi.ai.runner.{AiExecutionClass, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiTool}
 import org.goldenport.configuration.ResolvedConfiguration
 
@@ -21,7 +22,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.application-purposes.<application-purpose>.<policy>
  *
  * @since   Jul.  4, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 /**
@@ -37,7 +38,8 @@ private[textus] final case class AiRuntimeExecution(
   engine: String,
   model: String,
   reasoningLevel: Option[String] = None,
-  tools: Vector[AiTool] = Vector.empty
+  tools: Vector[AiTool] = Vector.empty,
+  mcpServerSet: Option[McpServerSetId] = None
 ) {
   def codexExecutionProfile: String = s"runtime-${executionClass.id}"
 
@@ -694,6 +696,26 @@ private[textus] final class AiProfileConfig(
       }
     } yield executions
 
+  /** Runtime-owned logical MCP requirements published through the CNCF Port. */
+  def mcpClientRequirementsC: Consequence[Vector[McpClientRequirement]] =
+    if (_config_string(Vector("textus.ai.profile")).isEmpty)
+      Consequence.success(Vector.empty)
+    else
+      for {
+        _ <- _reject_legacy_configuration
+        profile <- _runtime_profile_c
+        requirements <- profile.executions.keys.toVector.sortBy(_.id).foldLeft(
+          Consequence.success(Vector.empty[McpClientRequirement])
+        ) { (z, executionclass) =>
+          for {
+            values <- z
+            execution <- _runtime_execution_c(profile, executionclass)
+          } yield execution.mcpServerSet
+            .map(id => values :+ McpClientRequirement(id))
+            .getOrElse(values)
+        }
+      } yield requirements.distinct
+
   def gemmaModelsC: Consequence[Option[Vector[String]]] =
     for {
       _ <- _reject_legacy_configuration
@@ -822,14 +844,24 @@ private[textus] final class AiProfileConfig(
           _execution_class_keys(executionclass.id, "tools") ++
             _execution_class_keys(executionclass.id, "enabled-tools")
         ).map(AiTool.parseList).getOrElse(default.tools)
-        Consequence.success(default.copy(
-          provider = provider,
-          mode = mode,
-          engine = engine,
-          model = model,
-          reasoningLevel = reasoning,
-          tools = tools
-        ))
+        val mcpserversetc = _config_string(
+          _execution_class_keys(executionclass.id, "mcp-server-set") ++
+            _execution_class_keys(executionclass.id, "mcpServerSet")
+        ) match {
+          case Some(value) => McpServerSetId.parseC(value).map(Some(_))
+          case None => Consequence.success(default.mcpServerSet)
+        }
+        mcpserversetc.map { mcpserverset =>
+          default.copy(
+            provider = provider,
+            mode = mode,
+            engine = engine,
+            model = model,
+            reasoningLevel = reasoning,
+            tools = tools,
+            mcpServerSet = mcpserverset
+          )
+        }
       case None =>
         Consequence.configurationInvalid(s"AI runtime profile '${profile.name}' has no execution class: ${executionclass.id}")
     }

@@ -197,6 +197,38 @@ Artifacts:
 - [Phase 5 Dashboard](../phase/phase-5.md)
 - [Phase 5 Checklist](../phase/phase-5-checklist.md)
 
+### Phase 6: Provider-Neutral MCP Tool Orchestration
+
+Goal: allow a runtime profile to admit a named, operator-owned MCP tool set
+through the existing `generate` and `chat` operations, independently of the
+selected AI provider.
+
+Scope:
+
+- consume the CNCF MCP client Port and its admitted named server sets;
+- keep MCP server selection, endpoint policy, credentials, tool allowlists,
+  and transport settings under operator/runtime ownership;
+- resolve MCP tool availability only from the selected runtime profile and
+  execution class;
+- run bounded provider function-call continuations for Gemma/Ollama, OpenAI,
+  and Google Gemini while preserving each provider's built-in web tools; and
+- publish redacted tool execution facts, limits, and structured failures to
+  response metadata and CallTree records.
+
+Non-goals:
+
+- no new CML operation, and no direct application-caller MCP endpoint,
+  server, header, or tool selection;
+- no provider-native remote-MCP pass-through in the initial slice;
+- no stdio, SSE, arbitrary subprocess, arbitrary HTTP, or arbitrary
+  filesystem MCP transport; and
+- no assumption that every Gemma/Ollama model supports tool calling.
+
+Artifacts:
+
+- [Phase 6 Dashboard](../phase/phase-6.md)
+- [Phase 6 Checklist](../phase/phase-6-checklist.md)
+
 ## Phase Ordering
 
 Phase 1 was reopened on 2026-07-16 after the user clarified that Codex CLI is
@@ -226,9 +258,12 @@ completed on 2026-07-18.
 - Phase 5: complete on 2026-07-21. The opt-in `GemmaOllamaLiveSpec` verified
   the managed Docker service, retained model volume, `gemma:2b` generation,
   and stop-on-shutdown cleanup through the component-facing runner path.
+- Phase 6: active from 2026-07-21. MO-01 now resolves a logical MCP server set
+  only from runtime execution-class policy and publishes only the normalized
+  CNCF client input socket; common catalog orchestration remains next.
 - Latest phase closure: `docs/phase/phase-5-closure.md`
-- Current next task: begin Phase 6 only when CNCF Phase 45 has established the
-  MCP client contract.
+- Current next task: implement Phase 6 MO-02 common admitted-catalog and
+  function-call orchestration after CNCF Phase 45 closes its builtin baseline.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 
