@@ -501,13 +501,14 @@ final class TextusAiRunnerSpec
         )
       ))
 
-      Then("the failure remains terminal and the commercial provider is not called")
+      Then("the original structured failure remains terminal and the commercial provider is not called")
       result should matchPattern { case Consequence.Failure(_) => }
       val detail = result match {
         case Consequence.Failure(conclusion) => conclusion.display
         case _ => fail("expected a terminal strategy failure")
       }
-      detail should include ("input")
+      detail should include ("fixture input denied")
+      detail should not include "without admitted fallback"
       _GenerateServiceState.count(prompt) shouldBe 1
     }
 

@@ -402,13 +402,10 @@ final class TextusAiRunner(
     def run(prompt: String): Consequence[_Accounted[AiGenerateResponse]] =
       primaryCandidate(prompt) match {
         case Consequence.Failure(conclusion) =>
-          val failure = lastfailure
-          strategy.fallbackFor(failure) match {
-            case Some(_) => fallback(failure)
-            case None => Consequence.operationIllegal(
-              "ai.operational-strategy",
-              s"AI strategy terminated without admitted fallback: ${failure.id}"
-            )
+          val failureclass = lastfailure
+          strategy.fallbackFor(failureclass) match {
+            case Some(_) => fallback(failureclass)
+            case None => Consequence.Failure(conclusion)
           }
         case Consequence.Success((response, finalresolution, costadmission)) =>
           provider.evaluateCandidateC(
