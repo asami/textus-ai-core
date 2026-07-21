@@ -122,7 +122,7 @@ Stage Status:
 ## Stage MO-05 - Executable Evidence And Closure
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI maintainers
 - Update rule: Close only after fake MCP and provider evidence covers every
   admitted and rejected path; live provider/MCP verification remains explicitly
@@ -146,4 +146,10 @@ Stage Status:
   redacted provider failures; `AiProviderAdmissionSpec` and the Google/OpenAI
   runner specifications cover logical URL/search admission and provider
   mapping.
-- [ ] Record opt-in live MCP and tool-capable Gemma/Ollama heavy-test evidence.
+- [x] Record opt-in tool-capable Gemma/Ollama heavy-test evidence.
+  `TEXTUS_AI_LIVE_GEMMA_TEST=true sbt --batch 'testOnly
+  org.simplemodeling.textus.ai.GemmaOllamaLiveSpec'` passed on 2026-07-22 in
+  7 minutes 37 seconds. It verified profile-owned Docker lifecycle, no-tool
+  `gemma:2b` generation, and a `functiongemma` native function-call request.
+  The CNCF Streamable HTTP MCP fixture remains deterministic integration
+  evidence; live remote MCP is out of scope for Phase 6 closure.

@@ -412,6 +412,8 @@ final class TextusAiRunnerSpec
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini"),
+          "textus.ai.execution-classes.deep-consideration.model" ->
+            ConfigurationValue.StringValue("functiongemma"),
           "textus.ai.execution-classes.deep-consideration.mcp-server-set" ->
             ConfigurationValue.StringValue("research-tools")
         )),

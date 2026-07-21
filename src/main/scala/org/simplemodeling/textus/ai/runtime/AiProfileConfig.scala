@@ -23,7 +23,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.application-purposes.<application-purpose>.<policy>
  *
  * @since   Jul.  4, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 /**
@@ -960,8 +960,7 @@ private[textus] final class AiProfileConfig(
         for {
           mcpserverset <- mcpserversetc
           operationtoolset <- operationtoolsetc
-        } yield {
-          default.copy(
+          execution = default.copy(
             provider = provider,
             mode = mode,
             engine = engine,
@@ -971,7 +970,8 @@ private[textus] final class AiProfileConfig(
             mcpServerSet = mcpserverset,
             operationToolSet = operationtoolset
           )
-        }
+          _ <- _validate_gemma_tool_capability(execution)
+        } yield execution
       case None =>
         Consequence.configurationInvalid(s"AI runtime profile '${profile.name}' has no execution class: ${executionclass.id}")
     }
@@ -1174,6 +1174,36 @@ private[textus] final class AiProfileConfig(
       Consequence.configurationInvalid("AI runtime profile did not select a provider")
     else
       Consequence.unit
+
+  private def _validate_gemma_tool_capability(
+    execution: AiRuntimeExecution
+  ): Consequence[Unit] =
+    if (
+      _is_gemma(Some(execution.provider)) &&
+      (execution.mcpServerSet.nonEmpty || execution.operationToolSet.nonEmpty) &&
+      !_is_gemma_tool_capable_model(execution.model)
+    )
+      Consequence.configurationInvalid(
+        s"Gemma MCP/Operation tool execution requires an admitted tool-capable Ollama model: ${execution.executionClass.id}"
+      )
+    else
+      Consequence.unit
+
+  private def _is_gemma_tool_capable_model(model: String): Boolean = {
+    val normalized = Option(model).map(_.trim.toLowerCase(java.util.Locale.ROOT)).getOrElse("")
+    _ollama_tool_capable_models.exists { candidate =>
+      normalized == candidate || normalized.startsWith(s"$candidate:")
+    }
+  }
+
+  // Operators may admit a tested local model while the shipped safe default is FunctionGemma.
+  private def _ollama_tool_capable_models: Set[String] =
+    _config_string(Vector(
+      "textus.ai.ollama.tool-capable-models",
+      "textus.ai.ollama.toolCapableModels"
+    )).map(_.split(",").iterator.map(_.trim.toLowerCase(java.util.Locale.ROOT)).filter(_.nonEmpty).toSet)
+      .filter(_.nonEmpty)
+      .getOrElse(Set("functiongemma"))
 
   private def _reject_legacy_configuration: Consequence[Unit] = {
     val keys = configuration.toVector.flatMap(_.configuration.values.keys)

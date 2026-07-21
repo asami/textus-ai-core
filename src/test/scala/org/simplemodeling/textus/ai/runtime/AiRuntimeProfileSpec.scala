@@ -8,7 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 18, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiRuntimeProfileSpec
@@ -56,6 +56,47 @@ final class AiRuntimeProfileSpec
       requirements.isFaillure shouldBe true
       resolution.toString should include ("AI application purpose may not configure this key")
       requirements.toString should include ("AI application purpose may not configure this key")
+    }
+
+    "require an admitted tool-capable Ollama model for runtime-owned Gemma tools" in {
+      Given("Gemma profile policy that selects an admitted MCP server set")
+      val unsupported = _profiles(
+        "textus.ai.profile" -> "gemma",
+        "textus.ai.execution-classes.standard-work.mcp-server-set" -> "research.tools"
+      )
+      val supported = _profiles(
+        "textus.ai.profile" -> "gemma",
+        "textus.ai.execution-classes.standard-work.model" -> "functiongemma",
+        "textus.ai.execution-classes.standard-work.operation-tool-set" -> "textus.tools"
+      )
+      val operatoradmitted = _profiles(
+        "textus.ai.profile" -> "gemma",
+        "textus.ai.execution-classes.standard-work.model" -> "tested-local-tools",
+        "textus.ai.execution-classes.standard-work.mcp-server-set" -> "research.tools",
+        "textus.ai.ollama.tool-capable-models" -> "tested-local-tools"
+      )
+
+      When("profile resolution and Port requirement publication are evaluated")
+      val unsupportedResolution = unsupported.resolveRequired(AiRunnerRequirement(
+        purpose = Some("standard-work")
+      ))
+      val unsupportedRequirements = unsupported.mcpClientRequirementsC
+      val supportedResolution = supported.resolveRequired(AiRunnerRequirement(
+        purpose = Some("standard-work")
+      ))
+      val supportedRequirements = supported.operationToolRequirementsC
+      val operatorAdmittedResolution = operatoradmitted.resolveRequired(AiRunnerRequirement(
+        purpose = Some("standard-work")
+      ))
+
+      Then("a plain Gemma model cannot activate function tools, while the admitted FunctionGemma model can")
+      unsupportedResolution.isFaillure shouldBe true
+      unsupportedRequirements.isFaillure shouldBe true
+      unsupportedResolution.toString should include ("requires an admitted tool-capable Ollama model")
+      unsupportedRequirements.toString should include ("requires an admitted tool-capable Ollama model")
+      supportedResolution.toOption.flatMap(_.requirement.model) shouldBe Some("functiongemma")
+      supportedRequirements.toOption.toVector.flatten.map(_.toolSetId.print) shouldBe Vector("textus.tools")
+      operatorAdmittedResolution.toOption.flatMap(_.requirement.model) shouldBe Some("tested-local-tools")
     }
 
     "resolve every standard purpose through the built-in Codex CLI defaults" in {

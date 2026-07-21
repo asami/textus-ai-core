@@ -56,8 +56,11 @@ set before it invokes a provider.
   provider request construction and function-call continuation semantics.
 - The initial transport is CNCF-admitted Streamable HTTP only. Stdio, SSE,
   arbitrary process execution, and arbitrary HTTP are out of scope.
-- A runtime profile that selects local Gemma/Ollama must name a tool-capable
-  model. A plain no-tool request retains the existing generate/chat path.
+- A Gemma/Ollama execution class that selects an MCP or Operation tool set must
+  name a member of the runtime-owned `textus.ai.ollama.tool-capable-models`
+  catalog. `functiongemma` is the shipped default; an operator may replace the
+  catalog with locally tested alternatives. A plain no-tool request retains the
+  existing generate/chat path.
 
 ## Stages
 
@@ -71,7 +74,7 @@ set before it invokes a provider.
 | MO-02 | Common orchestration | One bounded, redacted tool catalog and function-call execution path bridges Textus AI to the CNCF MCP client Port. | done |
 | MO-03 | Local provider binding | Gemma/Ollama emits and receives tool calls through `/api/chat`; no-tool generation remains unchanged. | done |
 | MO-04 | Commercial provider bindings | OpenAI Responses, Gemini Interactions, and Anthropic Messages execute the same admitted MCP tools through their native function continuation formats. | done |
-| MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | active |
+| MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | done |
 
 ## Implementation Status
 
@@ -116,9 +119,7 @@ this runtime-owned function loop.
 MO-04 is complete. MO-05 confirms named-server-set admission: profile and
 execution-class policy publish the logical requirement, application-purpose
 MCP selection fails before Port activation, and the installed catalog excludes
-transport-reported tools outside the admitted set. The remaining work is
-full no-tool and provider-failure regression evidence, and separately opt-in
-live MCP/Gemma evidence. `CommercialToolOrchestrationSpec` now exercises each
+transport-reported tools outside the admitted set. `CommercialToolOrchestrationSpec` exercises each
 commercial binding against the common fake MCP boundary: OpenAI Responses,
 Gemini Interactions, and Anthropic Messages continue only with native
 correlation after an admitted result and stop before another provider request
@@ -128,15 +129,22 @@ The deterministic regression baseline is complete: `TextusAiRunnerSpec`
 verifies plain generate/chat, structured-record normalization and failure
 handling, and redacted provider failures. `AiProviderAdmissionSpec` verifies
 logical URL/search admission and rejection; the Google and OpenAI runner
-specifications verify their corresponding provider mappings. The remaining
-MO-05 closure evidence is opt-in live MCP and tool-capable Gemma/Ollama.
+specifications verify their corresponding provider mappings. On 2026-07-22,
+the opt-in `TEXTUS_AI_LIVE_GEMMA_TEST=true sbt --batch 'testOnly
+org.simplemodeling.textus.ai.GemmaOllamaLiveSpec'` heavy test passed both
+managed local `gemma:2b` generation and a `functiongemma` native function-call
+request. The test completed in 7 minutes 37 seconds without retaining a
+container. The live result contains no prompt, tool argument, or tool-result
+payload in phase documentation. CNCF Streamable HTTP MCP transport remains
+covered by the deterministic assembled MCP fixture; live remote-MCP execution
+is intentionally not a Phase 6 closure requirement.
 
 ## Dependencies
 
 - CNCF Phase 45 must define and implement the MCP client Port, transport
   ExtensionPoint, server-set admission, bounded calls, and redacted diagnostics.
-- Phase 5 remains active independently for its optional live Gemma/Ollama
-  service provisioning evidence.
+- Phase 5 is complete and supplies the profile-owned local service provisioning
+  contract used by this phase.
 
 ## References
 
