@@ -87,6 +87,15 @@ record is maintained by Sanpomap at
 release revision is `72ed97e`. OS-04 remains active until an assembled local
 Gemma repair is recorded.
 
+On 2026-07-22, the bounded local acceptance path was remeasured with the
+generic `gemma3:4b` model. The assembled Sanpomap command completed without a
+Scenario DSL artifact. Direct, isolated Ollama probes for both `gemma3:4b` and
+the shipped `gemma:2b` model, including a `num_ctx=1024` `gemma:2b` probe,
+returned no bytes within the same 360-second envelope. This is not evidence of
+a provider-contract regression: the Textus AI live heavy test continues to
+verify bounded no-tool generation and native function calling. It is evidence
+that this host has not yet demonstrated a local-Gemma Scenario DSL repair.
+
 MO-01 is complete. An execution class may select one logical
 `operation-tool-set`, `mcp-server-set`, or both; the selected runtime profile
 publishes distinct logical requirements through CNCF `OperationToolSocket` and

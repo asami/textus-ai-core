@@ -50,7 +50,9 @@ Stage Status:
   escalation through Sanpomap acceptance.
   The controlled escalation is accepted in Sanpomap
   `docs/evidence/phase-2-assembled-live-evidence.yaml`; an assembled local
-  Gemma repair remains open.
+  Gemma repair remains open. On 2026-07-22, `gemma3:4b` failed to produce an
+  assembled Scenario DSL artifact; direct 360-second probes for `gemma3:4b`
+  and `gemma:2b` (with `num_ctx=1024`) also returned no bytes.
 - [x] Record accepted Textus AI revision `72ed97e` in the Sanpomap Phase 2
   ledger.
 
