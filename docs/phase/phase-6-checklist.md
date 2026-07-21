@@ -135,8 +135,11 @@ Stage Status:
   admitted catalog.
 - [x] Verify fake MCP tool success, rejection, limit exhaustion, and redacted
   observability for the completed Gemma provider binding.
-- [ ] Verify fake MCP tool failure and native continuation behavior for each
-  future commercial provider binding.
+- [x] Verify fake MCP tool failure and native continuation behavior for each
+  commercial provider binding. `CommercialToolOrchestrationSpec` runs OpenAI,
+  Gemini, and Anthropic through the common MCP invocation boundary, verifies
+  their native correlated continuation after success, and verifies that a
+  failed invocation stops before a synthetic provider result is sent.
 - [ ] Verify existing no-tool generate, chat, structured-record, URL/search,
   and provider failure regressions.
 - [ ] Record opt-in live MCP and tool-capable Gemma/Ollama heavy-test evidence.

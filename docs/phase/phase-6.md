@@ -117,9 +117,12 @@ MO-04 is complete. MO-05 confirms named-server-set admission: profile and
 execution-class policy publish the logical requirement, application-purpose
 MCP selection fails before Port activation, and the installed catalog excludes
 transport-reported tools outside the admitted set. The remaining work is
-cross-provider fake MCP failure and continuation evidence, full no-tool and
-provider-failure regression evidence, and separately opt-in live MCP/Gemma
-evidence.
+full no-tool and provider-failure regression evidence, and separately opt-in
+live MCP/Gemma evidence. `CommercialToolOrchestrationSpec` now exercises each
+commercial binding against the common fake MCP boundary: OpenAI Responses,
+Gemini Interactions, and Anthropic Messages continue only with native
+correlation after an admitted result and stop before another provider request
+when the MCP invocation fails.
 
 ## Dependencies
 
