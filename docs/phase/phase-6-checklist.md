@@ -1,7 +1,57 @@
-# Phase 6 Checklist - Provider-Neutral MCP Tool Orchestration
+# Phase 6 Checklist - Gemma-First Strategy and MCP Tool Orchestration
 
 status=active
-phase=[Phase 6 - Provider-Neutral MCP Tool Orchestration](phase-6.md)
+phase=[Phase 6 - Gemma-First Strategy and MCP Tool Orchestration](phase-6.md)
+
+## Stage OS-01 - Profile-Owned Strategy
+
+Stage Status:
+- Current status: DONE
+
+- [x] Add explicit `gemma-first-gemini` and `gemma-first-codex-cli` profiles.
+- [x] Resolve all five strategy kinds from an application-purpose-only request.
+- [x] Preserve single-provider behavior for every conventional profile.
+
+## Stage OS-02 - Bounded Runner Execution
+
+Stage Status:
+- Current status: DONE
+
+- [x] Attempt Gemma before any configured commercial provider.
+- [x] Bound repairs to zero through three and provider attempts to one or two.
+- [x] Admit fallback only for availability, timeout, malformed output, domain
+  validation, evidence, and ambiguity.
+- [x] Keep authorization, capability, admission, credential-policy, input, and
+  resource-limit failures terminal.
+- [x] Record strategy, attempt lineage, repair count, escalation reason, final
+  provider, duration, and existing reported usage safely.
+- [x] Re-run cost admission for every provider attempt and require a distinct
+  operator rate schedule before a commercial fallback can be admitted.
+
+## Stage OS-03 - Application Acceptance Integration
+
+Stage Status:
+- Current status: DONE
+
+- [x] Resolve an acceptance Operation from operator configuration rather than
+  the application request.
+- [x] Execute accept, bounded repair, confirmation/escalation, and rejection
+  semantics without moving domain policy into Textus AI.
+- [x] Keep prompt, candidate, credential, endpoint, and raw payload content out
+  of execution metadata.
+
+## Stage OS-04 - Cross-Component Evidence
+
+Stage Status:
+- Current status: OPEN
+
+- [x] Verify all Sanpomap purposes through deterministic strategy fixtures.
+- [ ] Verify one assembled local Gemma repair and one controlled commercial
+  escalation through Sanpomap acceptance.
+  The controlled escalation is accepted in Sanpomap
+  `docs/evidence/phase-2-assembled-live-evidence.yaml`; an assembled local
+  Gemma repair remains open.
+- [ ] Record the accepted Textus AI revision in the Sanpomap Phase 2 ledger.
 
 ## Stage MO-01 - Profile-Owned MCP Policy
 

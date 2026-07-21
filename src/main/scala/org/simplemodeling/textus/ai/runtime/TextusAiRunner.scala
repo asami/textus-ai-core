@@ -10,8 +10,10 @@ import org.goldenport.cncf.component.Component
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.spi.{SpiContract, SpiProvider, SpiSelection}
 import org.goldenport.cncf.spi.ai.runner.*
-import org.goldenport.protocol.Property
+import org.goldenport.protocol.{Property, Request}
+import org.goldenport.protocol.operation.OperationResponse
 import org.goldenport.record.Record
+import org.slf4j.LoggerFactory
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
 
@@ -23,7 +25,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -31,43 +33,375 @@ final class TextusAiRunner(
   selection: SpiSelection,
   profiles: AiProfileConfig = AiProfileConfig.empty
 ) extends AiRunner {
+  private val _log = LoggerFactory.getLogger(classOf[TextusAiRunner])
+
   def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] =
     _effective_resolution(req.requirement).flatMap { resolution =>
-      val requirement = resolution.requirement
-      val effective = _effective_selection(requirement)
-      val properties = _request_properties(req.properties, resolution)
       val maxtokens = resolution.maxTokens(req.maxTokens)
       val inputestimate = AiInputTokenEstimator.generate(req.prompt)
-      val policymetadata = resolution.executionMetadata(maxtokens, properties, inputEstimate = Some(inputestimate))
-      _with_generate_calltree(req, requirement, maxtokens, policymetadata) {
+      val primaryproperties = _request_properties(req.properties, resolution)
+      val policymetadata = resolution.executionMetadata(
+        maxtokens,
+        primaryproperties,
+        inputEstimate = Some(inputestimate)
+      )
+      _with_generate_calltree(req, resolution.requirement, maxtokens, policymetadata) {
         for {
           _ <- resolution.policy.validateInputBudget(inputestimate)
-          costadmission <- resolution.costAdmissionC(inputestimate, maxtokens)
-          _ <- resolution.policy.validateCostBudget(costadmission)
-          _ <- resolution.policy.validateGenerate(properties)
-          _ <- AiProviderAdmission.validate(effective, properties)
+          costadmission <- if (resolution.operationalStrategy.isEmpty)
+            resolution.costAdmissionC(inputestimate, maxtokens)
+          else
+            Consequence.success(None)
+          _ <- if (resolution.operationalStrategy.isEmpty)
+            resolution.policy.validateCostBudget(costadmission)
+          else
+            Consequence.unit
+          _ <- resolution.policy.validateGenerate(primaryproperties)
           response <- _with_concurrency_admission_c(resolution) {
-            for {
-              service <- provider.generateService(effective)
-              response <- service.generate(
-                GenerateRequest(
-                  prompt = req.prompt,
-                  temperature = req.temperature,
-                  maxTokens = maxtokens,
-                  properties = properties
+            resolution.operationalStrategy match {
+              case Some(strategy) =>
+                _generate_with_operational_strategy(
+                  req,
+                  resolution,
+                  strategy,
+                  inputestimate
                 )
-              )
-              _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
-              _ <- AiExecutionFacts.validateMaxReasoningTokens(
-                effective,
-                resolution.policy.maxReasoningTokens,
-                response.metadata
-              )
-            } yield response
+              case None =>
+                _generate_once(
+                  req,
+                  resolution,
+                  req.prompt,
+                  policymetadata,
+                  inputestimate,
+                  costadmission
+                )
+            }
           }
-        } yield _to_ai_generate_response(req, response, requirement, policymetadata, inputestimate, resolution, costadmission)
+        } yield response
       }
     }
+
+  private def _generate_once(
+    req: AiGenerateRequest,
+    resolution: AiProfileResolution,
+    prompt: String,
+    policyMetadata: Map[String, String],
+    inputEstimate: AiInputTokenEstimate,
+    costAdmission: Option[AiCostAdmission]
+  )(using ExecutionContext): Consequence[_Accounted[AiGenerateResponse]] =
+    _generate_raw(req, resolution, prompt).map { response =>
+      _to_ai_generate_response(
+        req,
+        response,
+        resolution.requirement,
+        policyMetadata,
+        inputEstimate,
+        resolution,
+        costAdmission
+      )
+    }
+
+  private def _generate_raw(
+    req: AiGenerateRequest,
+    resolution: AiProfileResolution,
+    prompt: String
+  )(using ExecutionContext): Consequence[GenerateResponse] = {
+    val effective = _effective_selection(resolution.requirement)
+    val properties = _request_properties(req.properties, resolution)
+    for {
+      _ <- AiProviderAdmission.validate(effective, properties)
+      service <- provider.generateService(effective)
+      response <- service.generate(GenerateRequest(
+        prompt = prompt,
+        temperature = req.temperature,
+        maxTokens = resolution.maxTokens(req.maxTokens),
+        properties = properties
+      ))
+      _ <- AiExecutionFacts.validateMaxOutputTokens(
+        effective,
+        resolution.maxTokens(req.maxTokens),
+        response.metadata
+      )
+      _ <- AiExecutionFacts.validateMaxReasoningTokens(
+        effective,
+        resolution.policy.maxReasoningTokens,
+        response.metadata
+      )
+    } yield response
+  }
+
+  private def _generate_raw_attempt(
+    req: AiGenerateRequest,
+    resolution: AiProfileResolution,
+    prompt: String
+  )(using ExecutionContext): Either[(org.goldenport.Conclusion, AiAttemptFailureClass), GenerateResponse] = {
+    val effective = _effective_selection(resolution.requirement)
+    val properties = _request_properties(req.properties, resolution)
+    AiProviderAdmission.validate(effective, properties) match {
+      case Consequence.Failure(conclusion) =>
+        Left(conclusion -> AiAttemptFailureClass.Capability)
+      case Consequence.Success(_) =>
+        provider.generateService(effective) match {
+          case Consequence.Failure(conclusion) =>
+            Left(conclusion -> AiAttemptFailureClass.Capability)
+          case Consequence.Success(service) =>
+            service.generate(GenerateRequest(
+              prompt = prompt,
+              temperature = req.temperature,
+              maxTokens = resolution.maxTokens(req.maxTokens),
+              properties = properties
+            )) match {
+              case Consequence.Failure(conclusion) =>
+                Left(conclusion -> AiAttemptFailureClass.fromConclusion(conclusion))
+              case Consequence.Success(response) =>
+                val limits = for {
+                  _ <- AiExecutionFacts.validateMaxOutputTokens(
+                    effective,
+                    resolution.maxTokens(req.maxTokens),
+                    response.metadata
+                  )
+                  _ <- AiExecutionFacts.validateMaxReasoningTokens(
+                    effective,
+                    resolution.policy.maxReasoningTokens,
+                    response.metadata
+                  )
+                } yield ()
+                limits match {
+                  case Consequence.Success(_) => Right(response)
+                  case Consequence.Failure(conclusion) =>
+                    Left(conclusion -> AiAttemptFailureClass.ResourceLimit)
+                }
+            }
+        }
+    }
+  }
+
+  private def _generate_with_operational_strategy(
+    req: AiGenerateRequest,
+    resolution: AiProfileResolution,
+    strategy: AiOperationalStrategy,
+    inputEstimate: AiInputTokenEstimate
+  )(using ExecutionContext): Consequence[_Accounted[AiGenerateResponse]] = {
+    val started = System.nanoTime()
+    var attempts = Vector.empty[AiAttemptFact]
+    var attemptindex = 0
+    var repairs = 0
+    var escalationreason: Option[String] = None
+    var lastfailure = AiAttemptFailureClass.Unknown
+
+    def invoke(
+      execution: AiRuntimeExecution,
+      stage: String,
+      prompt: String,
+      rateschedule: Option[AiRateSchedule] = resolution.rateSchedule
+    ): Consequence[(GenerateResponse, AiProfileResolution, Option[AiCostAdmission])] = {
+      attemptindex += 1
+      val executionresolution = resolution.forExecution(execution).copy(rateSchedule = rateschedule)
+      val admission = for {
+        value <- executionresolution.costAdmissionC(
+          inputEstimate,
+          executionresolution.maxTokens(req.maxTokens)
+        )
+        _ <- executionresolution.policy.validateCostBudget(value)
+      } yield value
+      admission match {
+        case Consequence.Failure(conclusion) =>
+          lastfailure = AiAttemptFailureClass.Admission
+          attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
+          Consequence.Failure(conclusion)
+        case Consequence.Success(costadmission) => _generate_raw_attempt(req, executionresolution, prompt) match {
+          case Right(response) =>
+            attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "success")
+            Consequence.success((response, executionresolution, costadmission))
+          case Left((conclusion, failure)) =>
+            lastfailure = failure
+            val exceptionclass = conclusion.getException
+              .map(_.getClass.getName)
+              .getOrElse("none")
+            val safelog =
+              s"AI provider failure: provider=${execution.provider} class=${failure.id} " +
+                s"reason=${AiAttemptFailureClass.safeReason(conclusion)} " +
+                s"status=${conclusion.status.webCode.code} exception=$exceptionclass"
+            if (failure == AiAttemptFailureClass.Unknown)
+              _log.warn(safelog)
+            else
+              _log.debug(safelog)
+            attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
+            Consequence.Failure(conclusion)
+        }
+      }
+    }
+
+    def primaryCandidate(
+      prompt: String
+    ): Consequence[(GenerateResponse, AiProfileResolution, Option[AiCostAdmission])] =
+      if (repairs > 0)
+        invoke(strategy.primary, "repair", prompt)
+      else
+        strategy.kind match {
+          case AiOperationalStrategyKind.Decomposed =>
+            invoke(
+              strategy.primary,
+              "decompose",
+              s"Decompose the following task into a concise execution plan. Do not answer the task yet.\n\n$prompt"
+            ).flatMap { case (plan, _, _) =>
+              invoke(
+                strategy.primary,
+                "compose",
+                s"Complete the original task using the plan below. Return only the requested final artifact.\n\n" +
+                  s"Plan:\n${plan.text}\n\nOriginal task:\n$prompt"
+              )
+            }
+          case AiOperationalStrategyKind.CandidateRanking =>
+            for {
+              first <- invoke(strategy.primary, "candidate-1", prompt)
+              second <- invoke(strategy.primary, "candidate-2", prompt)
+              ranked <- invoke(
+                strategy.primary,
+                "rank",
+                s"Choose and improve the better candidate for the original task. Return only the final artifact.\n\n" +
+                  s"Candidate 1:\n${first._1.text}\n\nCandidate 2:\n${second._1.text}\n\nOriginal task:\n$prompt"
+              )
+            } yield ranked
+          case AiOperationalStrategyKind.ToolGrounded
+              if strategy.primary.mcpServerSet.nonEmpty =>
+            Consequence.configurationInvalid(
+              "Tool-grounded MCP strategy requires the Textus AI function-call orchestrator."
+            )
+          case AiOperationalStrategyKind.ToolGrounded
+              if strategy.primary.tools.isEmpty =>
+            Consequence.configurationInvalid(
+              "Tool-grounded AI strategy requires a runtime-owned logical tool or MCP server set."
+            )
+          case _ =>
+            invoke(strategy.primary, "initial", prompt)
+        }
+
+    def finish(
+      response: GenerateResponse,
+      finalresolution: AiProfileResolution,
+      costadmission: Option[AiCostAdmission]
+    ): Consequence[_Accounted[AiGenerateResponse]] = {
+      val facts = AiStrategyFacts(
+        attempts,
+        repairs,
+        escalationreason,
+        finalresolution.requirement.provider.getOrElse(""),
+        (System.nanoTime() - started) / 1000000L
+      )
+      val finalPolicyMetadata = finalresolution.executionMetadata(
+        finalresolution.maxTokens(req.maxTokens),
+        _request_properties(req.properties, finalresolution),
+        inputEstimate = Some(inputEstimate)
+      )
+      Consequence.success(_to_ai_generate_response(
+        req,
+        response,
+        finalresolution.requirement,
+        finalPolicyMetadata ++ facts.metadata,
+        inputEstimate,
+        finalresolution,
+        costadmission
+      ))
+    }
+
+    def fallback(
+      failure: AiAttemptFailureClass
+    ): Consequence[_Accounted[AiGenerateResponse]] = {
+      escalationreason = Some(failure.id)
+      strategy.fallbackFor(failure) match {
+        case None =>
+          Consequence.operationIllegal(
+            "ai.operational-strategy",
+            s"AI strategy terminated without admitted fallback: ${failure.id}"
+          )
+        case Some(execution) =>
+          invoke(
+            execution,
+            "commercial-fallback",
+            req.prompt,
+            strategy.commercialFallbackRateSchedule
+          ) match {
+            case Consequence.Failure(_) => Consequence.operationIllegal(
+              "ai.operational-strategy",
+              s"Commercial fallback execution failed: ${lastfailure.id}"
+            )
+            case Consequence.Success((response, finalresolution, costadmission)) =>
+              provider.evaluateCandidateC(
+                strategy.acceptanceOperation,
+                resolution.applicationPurpose,
+                response.text,
+                repairs,
+                strategy.maxRepairs
+              ).flatMap {
+                case acceptance if Set("accept", "confirm").contains(acceptance.decision) =>
+                  finish(response, finalresolution, costadmission)
+                case acceptance =>
+                  Consequence.operationIllegal(
+                    "ai.operational-strategy",
+                    s"Commercial fallback failed acceptance: ${acceptance.decision}"
+                  )
+              }
+          }
+      }
+    }
+
+    def run(prompt: String): Consequence[_Accounted[AiGenerateResponse]] =
+      primaryCandidate(prompt) match {
+        case Consequence.Failure(conclusion) =>
+          val failure = lastfailure
+          strategy.fallbackFor(failure) match {
+            case Some(_) => fallback(failure)
+            case None => Consequence.operationIllegal(
+              "ai.operational-strategy",
+              s"AI strategy terminated without admitted fallback: ${failure.id}"
+            )
+          }
+        case Consequence.Success((response, finalresolution, costadmission)) =>
+          provider.evaluateCandidateC(
+            strategy.acceptanceOperation,
+            resolution.applicationPurpose,
+            response.text,
+            repairs,
+            strategy.maxRepairs
+          ).flatMap {
+            case acceptance if acceptance.decision == "accept" =>
+              finish(response, finalresolution, costadmission)
+            case acceptance if acceptance.decision == "repair" && repairs < strategy.maxRepairs =>
+              repairs += 1
+              run(_repair_prompt(req.prompt, response.text, acceptance))
+            case acceptance if acceptance.decision == "confirm" =>
+              fallback(AiAttemptFailureClass.Ambiguity)
+            case acceptance if acceptance.decision == "escalate" =>
+              fallback(AiAttemptFailureClass.fromEscalationReason(
+                acceptance.escalationReason.getOrElse("")
+              ))
+            case acceptance if acceptance.decision == "repair" =>
+              fallback(AiAttemptFailureClass.DomainValidation)
+            case acceptance if acceptance.decision == "reject" =>
+              Consequence.operationIllegal(
+                "ai.operational-strategy",
+                "AI candidate was rejected by the application acceptance policy."
+              )
+            case acceptance =>
+              Consequence.configurationInvalid(
+                s"Unsupported AI acceptance decision: ${acceptance.decision}"
+              )
+          }
+      }
+
+    run(req.prompt)
+  }
+
+  private def _repair_prompt(
+    originalPrompt: String,
+    candidate: String,
+    acceptance: AiCandidateAcceptance
+  ): String =
+    s"Repair the candidate using only the validation diagnostics and allowed paths below. " +
+      s"Return only the corrected final artifact.\n\nOriginal task:\n$originalPrompt\n\n" +
+      s"Candidate:\n$candidate\n\nDiagnostics:\n${acceptance.diagnostics}\n\n" +
+      s"Allowed repair paths:\n${acceptance.allowedRepairPaths}"
 
   def generateRecord(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] =
     _effective_resolution(req.requirement).flatMap { resolution =>
@@ -858,16 +1192,75 @@ final class TextusAiRunner(
     )
 }
 
-final class TextusAiRunnerProvider(
+class TextusAiRunnerProvider(
   component: Component,
   defaultselection: SpiSelection = SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
   profiles: AiProfileConfig = AiProfileConfig.empty,
-  concurrencystate: AiConcurrencyAdmissionState = new AiConcurrencyAdmissionState()
+  concurrencystate: AiConcurrencyAdmissionState = new AiConcurrencyAdmissionState(),
+  assembledSubsystem: Option[org.goldenport.cncf.subsystem.Subsystem] = None
 ) extends SpiProvider[AiRunner] {
   private val _late_concurrency_admissions =
     new ConcurrentHashMap[ConcurrencyScopeId, ScopedConcurrencyAdmission]()
 
   private[runtime] def componentScope = component.scopeContext
+
+  private[runtime] def evaluateCandidateC(
+    operation: Option[String],
+    purpose: Option[String],
+    candidate: String,
+    repairCount: Int,
+    maxRepairs: Int
+  ): Consequence[AiCandidateAcceptance] =
+    operation match {
+      case None =>
+        Consequence.success(AiCandidateAcceptance("accept", "", "", None))
+      case Some(identity) =>
+        identity.split("\\.", 3).toVector match {
+          case Vector(componentname, service, operationname) =>
+            val response = assembledSubsystem.orElse(component.subsystem)
+              .map(_.executeOperationResponse(Request.of(
+                component = componentname,
+                service = service,
+                operation = operationname,
+                properties = List(
+                  Property("purpose", purpose.getOrElse(""), None),
+                  Property("candidate", candidate, None),
+                  Property("candidateFormat", "yaml", None),
+                  Property("repairCount", repairCount.toString, None),
+                  Property("maxRepairs", maxRepairs.toString, None)
+                )
+              )))
+              .getOrElse(Consequence.serviceUnavailable(
+                "AI acceptance operation requires an assembled subsystem."
+              ))
+              .recoverWith { _ =>
+                Consequence.operationIllegal(
+                  "ai.acceptance-operation",
+                  "Application acceptance operation invocation failed."
+                )
+              }
+            response.flatMap {
+                case OperationResponse.RecordResponse(record) =>
+                  record.getString("decision").map(_.trim.toLowerCase(Locale.ROOT)).filter(_.nonEmpty) match {
+                    case Some(decision) => Consequence.success(AiCandidateAcceptance(
+                      decision,
+                      record.getString("diagnostics").getOrElse(""),
+                      record.getString("allowedRepairPaths").getOrElse(""),
+                      record.getString("escalationReason").map(_.trim).filter(_.nonEmpty)
+                    ))
+                    case None => Consequence.configurationInvalid(
+                      "Application acceptance operation response has no decision."
+                    )
+                  }
+                case other => Consequence.configurationInvalid(
+                  "Application acceptance operation returned a non-record response."
+                )
+              }
+          case _ => Consequence.configurationInvalid(
+            s"AI acceptance operation must be Component.Service.operation: $identity"
+          )
+        }
+    }
 
   /*
    * Application purpose registrations may be bound after the runtime component

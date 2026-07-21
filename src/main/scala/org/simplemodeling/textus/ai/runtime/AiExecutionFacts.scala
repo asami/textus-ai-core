@@ -83,7 +83,7 @@ private[textus] object AiAccountingFacts {
  * Provider-neutral execution metadata normalization for Textus AI responses.
  *
  * @since   Jul. 16, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] object AiExecutionFacts {
@@ -100,6 +100,14 @@ private[textus] object AiExecutionFacts {
   val NORMALIZATION_MODE = "ai.execution.normalization_mode"
   val RESPONSE_ID = "ai.execution.response_id"
   val FINISH_REASON = "ai.execution.finish_reason"
+  val OPERATIONAL_STRATEGY = "ai.execution.strategy"
+  val ATTEMPT_LINEAGE = "ai.execution.attempt_lineage"
+  val REPAIR_COUNT = "ai.execution.repair_count"
+  val ESCALATION_REASON = "ai.execution.escalation_reason"
+  val FINAL_PROVIDER = "ai.execution.final_provider"
+  val DURATION_MILLIS = "ai.execution.duration_millis"
+  val STRATEGY_MAX_REPAIRS = "ai.policy.strategy_max_repairs"
+  val STRATEGY_MAX_PROVIDER_ATTEMPTS = "ai.policy.strategy_max_provider_attempts"
   val INPUT_TOKENS = "ai.usage.input_tokens"
   val INPUT_TOKENS_SOURCE = "ai.usage.input_tokens_source"
   val CACHED_INPUT_TOKENS = "ai.usage.cached_input_tokens"

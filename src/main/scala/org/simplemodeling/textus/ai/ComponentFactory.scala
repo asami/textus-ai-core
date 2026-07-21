@@ -53,7 +53,8 @@ class ComponentFactory extends TextusAiComponent.Factory:
       profiles,
       concurrencystate,
       gemma,
-      claude
+      claude,
+      Some(bootstrapcontext)
     )
 
   override protected def create_Core(
@@ -104,7 +105,8 @@ object ComponentFactory:
       profiles,
       new AiConcurrencyAdmissionState(),
       gemmaRuntimeConfig(configuration, profiles, component.subsystem),
-      configuration.flatMap(value => ClaudeCodeConfig.fromConfiguration(value, claudeCodeExecutionProfiles(profiles)))
+      configuration.flatMap(value => ClaudeCodeConfig.fromConfiguration(value, claudeCodeExecutionProfiles(profiles))),
+      component.subsystem
     )
   }
 
@@ -116,7 +118,8 @@ object ComponentFactory:
     profiles: AiProfileConfig,
     concurrencystate: AiConcurrencyAdmissionState,
     gemmaconfig: GemmaRuntimeConfig,
-    claudeconfig: Option[ClaudeCodeRuntimeConfig]
+    claudeconfig: Option[ClaudeCodeRuntimeConfig],
+    subsystem: Option[Subsystem]
   ): Component =
     val openai = configuration.flatMap(OpenAiConfig.fromConfiguration)
     val anthropic = configuration.flatMap(AnthropicConfig.fromConfiguration)
@@ -129,7 +132,13 @@ object ComponentFactory:
     )
     val withgenerate = AiRuntimeGenerateBinding.register(component, Some(gemmaconfig), openai, google, codex, claudeconfig, anthropic)
     val withchat = AiRuntimeChatBinding.register(withgenerate, Some(gemmaconfig), openai, google, codex, claudeconfig, anthropic)
-    val runnerprovider = new TextusAiRunnerProvider(withchat, defaultselection, profiles, concurrencystate)
+    val runnerprovider = new TextusAiRunnerProvider(
+      withchat,
+      defaultselection,
+      profiles,
+      concurrencystate,
+      subsystem
+    )
     val mcpclientport = mcpClientPortC(profiles) match {
       case Consequence.Success(port) => port
       case Consequence.Failure(conclusion) =>

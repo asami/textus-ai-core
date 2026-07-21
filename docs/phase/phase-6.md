@@ -1,4 +1,4 @@
-# Phase 6 - Provider-Neutral MCP Tool Orchestration
+# Phase 6 - Gemma-First Strategy and MCP Tool Orchestration
 
 status=active
 planned_at=2026-07-21
@@ -7,14 +7,25 @@ strategy=[Textus AI Development Strategy](../strategy/textus-ai-development-stra
 
 ## Purpose
 
-Allow selected Textus AI runtime profiles to use an operator-owned MCP tool
-catalog through the existing `generate` and `chat` operations. An application
+Execute bounded Gemma-first profiles and allow selected Textus AI runtime
+profiles to use an operator-owned MCP tool catalog through the existing
+`generate` and `chat` operations. An application
 continues to select only its registered application purpose. Textus AI resolves
 the standard purpose, execution class, runtime profile, and admitted MCP server
 set before it invokes a provider.
 
 ## Scope
 
+- Resolve explicit Gemma-first profiles without changing the application
+  purpose-only request contract.
+- Execute structured, tool-grounded, decomposed, validator-repair, and
+  candidate-ranking strategies with bounded repairs and provider attempts.
+- Call an operator-configured application acceptance Operation between attempts
+  and admit commercial escalation only for reviewed residual failure classes.
+- Publish safe strategy and attempt evidence without raw application/provider
+  payloads.
+- Account for each provider attempt with its own operator rate schedule; a
+  commercial fallback is not admitted under the primary Gemma schedule.
 - Consume the CNCF Phase 45 MCP client Port and named server-set catalog.
 - Bind MCP server-set selection to Textus AI runtime profile and execution
   class configuration only.
@@ -46,6 +57,10 @@ set before it invokes a provider.
 
 | ID | Stage | Outcome | Status |
 | --- | --- | --- | --- |
+| OS-01 | Profile-owned strategy | Explicit Gemma-first profiles resolve all five strategy kinds and bounded attempts. | done |
+| OS-02 | Runner execution | Generate executes Gemma first, bounded repair, and classified commercial escalation. | done |
+| OS-03 | Acceptance integration | A configured application Operation controls candidate decisions without provider selection. | done |
+| OS-04 | Cross-component evidence | Sanpomap deterministic and guarded production evidence verifies the strategy end to end. | active |
 | MO-01 | Profile-owned MCP policy | Runtime profiles and execution classes resolve an admitted MCP server set without caller configuration. | done |
 | MO-02 | Common orchestration | One bounded, redacted tool catalog and function-call execution path bridges Textus AI to the CNCF MCP client Port. | planned |
 | MO-03 | Local provider binding | Gemma/Ollama emits and receives tool calls through `/api/chat`; no-tool generation remains unchanged. | planned |
@@ -53,6 +68,15 @@ set before it invokes a provider.
 | MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | planned |
 
 ## Implementation Status
+
+OS-01 through OS-03 are complete. Sanpomap deterministic replay covers all
+registered application purposes. The first assembled guarded record exercises
+a classified Gemma availability failure, one Codex CLI fallback, and the
+Sanpomap acceptance operation before final Scenario DSL adoption. The accepted
+record is maintained by Sanpomap at
+`docs/evidence/phase-2-assembled-live-evidence.yaml`. OS-04 remains active until
+an assembled local Gemma repair and the accepted Textus AI release revision are
+recorded.
 
 MO-01 is complete. An execution class may select one logical
 `mcp-server-set`; the selected runtime profile publishes the distinct logical
@@ -73,5 +97,6 @@ MO-02.
 
 - CNCF Phase 45: `cloud-native-component-framework/docs/phase/phase-45.md`
 - [AI Purpose Catalog](../design/ai-purpose-catalog.md)
+- [Gemma-First Operational Profile](../spec/gemma-first-operational-profile.md)
 - [Gemma Integration Design Note](../notes/gemma-integration-design-note.md)
 - [Phase 5 Dashboard](phase-5.md)

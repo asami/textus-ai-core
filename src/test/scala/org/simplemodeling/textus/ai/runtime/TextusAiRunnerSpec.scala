@@ -14,6 +14,7 @@ import org.goldenport.cncf.http.HttpDriver
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
 import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
+import org.goldenport.cncf.subsystem.Subsystem
 import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
 import org.goldenport.bag.Bag
@@ -38,7 +39,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -341,6 +342,276 @@ final class TextusAiRunnerSpec
       response.metadata(AiExecutionFacts.PROVIDER) shouldBe "gemma"
       driver.calls.head should include ("/api/generate")
       driver.body.value should include ("\"model\":\"gemma:2b\"")
+    }
+
+    "execute an explicit Gemma-first profile and expose safe attempt lineage" in {
+      Given("a Gemma-first profile whose local provider is unavailable")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "gemma-unavailable"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini"),
+          "textus.ai.execution-classes.standard-work.max-cost-microunits" -> ConfigurationValue.StringValue("1000000"),
+          "textus.ai.execution-classes.standard-work.max-output-tokens" -> ConfigurationValue.StringValue("100"),
+          "textus.ai.execution-classes.standard-work.rate-schedule" -> ConfigurationValue.StringValue("gemma-standard"),
+          "textus.ai.execution-classes.standard-work.fallback-rate-schedule" -> ConfigurationValue.StringValue("gemini-standard"),
+          "textus.ai.rate-schedules.gemma-standard.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.gemma-standard.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.gemma-standard.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.gemma-standard.reasoning-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.gemini-standard.input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("100"),
+          "textus.ai.rate-schedules.gemini-standard.cached-input-microunits-per-million-tokens" -> ConfigurationValue.StringValue("20"),
+          "textus.ai.rate-schedules.gemini-standard.output-microunits-per-million-tokens" -> ConfigurationValue.StringValue("500"),
+          "textus.ai.rate-schedules.gemini-standard.reasoning-microunits-per-million-tokens" -> ConfigurationValue.StringValue("0")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-scenario-generation" -> "software-implementation")
+      ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.value
+
+      When("the application requests only its registered purpose")
+      val response = runner.generate(AiGenerateRequest(
+        prompt,
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-scenario-generation"),
+          purposeRequired = true
+        )
+      )).toOption.value
+
+      Then("Gemma is attempted first and the admitted Gemini fallback becomes final")
+      response.text shouldBe "generated:google:gemma-unavailable"
+      response.metadata(AiExecutionFacts.OPERATIONAL_STRATEGY) shouldBe "structured"
+      response.metadata(AiExecutionFacts.ATTEMPT_LINEAGE) shouldBe
+        "1:gemma:initial:failure,2:google:commercial-fallback:success"
+      response.metadata(AiExecutionFacts.ESCALATION_REASON) shouldBe "availability"
+      response.metadata(AiExecutionFacts.FINAL_PROVIDER) shouldBe "google"
+      response.metadata(AiExecutionFacts.REPAIR_COUNT) shouldBe "0"
+      response.metadata(AiExecutionFacts.LIMITATION_CODES) should include ("cost_estimated")
+      response.metadata(AiExecutionFacts.LIMITATION_CODES) should not include ("rate_schedule_unavailable")
+      response.metadata(AiExecutionFacts.DURATION_MILLIS).toLong should be >= 0L
+      response.metadata.keys.exists(key =>
+        key.toLowerCase.contains("credential") ||
+          key.toLowerCase.contains("raw_payload") ||
+          key.toLowerCase.contains("prompt_text")
+      ) shouldBe false
+      response.metadata.values.exists(_.contains(prompt)) shouldBe false
+      _GenerateServiceState.count(prompt) shouldBe 2
+    }
+
+    "never convert an input or policy failure into commercial fallback" in {
+      Given("the same explicit Gemma-first profile and a terminal primary failure")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "strategy-input-denied"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-scenario-generation" -> "software-implementation")
+      ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.value
+
+      When("the primary provider returns a terminal input failure")
+      val result = runner.generate(AiGenerateRequest(
+        prompt,
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-scenario-generation"),
+          purposeRequired = true
+        )
+      ))
+
+      Then("the failure remains terminal and the commercial provider is not called")
+      result should matchPattern { case Consequence.Failure(_) => }
+      val detail = result match {
+        case Consequence.Failure(conclusion) => conclusion.display
+        case _ => fail("expected a terminal strategy failure")
+      }
+      detail should include ("input")
+      _GenerateServiceState.count(prompt) shouldBe 1
+    }
+
+    "report a safe class when the admitted commercial fallback also fails" in {
+      Given("a Gemma availability failure followed by a remote availability failure")
+      given ExecutionContext = ExecutionContext.create()
+      val prompt = "all-providers-unavailable"
+      _GenerateServiceState.reset(prompt)
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini")
+        )),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-scenario-generation" -> "software-implementation")
+      ).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.value
+
+      When("both provider attempts fail")
+      val result = runner.generate(AiGenerateRequest(
+        prompt,
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-scenario-generation"),
+          purposeRequired = true
+        )
+      ))
+
+      Then("the response exposes only the terminal fallback class")
+      val detail = result match {
+        case Consequence.Failure(conclusion) => conclusion.display
+        case _ => fail("expected fallback execution failure")
+      }
+      detail should include ("Commercial fallback execution failed: availability")
+      detail should not include prompt
+      _GenerateServiceState.count(prompt) shouldBe 2
+    }
+
+    "use the factory-owned subsystem for application acceptance operations" in {
+      Given("a provider whose captured component predates subsystem attachment")
+      given ExecutionContext = ExecutionContext.create()
+      val subsystem = new Subsystem(
+        "textus-ai-acceptance-owner-spec",
+        configuration = ResolvedConfiguration(Configuration.empty, ConfigurationTrace.empty)
+      )
+      val provider = new TextusAiRunnerProvider(
+        _component(),
+        assembledSubsystem = Some(subsystem)
+      )
+
+      When("an acceptance operation is resolved")
+      val result = provider.evaluateCandidateC(
+        Some("Missing.Evaluation.evaluate"),
+        Some("fixture-purpose"),
+        "candidate",
+        0,
+        1
+      )
+
+      Then("the explicit subsystem is used instead of the stale component copy")
+      val detail = result match {
+        case Consequence.Failure(conclusion) => conclusion.display
+        case _ => fail("expected the missing fixture operation to fail")
+      }
+      detail should include ("Application acceptance operation invocation failed")
+      detail should not include "requires an assembled subsystem"
+    }
+
+    "apply bounded Gemma repair before accepting a candidate" in {
+      Given("a Gemma-first profile and a deterministic application acceptance gate")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini"),
+          "textus.ai.application-purposes.sanpomap-scenario-generation.acceptance-operation" ->
+            ConfigurationValue.StringValue("Sanpomap.Evaluation.evaluateAiCandidate")
+        )),
+        ConfigurationTrace.empty
+      )
+      val provider = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-scenario-generation" -> "software-implementation")
+      ) {
+        override private[runtime] def evaluateCandidateC(
+          operation: Option[String],
+          purpose: Option[String],
+          candidate: String,
+          repairCount: Int,
+          maxRepairs: Int
+        ): Consequence[AiCandidateAcceptance] =
+          if (repairCount == 0)
+            Consequence.success(AiCandidateAcceptance(
+              "repair",
+              "diagnostics: [{code: missing-route}]",
+              "scenario.route_intent",
+              None
+            ))
+          else
+            Consequence.success(AiCandidateAcceptance("accept", "", "", None))
+      }
+      val runner = provider.provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.value
+
+      When("the first Gemma candidate requires one repair")
+      val response = runner.generate(AiGenerateRequest(
+        "repair-once",
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-scenario-generation"),
+          purposeRequired = true
+        )
+      )).toOption.value
+
+      Then("the repaired Gemma candidate is final without commercial escalation")
+      response.metadata(AiExecutionFacts.REPAIR_COUNT) shouldBe "1"
+      response.metadata(AiExecutionFacts.FINAL_PROVIDER) shouldBe "gemma"
+      response.metadata(AiExecutionFacts.ATTEMPT_LINEAGE) shouldBe
+        "1:gemma:initial:success,2:gemma:repair:success"
+      response.metadata.get(AiExecutionFacts.ESCALATION_REASON) shouldBe None
+    }
+
+    "escalate only after the configured Gemma repair bound is exhausted" in {
+      Given("an acceptance gate that keeps rejecting Gemma domain output but accepts Gemini")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini"),
+          "textus.ai.application-purposes.sanpomap-scenario-generation.acceptance-operation" ->
+            ConfigurationValue.StringValue("Sanpomap.Evaluation.evaluateAiCandidate")
+        )),
+        ConfigurationTrace.empty
+      )
+      val provider = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-scenario-generation" -> "software-implementation")
+      ) {
+        override private[runtime] def evaluateCandidateC(
+          operation: Option[String],
+          purpose: Option[String],
+          candidate: String,
+          repairCount: Int,
+          maxRepairs: Int
+        ): Consequence[AiCandidateAcceptance] =
+          if (candidate.startsWith("generated:google:"))
+            Consequence.success(AiCandidateAcceptance("accept", "", "", None))
+          else
+            Consequence.success(AiCandidateAcceptance(
+              "repair",
+              "diagnostics: [{code: domain-invalid}]",
+              "scenario.route_intent",
+              None
+            ))
+      }
+      val runner = provider.provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.value
+
+      When("Gemma still fails after its one admitted repair")
+      val response = runner.generate(AiGenerateRequest(
+        "repair-then-escalate",
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-scenario-generation"),
+          purposeRequired = true
+        )
+      )).toOption.value
+
+      Then("the explicit profile performs one commercial attempt and records why")
+      response.metadata(AiExecutionFacts.REPAIR_COUNT) shouldBe "1"
+      response.metadata(AiExecutionFacts.ESCALATION_REASON) shouldBe "domain-validation"
+      response.metadata(AiExecutionFacts.FINAL_PROVIDER) shouldBe "google"
+      response.metadata(AiExecutionFacts.ATTEMPT_LINEAGE) shouldBe
+        "1:gemma:initial:success,2:gemma:repair:success,3:google:commercial-fallback:success"
     }
 
     "reject a caller attempt to override an application-purpose runtime binding" in {
@@ -1826,6 +2097,12 @@ final class TextusAiRunnerSpec
         Consequence.success(GenerateResponse(_record_json("Strict Record Exhibition"), Some(name), _provider_metadata(name)))
       else if (req.prompt == "execution-facts")
         Consequence.success(GenerateResponse(s"generated:$name:${req.prompt}", Some(name), _provider_metadata(name)))
+      else if (req.prompt == "all-providers-unavailable")
+        Consequence.serviceUnavailable("fixture provider unavailable")
+      else if (req.prompt == "gemma-unavailable" && name == "local")
+        Consequence.serviceUnavailable("fixture Gemma unavailable")
+      else if (req.prompt == "strategy-input-denied" && name == "local")
+        Consequence.operationIllegal("fixture-input", "fixture input denied")
       else if (req.prompt == "fenced-record")
         Consequence.success(GenerateResponse(s"```json\n${_record_json("Fenced Record Exhibition")}\n```", Some(name)))
       else if (req.prompt == "embedded-record")

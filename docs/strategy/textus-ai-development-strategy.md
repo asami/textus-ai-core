@@ -197,14 +197,22 @@ Artifacts:
 - [Phase 5 Dashboard](../phase/phase-5.md)
 - [Phase 5 Checklist](../phase/phase-5-checklist.md)
 
-### Phase 6: Provider-Neutral MCP Tool Orchestration
+### Phase 6: Gemma-First Strategy and Provider-Neutral MCP Tool Orchestration
 
-Goal: allow a runtime profile to admit a named, operator-owned MCP tool set
-through the existing `generate` and `chat` operations, independently of the
-selected AI provider.
+Goal: execute explicit bounded Gemma-first profiles and allow those profiles to
+admit a named, operator-owned MCP tool set through the existing `generate` and
+`chat` operations.
 
 Scope:
 
+- preserve application-purpose-only requests while a selected profile owns
+  Gemma-first structured, tool-grounded, decomposed, validator-repair, and
+  candidate-ranking execution;
+- permit a second commercial provider only in an explicit Gemma-first profile
+  and only for classified availability, timeout, malformed output, domain,
+  evidence, or ambiguity outcomes;
+- call an operator-configured application acceptance Operation between bounded
+  attempts without moving domain rules into Textus AI;
 - consume the CNCF MCP client Port and its admitted named server sets;
 - keep MCP server selection, endpoint policy, credentials, tool allowlists,
   and transport settings under operator/runtime ownership;
@@ -219,6 +227,9 @@ Non-goals:
 
 - no new CML operation, and no direct application-caller MCP endpoint,
   server, header, or tool selection;
+- no implicit fallback in conventional profiles and no fallback for policy,
+  authorization, capability, credential, input, admission, or resource-limit
+  failures;
 - no provider-native remote-MCP pass-through in the initial slice;
 - no stdio, SSE, arbitrary subprocess, arbitrary HTTP, or arbitrary
   filesystem MCP transport; and

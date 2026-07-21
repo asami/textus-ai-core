@@ -48,10 +48,20 @@ private[textus] final case class AiRuntimeExecution(
 
 private[textus] final case class AiRuntimeProfile(
   name: String,
-  executions: Map[AiExecutionClass, AiRuntimeExecution]
+  executions: Map[AiExecutionClass, AiRuntimeExecution],
+  fallbackExecutions: Map[AiExecutionClass, AiRuntimeExecution] = Map.empty,
+  operationalStrategies: Map[String, AiOperationalStrategyKind] = Map.empty,
+  maxRepairs: Int = 0,
+  maxProviderAttempts: Int = 1
 ) {
   def execution(executionclass: AiExecutionClass): Option[AiRuntimeExecution] =
     executions.get(executionclass)
+
+  def fallbackExecution(executionclass: AiExecutionClass): Option[AiRuntimeExecution] =
+    fallbackExecutions.get(executionclass)
+
+  def operationalStrategy(standardPurpose: String): Option[AiOperationalStrategyKind] =
+    operationalStrategies.get(standardPurpose)
 }
 
 /** Textus AI's shipped runtime profiles. */
@@ -163,6 +173,33 @@ private[textus] object AiRuntimeProfileCatalog {
     )
   )
 
+  private val _gemma_first_strategies = Map(
+    "command-execution" -> AiOperationalStrategyKind.Structured,
+    "software-implementation" -> AiOperationalStrategyKind.Structured,
+    "structured-extraction" -> AiOperationalStrategyKind.ValidatorRepair,
+    "web-analysis" -> AiOperationalStrategyKind.ToolGrounded,
+    "software-analysis" -> AiOperationalStrategyKind.CandidateRanking,
+    "software-design" -> AiOperationalStrategyKind.Decomposed
+  )
+
+  val gemmaFirstGemini: AiRuntimeProfile = AiRuntimeProfile(
+    name = "gemma-first-gemini",
+    executions = gemma.executions,
+    fallbackExecutions = gemini.executions,
+    operationalStrategies = _gemma_first_strategies,
+    maxRepairs = 1,
+    maxProviderAttempts = 2
+  )
+
+  val gemmaFirstCodexCli: AiRuntimeProfile = AiRuntimeProfile(
+    name = "gemma-first-codex-cli",
+    executions = gemma.executions,
+    fallbackExecutions = codexCli.executions,
+    operationalStrategies = _gemma_first_strategies,
+    maxRepairs = 1,
+    maxProviderAttempts = 2
+  )
+
   val claudeCode: AiRuntimeProfile = AiRuntimeProfile(
     "claude-code",
     Map(
@@ -189,6 +226,8 @@ private[textus] object AiRuntimeProfileCatalog {
     gemma,
     gemmaSimpleGemini,
     gemmaSimpleCodexCli,
+    gemmaFirstGemini,
+    gemmaFirstCodexCli,
     claudeCode,
     anthropic
   ).map { profile =>
@@ -237,7 +276,9 @@ private[textus] final case class AiPurposeProfile(
   recordRetryLimit: Option[String] = None,
   maxConcurrent: Option[String] = None,
   outputSchemaId: Option[String] = None,
-  promptContractId: Option[String] = None
+  promptContractId: Option[String] = None,
+  operationalStrategy: Option[String] = None,
+  acceptanceOperation: Option[String] = None
 ) {
   def applyTo(requirement: AiRunnerRequirement): AiRunnerRequirement =
     requirement.copy(
@@ -385,8 +426,22 @@ private[textus] final case class AiProfileResolution(
   effectiveStandardPurpose: Option[String] = None,
   runtimeProfile: Option[String] = None,
   effectiveExecutionClass: Option[AiExecutionClass] = None,
-  runtimeExecution: Option[AiRuntimeExecution] = None
+  runtimeExecution: Option[AiRuntimeExecution] = None,
+  operationalStrategy: Option[AiOperationalStrategy] = None
 ) {
+  def forExecution(execution: AiRuntimeExecution): AiProfileResolution =
+    copy(
+      requirement = requirement.copy(
+        provider = Some(execution.provider),
+        mode = Some(execution.mode),
+        engine = Some(execution.engine),
+        model = Some(execution.model),
+        executionClass = Some(execution.executionClass),
+        tools = execution.tools
+      ),
+      runtimeExecution = Some(execution)
+    )
+
   def maxTokens(request: Option[Int]): Option[Int] =
     request.orElse(policy.maxOutputTokens)
 
@@ -482,6 +537,9 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.POLICY_RUNTIME_PROFILE -> runtimeProfile,
       AiExecutionFacts.POLICY_EFFECTIVE_EXECUTION_CLASS -> effectiveExecutionClass.map(_.id),
       AiExecutionFacts.POLICY_REASONING_LEVEL -> reasoningLevel,
+      AiExecutionFacts.OPERATIONAL_STRATEGY -> operationalStrategy.map(_.id),
+      AiExecutionFacts.STRATEGY_MAX_REPAIRS -> operationalStrategy.map(_.maxRepairs.toString),
+      AiExecutionFacts.STRATEGY_MAX_PROVIDER_ATTEMPTS -> operationalStrategy.map(_.maxProviderAttempts.toString),
       AiExecutionFacts.ENABLED_TOOLS -> Option.when(codexExecutionProfile.nonEmpty && requirement.tools.nonEmpty)(
         requirement.tools.map(_.id).mkString(",")
       ),
@@ -664,15 +722,14 @@ private[textus] final class AiProfileConfig(
     for {
       _ <- _reject_legacy_configuration
       profile <- _runtime_profile_c
-      executions <- profile.executions.keys.toVector.foldLeft(
+      executions <- (profile.executions.keySet ++ profile.fallbackExecutions.keySet).toVector.foldLeft(
         Consequence.success(Map.empty[String, AiRuntimeExecution])
       ) { (z, executionclass) =>
         z.flatMap { values =>
-          _runtime_execution_c(profile, executionclass).map { execution =>
-            if (_is_codex(Some(execution.provider)))
-              values.updated(execution.codexExecutionProfile, execution)
-            else
-              values
+          _profile_executions_c(profile, executionclass).map { executions =>
+            executions.filter(execution => _is_codex(Some(execution.provider))).foldLeft(values) {
+              (result, execution) => result.updated(execution.codexExecutionProfile, execution)
+            }
           }
         }
       }
@@ -682,19 +739,30 @@ private[textus] final class AiProfileConfig(
     for {
       _ <- _reject_legacy_configuration
       profile <- _runtime_profile_c
-      executions <- profile.executions.keys.toVector.foldLeft(
+      executions <- (profile.executions.keySet ++ profile.fallbackExecutions.keySet).toVector.foldLeft(
         Consequence.success(Map.empty[String, AiRuntimeExecution])
       ) { (z, executionclass) =>
         z.flatMap { values =>
-          _runtime_execution_c(profile, executionclass).map { execution =>
-            if (_is_claude(Some(execution.provider)))
-              values.updated(execution.claudeCodeExecutionProfile, execution)
-            else
-              values
+          _profile_executions_c(profile, executionclass).map { executions =>
+            executions.filter(execution => _is_claude(Some(execution.provider))).foldLeft(values) {
+              (result, execution) => result.updated(execution.claudeCodeExecutionProfile, execution)
+            }
           }
         }
       }
     } yield executions
+
+  private def _profile_executions_c(
+    profile: AiRuntimeProfile,
+    executionclass: AiExecutionClass
+  ): Consequence[Vector[AiRuntimeExecution]] =
+    for {
+      primary <- profile.execution(executionclass) match {
+        case Some(_) => _runtime_execution_c(profile, executionclass).map(Some(_))
+        case None => Consequence.success(None)
+      }
+      fallback <- _runtime_fallback_execution_c(profile, executionclass)
+    } yield primary.toVector ++ fallback.toVector
 
   /** Runtime-owned logical MCP requirements published through the CNCF Port. */
   def mcpClientRequirementsC: Consequence[Vector[McpClientRequirement]] =
@@ -770,6 +838,13 @@ private[textus] final class AiProfileConfig(
         executionClass = Some(identity.executionClass)
       )
       _ <- _validate_runtime_execution(execution, effective)
+      strategy <- _operational_strategy_c(
+        runtimeprofile,
+        identity,
+        effectiveprofile,
+        execution,
+        rateschedule
+      )
     } yield AiProfileResolution(
       effective,
       policy,
@@ -778,7 +853,8 @@ private[textus] final class AiProfileConfig(
       effectiveStandardPurpose = Some(identity.standardPurpose),
       runtimeProfile = Some(runtimeprofile.name),
       effectiveExecutionClass = Some(identity.executionClass),
-      runtimeExecution = Some(execution)
+      runtimeExecution = Some(execution),
+      operationalStrategy = strategy
     )
 
   private final case class _PurposeIdentity(
@@ -866,6 +942,121 @@ private[textus] final class AiProfileConfig(
         Consequence.configurationInvalid(s"AI runtime profile '${profile.name}' has no execution class: ${executionclass.id}")
     }
 
+  private def _operational_strategy_c(
+    profile: AiRuntimeProfile,
+    identity: _PurposeIdentity,
+    purposeProfile: AiPurposeProfile,
+    primary: AiRuntimeExecution,
+    primaryRateSchedule: Option[AiRateSchedule]
+  ): Consequence[Option[AiOperationalStrategy]] = {
+    val kindc = purposeProfile.operationalStrategy match {
+      case Some(value) => AiOperationalStrategyKind.parseC(value).map(Some(_))
+      case None => Consequence.success(profile.operationalStrategy(identity.standardPurpose))
+    }
+    for {
+      kind <- kindc
+      result <- kind match {
+        case None => Consequence.success(None)
+        case Some(value) =>
+          for {
+            _ <- if (_is_gemma(Some(primary.provider))) Consequence.unit
+              else Consequence.configurationInvalid(
+                s"AI operational strategy requires a Gemma primary execution: ${profile.name}"
+              )
+            maxrepairs <- _bounded_int(
+              _config_string(_execution_class_keys(identity.executionClass.id, "strategy-max-repairs"))
+                .orElse(Some(profile.maxRepairs.toString)),
+              "strategy-max-repairs",
+              identity.applicationPurpose,
+              0,
+              3
+            ).map(_.getOrElse(0))
+            maxattempts <- _bounded_int(
+              _config_string(_execution_class_keys(identity.executionClass.id, "strategy-max-provider-attempts"))
+                .orElse(Some(profile.maxProviderAttempts.toString)),
+              "strategy-max-provider-attempts",
+              identity.applicationPurpose,
+              1,
+              2
+            ).map(_.getOrElse(1))
+            fallback <- _runtime_fallback_execution_c(profile, identity.executionClass)
+            fallbackratescheduleid <- _policy_id(
+              _config_string(_execution_class_keys(
+                identity.executionClass.id,
+                "fallback-rate-schedule"
+              )),
+              "fallback-rate-schedule",
+              identity.applicationPurpose
+            )
+            fallbackrateschedule <- _rate_schedule_c(fallbackratescheduleid)
+            _ <- if (maxattempts == 1 || fallback.nonEmpty) Consequence.unit
+              else Consequence.configurationInvalid(
+                s"AI operational strategy requires a configured commercial fallback: ${profile.name}"
+              )
+            _ <- if (maxattempts == 1 || fallback.forall(value => !_is_gemma(Some(value.provider))))
+              Consequence.unit
+            else Consequence.configurationInvalid(
+              s"AI operational strategy commercial fallback may not select Gemma: ${profile.name}"
+            )
+            _ <- if (
+              maxattempts == 1 ||
+              fallback.isEmpty ||
+              primaryRateSchedule.isEmpty ||
+              fallbackrateschedule.nonEmpty
+            ) Consequence.unit
+            else Consequence.configurationInvalid(
+              s"AI operational strategy with cost accounting requires fallback-rate-schedule: ${profile.name}"
+            )
+            acceptance <- purposeProfile.acceptanceOperation match {
+              case Some(operation) => _policy_id(
+                Some(operation), "acceptance-operation", identity.applicationPurpose
+              )
+              case None => Consequence.success(None)
+            }
+          } yield Some(AiOperationalStrategy(
+            value,
+            primary,
+            fallback,
+            fallbackrateschedule,
+            maxrepairs,
+            maxattempts,
+            acceptance
+          ))
+      }
+    } yield result
+  }
+
+  private def _runtime_fallback_execution_c(
+    profile: AiRuntimeProfile,
+    executionclass: AiExecutionClass
+  ): Consequence[Option[AiRuntimeExecution]] =
+    profile.fallbackExecution(executionclass) match {
+      case None => Consequence.success(None)
+      case Some(default) =>
+        val provider = _config_string(
+          _execution_class_keys(executionclass.id, "fallback-provider")
+        ).getOrElse(default.provider)
+        val mode = _config_string(
+          _execution_class_keys(executionclass.id, "fallback-mode")
+        ).getOrElse(default.mode)
+        val engine = _config_string(
+          _execution_class_keys(executionclass.id, "fallback-engine")
+        ).getOrElse(default.engine)
+        val model = _config_string(
+          _execution_class_keys(executionclass.id, "fallback-model")
+        ).getOrElse(default.model)
+        val reasoning = _config_string(
+          _execution_class_keys(executionclass.id, "fallback-reasoning-level")
+        ).orElse(default.reasoningLevel)
+        Consequence.success(Some(default.copy(
+          provider = provider,
+          mode = mode,
+          engine = engine,
+          model = model,
+          reasoningLevel = reasoning
+        )))
+    }
+
   private def _runtime_purpose_profile(
     identity: _PurposeIdentity,
     execution: AiRuntimeExecution
@@ -902,7 +1093,9 @@ private[textus] final class AiProfileConfig(
       recordRetryLimit = _config_string(_application_purpose_keys(purpose, "record-retry-limit")),
       maxConcurrent = _config_string(_application_purpose_keys(purpose, "max-concurrent")),
       outputSchemaId = _config_string(_application_purpose_keys(purpose, "output-schema-id")),
-      promptContractId = _config_string(_application_purpose_keys(purpose, "prompt-contract-id"))
+      promptContractId = _config_string(_application_purpose_keys(purpose, "prompt-contract-id")),
+      operationalStrategy = _config_string(_application_purpose_keys(purpose, "operational-strategy")),
+      acceptanceOperation = _config_string(_application_purpose_keys(purpose, "acceptance-operation"))
     ))
 
   private def _reject_caller_selection(requirement: AiRunnerRequirement): Consequence[Unit] =
@@ -1004,9 +1197,12 @@ private[textus] final class AiProfileConfig(
       "record-retry-limit",
       "max-concurrent",
       "output-schema-id",
-      "prompt-contract-id"
+      "prompt-contract-id",
+      "operational-strategy",
+      "acceptance-operation"
     )
-    key.startsWith(prefix) && !permitted.contains(key.drop(prefix.length).split("\\.").lastOption.getOrElse(""))
+    val parts = key.drop(prefix.length).split("\\.").filter(_.nonEmpty)
+    key.startsWith(prefix) && parts.length >= 2 && !permitted.contains(parts.last)
   }
 
   private def _validate_application_configuration_c: Consequence[Unit] =
@@ -1042,7 +1238,9 @@ private[textus] final class AiProfileConfig(
       recordRetryLimit = application.recordRetryLimit.orElse(base.recordRetryLimit),
       maxConcurrent = application.maxConcurrent.orElse(base.maxConcurrent),
       outputSchemaId = application.outputSchemaId.orElse(base.outputSchemaId),
-      promptContractId = application.promptContractId.orElse(base.promptContractId)
+      promptContractId = application.promptContractId.orElse(base.promptContractId),
+      operationalStrategy = application.operationalStrategy.orElse(base.operationalStrategy),
+      acceptanceOperation = application.acceptanceOperation.orElse(base.acceptanceOperation)
     )
 
   private def _validate_narrowing(
