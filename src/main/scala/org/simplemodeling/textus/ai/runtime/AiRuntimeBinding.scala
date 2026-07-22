@@ -5,6 +5,7 @@ import org.simplemodeling.textus.ai.provider.anthropic.{AnthropicChatExtensionPo
 import org.simplemodeling.textus.ai.provider.codex.{CodexChatExtensionPoint, CodexGenerateExtensionPoint, CodexRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeChatExtensionPoint, ClaudeCodeGenerateExtensionPoint, ClaudeCodeRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.gemma.{GemmaChatExtensionPoint, GemmaGenerateExtensionPoint, GemmaRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityChatExtensionPoint, AntigravityGenerateExtensionPoint, AntigravityRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.google.{GoogleChatExtensionPoint, GoogleGenerateExtensionPoint, GoogleRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.{OpenAiChatExtensionPoint, OpenAiGenerateExtensionPoint, OpenAiRuntimeConfig}
 
@@ -15,7 +16,7 @@ object AiRuntimeGenerateBinding:
     google: Option[GoogleRuntimeConfig],
     codex: Option[CodexRuntimeConfig]
   ): Component.Binding[GenerateRequirement, GenerateService] =
-    _create(gemma, openai, google, codex, None, None, None)
+    _create(gemma, openai, google, codex, None, None, None, None)
 
   def create(
     gemma: Option[GemmaRuntimeConfig],
@@ -24,7 +25,7 @@ object AiRuntimeGenerateBinding:
     codex: Option[CodexRuntimeConfig],
     claude: Option[ClaudeCodeRuntimeConfig]
   ): Component.Binding[GenerateRequirement, GenerateService] =
-    _create(gemma, openai, google, codex, claude, None, None)
+    _create(gemma, openai, google, codex, claude, None, None, None)
 
   private def _create_for_runtime(
     component: Component,
@@ -33,9 +34,10 @@ object AiRuntimeGenerateBinding:
     google: Option[GoogleRuntimeConfig],
     codex: Option[CodexRuntimeConfig],
     claude: Option[ClaudeCodeRuntimeConfig],
-    anthropic: Option[AnthropicRuntimeConfig]
+    anthropic: Option[AnthropicRuntimeConfig],
+    antigravity: Option[AntigravityRuntimeConfig]
   ): Component.Binding[GenerateRequirement, GenerateService] =
-    _create(gemma, openai, google, codex, claude, anthropic, Some(component))
+    _create(gemma, openai, google, codex, claude, anthropic, antigravity, Some(component))
 
   private def _create(
     gemma: Option[GemmaRuntimeConfig],
@@ -44,6 +46,7 @@ object AiRuntimeGenerateBinding:
     codex: Option[CodexRuntimeConfig],
     claude: Option[ClaudeCodeRuntimeConfig],
     anthropic: Option[AnthropicRuntimeConfig],
+    antigravity: Option[AntigravityRuntimeConfig],
     runtimecomponent: Option[Component]
   ): Component.Binding[GenerateRequirement, GenerateService] =
     val spi =
@@ -51,6 +54,7 @@ object AiRuntimeGenerateBinding:
         openai.map(new OpenAiGenerateExtensionPoint(_): ExtensionPoint[GenerateService]).toVector ++
         anthropic.map(new AnthropicGenerateExtensionPoint(_): ExtensionPoint[GenerateService]).toVector ++
         google.map(new GoogleGenerateExtensionPoint(_): ExtensionPoint[GenerateService]).toVector ++
+        antigravity.map(_antigravity_extension_point(_, runtimecomponent)).toVector ++
         codex.map(_codex_extension_point(_, runtimecomponent)).toVector ++
         claude.map(_claude_extension_point(_, runtimecomponent)).toVector
     Component.Binding(
@@ -68,9 +72,19 @@ object AiRuntimeGenerateBinding:
     google: Option[GoogleRuntimeConfig],
     codex: Option[CodexRuntimeConfig],
     claude: Option[ClaudeCodeRuntimeConfig] = None,
-    anthropic: Option[AnthropicRuntimeConfig] = None
+    anthropic: Option[AnthropicRuntimeConfig] = None,
+    antigravity: Option[AntigravityRuntimeConfig] = None
   ): Component =
-    component.withBinding("generate", _create_for_runtime(component, gemma, openai, google, codex, claude, anthropic))
+    component.withBinding("generate", _create_for_runtime(component, gemma, openai, google, codex, claude, anthropic, antigravity))
+
+  private def _antigravity_extension_point(
+    config: AntigravityRuntimeConfig,
+    runtimecomponent: Option[Component]
+  ): ExtensionPoint[GenerateService] =
+    runtimecomponent match {
+      case Some(component) => new AntigravityGenerateExtensionPoint(config).withRuntimeComponent(component)
+      case None => new AntigravityGenerateExtensionPoint(config)
+    }
 
   private def _codex_extension_point(
     config: CodexRuntimeConfig,
@@ -97,7 +111,7 @@ object AiRuntimeChatBinding:
     google: Option[GoogleRuntimeConfig],
     codex: Option[CodexRuntimeConfig]
   ): Component.Binding[GenerateRequirement, ChatService] =
-    _create(gemma, openai, google, codex, None, None, None)
+    _create(gemma, openai, google, codex, None, None, None, None)
 
   def create(
     gemma: Option[GemmaRuntimeConfig],
@@ -106,7 +120,7 @@ object AiRuntimeChatBinding:
     codex: Option[CodexRuntimeConfig],
     claude: Option[ClaudeCodeRuntimeConfig]
   ): Component.Binding[GenerateRequirement, ChatService] =
-    _create(gemma, openai, google, codex, claude, None, None)
+    _create(gemma, openai, google, codex, claude, None, None, None)
 
   private def _create_for_runtime(
     component: Component,
@@ -115,9 +129,10 @@ object AiRuntimeChatBinding:
     google: Option[GoogleRuntimeConfig],
     codex: Option[CodexRuntimeConfig],
     claude: Option[ClaudeCodeRuntimeConfig],
-    anthropic: Option[AnthropicRuntimeConfig]
+    anthropic: Option[AnthropicRuntimeConfig],
+    antigravity: Option[AntigravityRuntimeConfig]
   ): Component.Binding[GenerateRequirement, ChatService] =
-    _create(gemma, openai, google, codex, claude, anthropic, Some(component))
+    _create(gemma, openai, google, codex, claude, anthropic, antigravity, Some(component))
 
   private def _create(
     gemma: Option[GemmaRuntimeConfig],
@@ -126,6 +141,7 @@ object AiRuntimeChatBinding:
     codex: Option[CodexRuntimeConfig],
     claude: Option[ClaudeCodeRuntimeConfig],
     anthropic: Option[AnthropicRuntimeConfig],
+    antigravity: Option[AntigravityRuntimeConfig],
     runtimecomponent: Option[Component]
   ): Component.Binding[GenerateRequirement, ChatService] =
     val spi =
@@ -133,6 +149,7 @@ object AiRuntimeChatBinding:
         openai.map(new OpenAiChatExtensionPoint(_): ExtensionPoint[ChatService]).toVector ++
         anthropic.map(new AnthropicChatExtensionPoint(_): ExtensionPoint[ChatService]).toVector ++
         google.map(new GoogleChatExtensionPoint(_): ExtensionPoint[ChatService]).toVector ++
+        antigravity.map(_antigravity_extension_point(_, runtimecomponent)).toVector ++
         codex.map(_codex_extension_point(_, runtimecomponent)).toVector ++
         claude.map(_claude_extension_point(_, runtimecomponent)).toVector
     Component.Binding(
@@ -150,9 +167,19 @@ object AiRuntimeChatBinding:
     google: Option[GoogleRuntimeConfig],
     codex: Option[CodexRuntimeConfig],
     claude: Option[ClaudeCodeRuntimeConfig] = None,
-    anthropic: Option[AnthropicRuntimeConfig] = None
+    anthropic: Option[AnthropicRuntimeConfig] = None,
+    antigravity: Option[AntigravityRuntimeConfig] = None
   ): Component =
-    component.withBinding("chat", _create_for_runtime(component, gemma, openai, google, codex, claude, anthropic))
+    component.withBinding("chat", _create_for_runtime(component, gemma, openai, google, codex, claude, anthropic, antigravity))
+
+  private def _antigravity_extension_point(
+    config: AntigravityRuntimeConfig,
+    runtimecomponent: Option[Component]
+  ): ExtensionPoint[ChatService] =
+    runtimecomponent match {
+      case Some(component) => new AntigravityChatExtensionPoint(config).withRuntimeComponent(component)
+      case None => new AntigravityChatExtensionPoint(config)
+    }
 
   private def _codex_extension_point(
     config: CodexRuntimeConfig,

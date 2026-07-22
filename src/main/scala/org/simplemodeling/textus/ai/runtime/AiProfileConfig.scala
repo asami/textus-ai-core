@@ -45,6 +45,8 @@ private[textus] final case class AiRuntimeExecution(
 ) {
   def codexExecutionProfile: String = s"runtime-${executionClass.id}"
 
+  def antigravityExecutionProfile: String = s"runtime-${executionClass.id}"
+
   def claudeCodeExecutionProfile: String = s"runtime-${executionClass.id}"
 }
 
@@ -92,6 +94,32 @@ private[textus] object AiRuntimeProfileCatalog {
       mode = "remote",
       engine = "gemini",
       model = model
+    )
+
+  private def _antigravity(
+    executionclass: AiExecutionClass,
+    model: String = "auto"
+  ): AiRuntimeExecution =
+    AiRuntimeExecution(
+      executionclass,
+      provider = "google",
+      mode = "local",
+      engine = "antigravity-cli",
+      model = model
+    )
+
+  private def _openai(
+    executionclass: AiExecutionClass,
+    model: String,
+    reasoning: String
+  ): AiRuntimeExecution =
+    AiRuntimeExecution(
+      executionclass,
+      provider = "openai",
+      mode = "remote",
+      engine = "gpt",
+      model = model,
+      reasoningLevel = Some(reasoning)
     )
 
   private def _gemma(
@@ -149,6 +177,24 @@ private[textus] object AiRuntimeProfileCatalog {
       AiExecutionClass.SimpleThinking -> _gemini(AiExecutionClass.SimpleThinking, "gemini-2.5-pro"),
       AiExecutionClass.AdvancedThinking -> _gemini(AiExecutionClass.AdvancedThinking, "gemini-2.5-pro"),
       AiExecutionClass.DeepThinking -> _gemini(AiExecutionClass.DeepThinking, "gemini-2.5-pro")
+    )
+  )
+
+  val antigravityCli: AiRuntimeProfile = AiRuntimeProfile(
+    "antigravity-cli",
+    AiExecutionClass.values.map { executionclass =>
+      executionclass -> _antigravity(executionclass)
+    }.toMap
+  )
+
+  val openai: AiRuntimeProfile = AiRuntimeProfile(
+    "openai",
+    Map(
+      AiExecutionClass.SimpleWork -> _openai(AiExecutionClass.SimpleWork, "gpt-5.6-luna", "medium"),
+      AiExecutionClass.StandardWork -> _openai(AiExecutionClass.StandardWork, "gpt-5.6-terra", "high"),
+      AiExecutionClass.SimpleThinking -> _openai(AiExecutionClass.SimpleThinking, "gpt-5.6-sol", "medium"),
+      AiExecutionClass.AdvancedThinking -> _openai(AiExecutionClass.AdvancedThinking, "gpt-5.6-sol", "high"),
+      AiExecutionClass.DeepThinking -> _openai(AiExecutionClass.DeepThinking, "gpt-5.6-sol", "xhigh")
     )
   )
 
@@ -249,6 +295,8 @@ private[textus] object AiRuntimeProfileCatalog {
   val profiles: Map[String, AiRuntimeProfile] = Vector(
     codexCli,
     gemini,
+    antigravityCli,
+    openai,
     gemma,
     gemmaSimpleGemini,
     gemmaSimpleCodexCli,
@@ -476,7 +524,7 @@ private[textus] final case class AiProfileResolution(
   def requestProperties(
     properties: Vector[org.goldenport.protocol.Property]
   ): Vector[org.goldenport.protocol.Property] =
-    properties ++ policy.requestProperties ++ _codex_execution_profile_property ++ _claude_code_execution_profile_property ++ _openai_reasoning_property
+    properties ++ policy.requestProperties ++ _codex_execution_profile_property ++ _antigravity_execution_profile_property ++ _claude_code_execution_profile_property ++ _openai_reasoning_property
 
   def isCodexProfile: Boolean =
     requirement.provider.exists(_is_codex)
@@ -484,8 +532,11 @@ private[textus] final case class AiProfileResolution(
   def isClaudeCodeProfile: Boolean =
     requirement.provider.exists(_is_claude)
 
+  def isAntigravityProfile: Boolean =
+    runtimeExecution.exists(_.engine.trim.equalsIgnoreCase("antigravity-cli"))
+
   def isManagedCliProfile: Boolean =
-    isCodexProfile || isClaudeCodeProfile
+    isCodexProfile || isAntigravityProfile || isClaudeCodeProfile
 
   def controlsOpenAiReasoning: Boolean =
     requirement.provider.exists(_is_openai) && reasoningLevel.nonEmpty
@@ -495,6 +546,9 @@ private[textus] final case class AiProfileResolution(
 
   def claudeCodeExecutionProfile: Option[String] =
     Option.when(isClaudeCodeProfile)(runtimeExecution.map(_.claudeCodeExecutionProfile)).flatten
+
+  def antigravityExecutionProfile: Option[String] =
+    Option.when(isAntigravityProfile)(runtimeExecution.map(_.antigravityExecutionProfile)).flatten
 
   def reasoningLevel: Option[String] =
     runtimeExecution.flatMap(_.reasoningLevel)
@@ -569,7 +623,7 @@ private[textus] final case class AiProfileResolution(
       AiExecutionFacts.STRATEGY_MAX_REPAIRS -> operationalStrategy.map(_.maxRepairs.toString),
       AiExecutionFacts.STRATEGY_MAX_PROVIDER_ATTEMPTS -> operationalStrategy.map(_.maxProviderAttempts.toString),
       AiExecutionFacts.MCP_SERVER_SET -> runtimeExecution.flatMap(_.mcpServerSet).map(_.print),
-      AiExecutionFacts.ENABLED_TOOLS -> Option.when(codexExecutionProfile.nonEmpty && requirement.tools.nonEmpty)(
+      AiExecutionFacts.ENABLED_TOOLS -> Option.when(isManagedCliProfile && requirement.tools.nonEmpty)(
         requirement.tools.map(_.id).mkString(",")
       ),
       AiExecutionFacts.INPUT_PAYLOAD_BYTES -> inputEstimate.map(_.payloadBytes.toString),
@@ -590,6 +644,11 @@ private[textus] final case class AiProfileResolution(
   private def _claude_code_execution_profile_property: Vector[org.goldenport.protocol.Property] =
     claudeCodeExecutionProfile.map { value =>
       org.goldenport.protocol.Property(AiRequestProperties.CLAUDE_CODE_EXECUTION_PROFILE, value, None)
+    }.toVector
+
+  private def _antigravity_execution_profile_property: Vector[org.goldenport.protocol.Property] =
+    antigravityExecutionProfile.map { value =>
+      org.goldenport.protocol.Property(AiRequestProperties.ANTIGRAVITY_EXECUTION_PROFILE, value, None)
     }.toVector
 
   private def _openai_reasoning_property: Vector[org.goldenport.protocol.Property] =
@@ -781,6 +840,23 @@ private[textus] final class AiProfileConfig(
       }
     } yield executions
 
+  def antigravityExecutionsC: Consequence[Map[String, AiRuntimeExecution]] =
+    for {
+      _ <- _reject_legacy_configuration
+      profile <- _runtime_profile_c
+      executions <- (profile.executions.keySet ++ profile.fallbackExecutions.keySet).toVector.foldLeft(
+        Consequence.success(Map.empty[String, AiRuntimeExecution])
+      ) { (z, executionclass) =>
+        z.flatMap { values =>
+          _profile_executions_c(profile, executionclass).map { executions =>
+            executions.filter(execution => _is_antigravity(execution)).foldLeft(values) {
+              (result, execution) => result.updated(execution.antigravityExecutionProfile, execution)
+            }
+          }
+        }
+      }
+    } yield executions
+
   private def _profile_executions_c(
     profile: AiRuntimeProfile,
     executionclass: AiExecutionClass
@@ -894,6 +970,7 @@ private[textus] final class AiProfileConfig(
         execution,
         rateschedule
       )
+      _ <- _validate_gemma_tool_capability(execution, strategy)
     } yield AiProfileResolution(
       effective,
       policy,
@@ -996,7 +1073,6 @@ private[textus] final class AiProfileConfig(
             mcpServerSet = mcpserverset,
             operationToolSet = operationtoolset
           )
-          _ <- _validate_gemma_tool_capability(execution)
         } yield execution
       case None =>
         Consequence.configurationInvalid(s"AI runtime profile '${profile.name}' has no execution class: ${executionclass.id}")
@@ -1019,7 +1095,10 @@ private[textus] final class AiProfileConfig(
         case None => Consequence.success(None)
         case Some(value) =>
           for {
-            _ <- if (_is_gemma(Some(primary.provider))) Consequence.unit
+            _ <- if (
+              value == AiOperationalStrategyKind.PromptGrounded ||
+              _is_gemma(Some(primary.provider))
+            ) Consequence.unit
               else Consequence.configurationInvalid(
                 s"AI operational strategy requires a Gemma primary execution: ${profile.name}"
               )
@@ -1202,15 +1281,17 @@ private[textus] final class AiProfileConfig(
       Consequence.unit
 
   private def _validate_gemma_tool_capability(
-    execution: AiRuntimeExecution
+    execution: AiRuntimeExecution,
+    strategy: Option[AiOperationalStrategy]
   ): Consequence[Unit] =
     if (
       _is_gemma(Some(execution.provider)) &&
       (execution.mcpServerSet.nonEmpty || execution.operationToolSet.nonEmpty) &&
+      !strategy.exists(_.kind == AiOperationalStrategyKind.PromptGrounded) &&
       !_is_gemma_tool_capable_model(execution.model)
     )
       Consequence.configurationInvalid(
-        s"Gemma MCP/Operation tool execution requires an admitted tool-capable Ollama model: ${execution.executionClass.id}"
+        s"Gemma native MCP/Operation tool execution requires an admitted tool-capable Ollama model: ${execution.executionClass.id}"
       )
     else
       Consequence.unit
@@ -1371,6 +1452,9 @@ private[textus] final class AiProfileConfig(
     provider.exists { value =>
       value.trim.equalsIgnoreCase("codex") || value.trim.equalsIgnoreCase("codex-cli")
     }
+
+  private def _is_antigravity(execution: AiRuntimeExecution): Boolean =
+    execution.engine.trim.equalsIgnoreCase("antigravity-cli")
 
   private def _is_codex_reasoning_level(value: String): Boolean =
     Set("minimal", "low", "medium", "high", "xhigh").contains(

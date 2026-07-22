@@ -51,6 +51,7 @@ final class TextusAiRunnerSpec
   with GivenWhenThen {
 
   "TextusAiRunner" should {
+    "runtime binding and selection" which {
     "delegate generate and chat requests through existing Textus AI runtime bindings" in {
       Given("a component with existing generate and chat runtime bindings")
       given ExecutionContext = ExecutionContext.create()
@@ -346,6 +347,9 @@ final class TextusAiRunnerSpec
       driver.body.value should include ("\"model\":\"gemma:2b\"")
     }
 
+    }
+
+    "operational strategies" which {
     "execute an explicit Gemma-first profile and expose safe attempt lineage" in {
       Given("a Gemma-first profile whose local provider is unavailable")
       given ExecutionContext = ExecutionContext.create()
@@ -477,6 +481,137 @@ final class TextusAiRunnerSpec
       response.metadata("gemma.mcp_calls") shouldBe "1"
       response.metadata("gemma.mcp_turns") shouldBe "2"
       response.metadata.values.exists(_.contains("research a station")) shouldBe false
+    }
+
+    "execute a prompt-grounded strategy with a plain Gemma model" in {
+      Given("a standard-work purpose with one runtime-owned CNCF Operation tool set")
+      given ExecutionContext = ExecutionContext.create()
+      var selectedoperationtoolset: Option[String] = None
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.execution-classes.standard-work.model" ->
+            ConfigurationValue.StringValue("gemma3:12b"),
+          "textus.ai.execution-classes.standard-work.operation-tool-set" ->
+            ConfigurationValue.StringValue("sanpomap-research"),
+          "textus.ai.application-purposes.sanpomap-scenario-research.operational-strategy" ->
+            ConfigurationValue.StringValue("prompt-grounded")
+        )),
+        ConfigurationTrace.empty
+      )
+      val provider = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-scenario-research" -> "standard-work")
+      ) {
+        override private[runtime] def generateWithPromptLoopC(
+          selection: SpiSelection,
+          mcpServerSet: Option[McpServerSetId],
+          operationToolSet: Option[OperationToolSetId],
+          prompt: String,
+          temperature: Option[Double],
+          maxTokens: Option[Int],
+          properties: Vector[Property]
+        )(using ExecutionContext): Consequence[GenerateResponse] = {
+          selectedoperationtoolset = operationToolSet.map(_.print)
+          Consequence.success(GenerateResponse(
+            "prompt-grounded result",
+            Some("gemma3:12b"),
+            Map(
+              "gemma.prompt_loop_calls" -> "1",
+              "gemma.operation_calls" -> "1",
+              "gemma.usage.input_tokens" -> "12",
+              "gemma.usage.output_tokens" -> "4",
+              "gemma.usage.total_tokens" -> "16"
+            )
+          ))
+        }
+      }
+      val runner = provider.provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.value
+
+      When("the application requests only its registered scenario-research purpose")
+      val response = runner.generate(AiGenerateRequest(
+        "research intermediate scenario stops",
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-scenario-research"),
+          purposeRequired = true
+        )
+      )).toOption.value
+
+      Then("Textus AI selects the provider-neutral prompt loop without native Gemma function calling")
+      selectedoperationtoolset shouldBe Some("sanpomap-research")
+      response.text shouldBe "prompt-grounded result"
+      response.model shouldBe Some("gemma3:12b")
+      response.metadata(AiExecutionFacts.OPERATIONAL_STRATEGY) shouldBe "prompt-grounded"
+      response.metadata(AiExecutionFacts.ATTEMPT_LINEAGE) shouldBe "1:gemma:prompt-grounded:success"
+      response.metadata("gemma.prompt_loop_calls") shouldBe "1"
+      response.metadata.values.exists(_.contains("research intermediate scenario stops")) shouldBe false
+    }
+
+    "reject prompt-grounded execution when aggregate admission exceeds the purpose budget" in {
+      Given("a prompt-grounded purpose whose bounded multi-turn envelope exceeds its cost budget")
+      given ExecutionContext = ExecutionContext.create()
+      var providercalled = false
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.execution-classes.standard-work.operation-tool-set" ->
+            ConfigurationValue.StringValue("sanpomap-research"),
+          "textus.ai.execution-classes.standard-work.max-cost-microunits" ->
+            ConfigurationValue.StringValue("1"),
+          "textus.ai.execution-classes.standard-work.rate-schedule" ->
+            ConfigurationValue.StringValue("costed"),
+          "textus.ai.rate-schedules.costed.input-microunits-per-million-tokens" ->
+            ConfigurationValue.StringValue("1000000"),
+          "textus.ai.rate-schedules.costed.cached-input-microunits-per-million-tokens" ->
+            ConfigurationValue.StringValue("0"),
+          "textus.ai.rate-schedules.costed.output-microunits-per-million-tokens" ->
+            ConfigurationValue.StringValue("1000000"),
+          "textus.ai.rate-schedules.costed.reasoning-microunits-per-million-tokens" ->
+            ConfigurationValue.StringValue("0"),
+          "textus.ai.application-purposes.sanpomap-scenario-research.operational-strategy" ->
+            ConfigurationValue.StringValue("prompt-grounded")
+        )),
+        ConfigurationTrace.empty
+      )
+      val provider = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-scenario-research" -> "standard-work")
+      ) {
+        override private[runtime] def generateWithPromptLoopC(
+          selection: SpiSelection,
+          mcpServerSet: Option[McpServerSetId],
+          operationToolSet: Option[OperationToolSetId],
+          prompt: String,
+          temperature: Option[Double],
+          maxTokens: Option[Int],
+          properties: Vector[Property]
+        )(using ExecutionContext): Consequence[GenerateResponse] = {
+          providercalled = true
+          Consequence.success(GenerateResponse("must not execute", Some("fixture")))
+        }
+      }
+      val runner = provider.provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.value
+
+      When("the application submits the admitted purpose")
+      val result = runner.generate(AiGenerateRequest(
+        "research a bounded route",
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-scenario-research"),
+          purposeRequired = true
+        )
+      ))
+
+      Then("admission remains terminal and no provider attempt is made")
+      result should matchPattern { case Consequence.Failure(_) => }
+      providercalled shouldBe false
     }
 
     "never convert an input or policy failure into commercial fallback" in {
@@ -694,6 +829,9 @@ final class TextusAiRunnerSpec
         "1:gemma:initial:success,2:gemma:repair:success,3:google:commercial-fallback:success"
     }
 
+    }
+
+    "purpose policy and admission" which {
     "reject a caller attempt to override an application-purpose runtime binding" in {
       Given("an AI runner with a mapped application purpose and operator class binding")
       given ExecutionContext = ExecutionContext.create()
@@ -1111,6 +1249,9 @@ final class TextusAiRunnerSpec
       broadenedinput.toString should include ("may not broaden inherited execution policy")
     }
 
+    }
+
+    "provider protocol adapters" which {
     "send Gemini tool requests through the Interactions API" in {
       Given("a Google provider service with a fake HTTP driver")
       val driver = new _FakeHttpDriver(
@@ -1289,11 +1430,11 @@ final class TextusAiRunnerSpec
 
       When("a plain generate request uses the direct Anthropic API")
       val response = service.generate(GenerateRequest("direct API prompt", maxTokens = Some(120))).toOption.get
-      val toolRequest = service.generate(GenerateRequest(
+      val toolrequest = service.generate(GenerateRequest(
         "tool prompt",
         properties = Vector(Property("ai.tools", "web_search", None))
       ))
-      val structuredRequest = service.generate(GenerateRequest(
+      val structuredrequest = service.generate(GenerateRequest(
         "structured prompt",
         recordSchema = Some(Record.dataAuto("type" -> "object"))
       ))
@@ -1307,10 +1448,10 @@ final class TextusAiRunnerSpec
       response.text shouldBe "anthropic answer"
       response.metadata("anthropic.response_id") shouldBe "msg_test"
       response.metadata("anthropic.usage.total_tokens") shouldBe "18"
-      toolRequest.isFaillure shouldBe true
-      toolRequest.toString should include ("AI tools are not supported by provider 'anthropic'")
-      structuredRequest.isFaillure shouldBe true
-      structuredRequest.toString should include ("AI structured record generation is not supported by provider 'anthropic'")
+      toolrequest.isFaillure shouldBe true
+      toolrequest.toString should include ("AI tools are not supported by provider 'anthropic'")
+      structuredrequest.isFaillure shouldBe true
+      structuredrequest.toString should include ("AI structured record generation is not supported by provider 'anthropic'")
       driver.calls should have size 1
     }
 
@@ -1339,6 +1480,9 @@ final class TextusAiRunnerSpec
       tools.toString should include ("AI tools are not supported by provider 'claude'")
     }
 
+    }
+
+    "provider policy and failure handling" which {
     "map Gemma output and timeout policies to the CNCF HTTP boundary" in {
       Given("a Gemma service with a deterministic HTTP driver")
       val driver = new _FakeHttpDriver(
@@ -1395,39 +1539,39 @@ final class TextusAiRunnerSpec
 
     "preserve provider response facts for plain provider endpoints" in {
       Given("plain Google OpenAI and Gemma provider responses")
-      val googleDriver = new _FakeHttpDriver(
+      val googledriver = new _FakeHttpDriver(
         """{"responseId":"google_plain","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"google answer"}]}}],"usageMetadata":{"promptTokenCount":11,"cachedContentTokenCount":3,"candidatesTokenCount":7,"thoughtsTokenCount":2,"totalTokenCount":18}}"""
       )
-      val googleContext = _context(googleDriver)
+      val googlecontext = _context(googledriver)
       val google = new GoogleGenerateService(
         GoogleRuntimeConfig(
           endpoint = URI.create("https://generativelanguage.googleapis.com"),
           apiKey = "test-google-key",
           model = "gemini-test"
         ),
-        googleContext
+        googlecontext
       ).generate(GenerateRequest("plain")).toOption.get
 
-      val openAiDriver = new _FakeHttpDriver(
+      val openaidriver = new _FakeHttpDriver(
         """{"id":"chatcmpl_plain","choices":[{"finish_reason":"stop","message":{"content":"openai answer"}}],"usage":{"prompt_tokens":12,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens":6,"completion_tokens_details":{"reasoning_tokens":2},"total_tokens":18}}"""
       )
-      val openAiContext = _context(openAiDriver)
+      val openaicontext = _context(openaidriver)
       val openai = new OpenAiGenerateService(
         OpenAiRuntimeConfig(
           endpoint = URI.create("https://api.openai.com"),
           apiKey = "test-openai-key",
           model = "gpt-test"
         ),
-        openAiContext
+        openaicontext
       ).generate(GenerateRequest("plain")).toOption.get
 
-      val gemmaDriver = new _FakeHttpDriver(
+      val gemmadriver = new _FakeHttpDriver(
         """{"response":"gemma answer","done_reason":"stop","prompt_eval_count":9,"eval_count":5}"""
       )
-      val gemmaContext = _context(gemmaDriver)
+      val gemmacontext = _context(gemmadriver)
       val gemma = new GemmaOllamaGenerateService(
         GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")),
-        gemmaContext
+        gemmacontext
       ).generate(GenerateRequest("plain")).toOption.get
 
       When("each provider returns a successful plain response")
@@ -1451,15 +1595,15 @@ final class TextusAiRunnerSpec
     "run Gemma structured records through the registered runtime binding" in {
       Given("a Gemma runtime binding backed by a deterministic Ollama response")
       val config = GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434"))
-      val successContext = _context(new _FakeHttpDriver(
+      val successcontext = _context(new _FakeHttpDriver(
         """{"response":"{\"exhibitions\":[{\"title\":\"Gemma Exhibition\",\"period_start\":\"2026-07-01\",\"period_end\":\"2026-07-31\",\"confidence\":88}]}","done_reason":"stop","prompt_eval_count":10,"eval_count":8}"""
       ))
-      val successRunner = _gemma_runner(config, successContext)
+      val successrunner = _gemma_runner(config, successcontext)
 
       When("a structured record request selects the local Gemma provider")
       val success = {
-        given ExecutionContext = successContext
-        successRunner.generateRecord(AiRecordRequest("structured review", _artscene_record_schema))
+        given ExecutionContext = successcontext
+        successrunner.generateRecord(AiRecordRequest("structured review", _artscene_record_schema))
       }
 
       Then("the actual Gemma binding produces a normalized schema-valid record")
@@ -1468,13 +1612,13 @@ final class TextusAiRunnerSpec
       success.toOption.get.metadata("gemma.usage.total_tokens") shouldBe "18"
 
       Given("the same registered binding with an explicit provider failure")
-      val failureContext = _context(new _FakeHttpDriver("private provider body", HttpStatus.BadRequest))
-      val failureRunner = _gemma_runner(config, failureContext)
+      val failurecontext = _context(new _FakeHttpDriver("private provider body", HttpStatus.BadRequest))
+      val failurerunner = _gemma_runner(config, failurecontext)
 
       When("structured record generation reaches the failing Gemma endpoint")
       val failure = {
-        given ExecutionContext = failureContext
-        failureRunner.generateRecord(AiRecordRequest("structured review", _artscene_record_schema))
+        given ExecutionContext = failurecontext
+        failurerunner.generateRecord(AiRecordRequest("structured review", _artscene_record_schema))
       }
 
       Then("the failure is explicit and does not expose the provider body")
@@ -1522,11 +1666,11 @@ final class TextusAiRunnerSpec
       )
 
       When("failure categories are resolved and an HTTP boundary returns a bad request")
-      val categoryResults = cases.map { case (status, (body, _)) =>
+      val categoryresults = cases.map { case (status, (body, _)) =>
         HttpSupport.failureCategory(status, body)
       }
       given ExecutionContext = _context(new _FakeHttpDriver("provider body with secret-account", HttpStatus.BadRequest))
-      val httpResult = HttpSupport.post(
+      val httpresult = HttpSupport.post(
         URI.create("https://provider.example"),
         "/v1/generate?key=secret-key",
         io.circe.Json.obj(),
@@ -1534,10 +1678,10 @@ final class TextusAiRunnerSpec
       )
 
       Then("categories are stable and the HTTP failure excludes the body and credential")
-      categoryResults.zip(cases).foreach { case (actual, (_, (_, expected))) =>
+      categoryresults.zip(cases).foreach { case (actual, (_, (_, expected))) =>
         actual shouldBe expected
       }
-      httpResult match
+      httpresult match
         case Consequence.Failure(conclusion) =>
           conclusion.display should include ("category=invalid_request")
           conclusion.display should include ("status=400")
@@ -1546,6 +1690,9 @@ final class TextusAiRunnerSpec
         case _ => fail("bad request should fail")
     }
 
+    }
+
+    "observability and structured generation" which {
     "record direct SPI generate calls in the CNCF CallTree" in {
       Given("an AI runner invoked directly through the SPI surface")
       given ExecutionContext =
@@ -1882,6 +2029,9 @@ final class TextusAiRunnerSpec
       _GenerateServiceState.count(prompt) shouldBe 1
     }
 
+    }
+
+    "component assembly and configuration" which {
     "register an AI runner provider on standalone component creation" in {
       Given("a standalone Textus AI component")
       given ExecutionContext = ExecutionContext.create()
@@ -2012,6 +2162,7 @@ final class TextusAiRunnerSpec
       redacted should include ("key=<redacted>")
       redacted should include ("other=value")
       redacted should not include ("secret-key")
+    }
     }
   }
 

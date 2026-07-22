@@ -221,7 +221,7 @@ Scope:
 - run bounded provider function-call continuations for Gemma/Ollama, Anthropic
   Messages, OpenAI, and Google Gemini while preserving each provider's built-in
   web tools;
-- keep Codex CLI and Claude Code CLI as profile-fixed managed-process providers
+- keep Codex CLI, Antigravity CLI, and Claude Code CLI as profile-fixed managed-process providers
   outside the runtime-owned function loop; and
 - publish redacted tool execution facts, limits, and structured failures to
   response metadata and CallTree records.
@@ -277,6 +277,17 @@ completed on 2026-07-18.
   Gemma-first thinking policy. Sanpomap deliberately uses one-shot generation
   and deterministic validation; live repair is not a production or closure
   requirement.
+- Phase 6 managed-CLI follow-up: on 2026-07-22, the `antigravity-cli` profile added
+  an explicitly enabled CNCF managed-process binding for local Antigravity CLI.
+  Deterministic specifications cover fixed sandboxed plan-mode headless
+  execution, one CNCF-bounded text prompt argument, Web capability admission,
+  and safe JSON metadata. Authenticated live evidence confirms the actual `agy`
+  JSON response contract while authentication remains operator-owned.
+- Phase 6 provider-neutral orchestration follow-up: on 2026-07-22,
+  `prompt-grounded` execution added a bounded question/evidence loop for plain
+  generation providers. Textus AI resolves and invokes only CNCF-admitted
+  Operation/MCP tools, strips provider-native tool selection, and publishes
+  counts and digests without prompt, argument, evidence, or provider payloads.
 - Current phase ledger: `docs/phase/phase-6.md`
 - Current next task: define the next runtime capability phase.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`

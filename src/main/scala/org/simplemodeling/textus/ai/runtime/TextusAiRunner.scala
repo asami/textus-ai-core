@@ -191,7 +191,7 @@ final class TextusAiRunner(
     var escalationreason: Option[String] = None
     var lastfailure = AiAttemptFailureClass.Unknown
 
-    def invoke(
+    def _invoke_(
       execution: AiRuntimeExecution,
       stage: String,
       prompt: String,
@@ -234,20 +234,20 @@ final class TextusAiRunner(
       }
     }
 
-    def primaryCandidate(
+    def _primary_candidate_(
       prompt: String
     ): Consequence[(GenerateResponse, AiProfileResolution, Option[AiCostAdmission])] =
       if (repairs > 0)
-        invoke(strategy.primary, "repair", prompt)
+        _invoke_(strategy.primary, "repair", prompt)
       else
         strategy.kind match {
           case AiOperationalStrategyKind.Decomposed =>
-            invoke(
+            _invoke_(
               strategy.primary,
               "decompose",
               s"Decompose the following task into a concise execution plan. Do not answer the task yet.\n\n$prompt"
             ).flatMap { case (plan, _, _) =>
-              invoke(
+              _invoke_(
                 strategy.primary,
                 "compose",
                 s"Complete the original task using the plan below. Return only the requested final artifact.\n\n" +
@@ -256,9 +256,9 @@ final class TextusAiRunner(
             }
           case AiOperationalStrategyKind.CandidateRanking =>
             for {
-              first <- invoke(strategy.primary, "candidate-1", prompt)
-              second <- invoke(strategy.primary, "candidate-2", prompt)
-              ranked <- invoke(
+              first <- _invoke_(strategy.primary, "candidate-1", prompt)
+              second <- _invoke_(strategy.primary, "candidate-2", prompt)
+              ranked <- _invoke_(
                 strategy.primary,
                 "rank",
                 s"Choose and improve the better candidate for the original task. Return only the final artifact.\n\n" +
@@ -267,17 +267,24 @@ final class TextusAiRunner(
             } yield ranked
           case AiOperationalStrategyKind.ToolGrounded
               if strategy.primary.mcpServerSet.nonEmpty || strategy.primary.operationToolSet.nonEmpty =>
-            invokeToolGrounded(strategy.primary, "tool-grounded", prompt)
+            _invoke_tool_grounded_(strategy.primary, "tool-grounded", prompt)
           case AiOperationalStrategyKind.ToolGrounded
               if strategy.primary.tools.isEmpty =>
             Consequence.configurationInvalid(
               "Tool-grounded AI strategy requires a runtime-owned Operation tool set or MCP server set."
             )
+          case AiOperationalStrategyKind.PromptGrounded
+              if strategy.primary.mcpServerSet.nonEmpty || strategy.primary.operationToolSet.nonEmpty =>
+            _invoke_prompt_grounded_(strategy.primary, "prompt-grounded", prompt)
+          case AiOperationalStrategyKind.PromptGrounded =>
+            Consequence.configurationInvalid(
+              "Prompt-grounded AI strategy requires a runtime-owned Operation tool set or MCP server set."
+            )
           case _ =>
-            invoke(strategy.primary, "initial", prompt)
+            _invoke_(strategy.primary, "initial", prompt)
         }
 
-    def invokeToolGrounded(
+    def _invoke_tool_grounded_(
       execution: AiRuntimeExecution,
       stage: String,
       prompt: String
@@ -330,7 +337,53 @@ final class TextusAiRunner(
       }
     }
 
-    def finish(
+    def _invoke_prompt_grounded_(
+      execution: AiRuntimeExecution,
+      stage: String,
+      prompt: String
+    ): Consequence[(GenerateResponse, AiProfileResolution, Option[AiCostAdmission])] = {
+      attemptindex += 1
+      val executionresolution = resolution.forExecution(execution)
+      val admission = for {
+        aggregateoutput <- ToolOrchestrator.admissionMaxOutputTokensC(
+          executionresolution.maxTokens(req.maxTokens)
+        )
+        value <- executionresolution.costAdmissionC(
+          ToolOrchestrator.admissionInputEstimate(
+            inputEstimate,
+            executionresolution.maxTokens(req.maxTokens)
+          ),
+          aggregateoutput
+        )
+        _ <- executionresolution.policy.validateCostBudget(value)
+      } yield value
+      admission match {
+        case Consequence.Failure(conclusion) =>
+          lastfailure = AiAttemptFailureClass.Admission
+          attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
+          Consequence.Failure(conclusion)
+        case Consequence.Success(costadmission) =>
+          provider.generateWithPromptLoopC(
+            _effective_selection(executionresolution.requirement),
+            execution.mcpServerSet,
+            execution.operationToolSet,
+            prompt,
+            req.temperature,
+            executionresolution.maxTokens(req.maxTokens),
+            _request_properties(req.properties, executionresolution)
+          ) match {
+            case Consequence.Success(response) =>
+              attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "success")
+              Consequence.success((response, executionresolution, costadmission))
+            case Consequence.Failure(conclusion) =>
+              lastfailure = AiAttemptFailureClass.fromConclusion(conclusion)
+              attempts = attempts :+ AiAttemptFact(attemptindex, execution.provider, stage, "failure")
+              Consequence.Failure(conclusion)
+          }
+      }
+    }
+
+    def _finish_(
       response: GenerateResponse,
       finalresolution: AiProfileResolution,
       costadmission: Option[AiCostAdmission]
@@ -342,7 +395,7 @@ final class TextusAiRunner(
         finalresolution.requirement.provider.getOrElse(""),
         (System.nanoTime() - started) / 1000000L
       )
-      val finalPolicyMetadata = finalresolution.executionMetadata(
+      val finalpolicymetadata = finalresolution.executionMetadata(
         finalresolution.maxTokens(req.maxTokens),
         _request_properties(req.properties, finalresolution),
         inputEstimate = Some(inputEstimate)
@@ -351,14 +404,14 @@ final class TextusAiRunner(
         req,
         response,
         finalresolution.requirement,
-        finalPolicyMetadata ++ facts.metadata,
+        finalpolicymetadata ++ facts.metadata,
         inputEstimate,
         finalresolution,
         costadmission
       ))
     }
 
-    def fallback(
+    def _fallback_(
       failure: AiAttemptFailureClass
     ): Consequence[_Accounted[AiGenerateResponse]] = {
       escalationreason = Some(failure.id)
@@ -369,7 +422,7 @@ final class TextusAiRunner(
             s"AI strategy terminated without admitted fallback: ${failure.id}"
           )
         case Some(execution) =>
-          invoke(
+          _invoke_(
             execution,
             "commercial-fallback",
             req.prompt,
@@ -388,7 +441,7 @@ final class TextusAiRunner(
                 strategy.maxRepairs
               ).flatMap {
                 case acceptance if Set("accept", "confirm").contains(acceptance.decision) =>
-                  finish(response, finalresolution, costadmission)
+                  _finish_(response, finalresolution, costadmission)
                 case acceptance =>
                   Consequence.operationIllegal(
                     "ai.operational-strategy",
@@ -399,12 +452,12 @@ final class TextusAiRunner(
       }
     }
 
-    def run(prompt: String): Consequence[_Accounted[AiGenerateResponse]] =
-      primaryCandidate(prompt) match {
+    def _run_(prompt: String): Consequence[_Accounted[AiGenerateResponse]] =
+      _primary_candidate_(prompt) match {
         case Consequence.Failure(conclusion) =>
           val failureclass = lastfailure
           strategy.fallbackFor(failureclass) match {
-            case Some(_) => fallback(failureclass)
+            case Some(_) => _fallback_(failureclass)
             case None => Consequence.Failure(conclusion)
           }
         case Consequence.Success((response, finalresolution, costadmission)) =>
@@ -416,18 +469,18 @@ final class TextusAiRunner(
             strategy.maxRepairs
           ).flatMap {
             case acceptance if acceptance.decision == "accept" =>
-              finish(response, finalresolution, costadmission)
+              _finish_(response, finalresolution, costadmission)
             case acceptance if acceptance.decision == "repair" && repairs < strategy.maxRepairs =>
               repairs += 1
-              run(_repair_prompt(req.prompt, response.text, acceptance))
+              _run_(_repair_prompt(req.prompt, response.text, acceptance))
             case acceptance if acceptance.decision == "confirm" =>
-              fallback(AiAttemptFailureClass.Ambiguity)
+              _fallback_(AiAttemptFailureClass.Ambiguity)
             case acceptance if acceptance.decision == "escalate" =>
-              fallback(AiAttemptFailureClass.fromEscalationReason(
+              _fallback_(AiAttemptFailureClass.fromEscalationReason(
                 acceptance.escalationReason.getOrElse("")
               ))
             case acceptance if acceptance.decision == "repair" =>
-              fallback(AiAttemptFailureClass.DomainValidation)
+              _fallback_(AiAttemptFailureClass.DomainValidation)
             case acceptance if acceptance.decision == "reject" =>
               Consequence.operationIllegal(
                 "ai.operational-strategy",
@@ -440,7 +493,7 @@ final class TextusAiRunner(
           }
       }
 
-    run(req.prompt)
+    _run_(req.prompt)
   }
 
   private def _repair_prompt(
@@ -1433,6 +1486,37 @@ class TextusAiRunnerProvider(
       response <- _with_tool_invocations_c(mcpservice, operationservice) { (mcpinvocation, operationinvocation) =>
         ToolOrchestrator.generateC(
           toolservice,
+          mcpinvocation,
+          operationinvocation,
+          prompt,
+          temperature,
+          maxTokens,
+          properties,
+          effective.provider.map(_.trim.toLowerCase(Locale.ROOT)).filter(_.nonEmpty).getOrElse("ai")
+        )
+      }
+      aggregateoutput <- ToolOrchestrator.admissionMaxOutputTokensC(maxTokens)
+      _ <- AiExecutionFacts.validateMaxOutputTokens(effective, aggregateoutput, response.metadata)
+    } yield response
+
+  private[runtime] def generateWithPromptLoopC(
+    selection: SpiSelection,
+    mcpServerSet: Option[McpServerSetId],
+    operationToolSet: Option[OperationToolSetId],
+    prompt: String,
+    temperature: Option[Double],
+    maxTokens: Option[Int],
+    properties: Vector[Property]
+  )(using ExecutionContext): Consequence[GenerateResponse] =
+    for {
+      effective <- Consequence.success(_effective_selection(selection))
+      _ <- AiProviderAdmission.validate(effective, properties)
+      mcpservice <- _mcp_service_c(mcpServerSet)
+      operationservice <- _operation_tool_service_c(operationToolSet)
+      generate <- generateService(effective)
+      response <- _with_tool_invocations_c(mcpservice, operationservice) { (mcpinvocation, operationinvocation) =>
+        ToolOrchestrator.generatePromptLoopC(
+          generate,
           mcpinvocation,
           operationinvocation,
           prompt,

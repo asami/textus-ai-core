@@ -16,6 +16,7 @@ import org.goldenport.configuration.{Configuration, ConfigurationTrace, Resolved
 import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaRuntimeConfig, OllamaManagedServiceBootstrap, OllamaManagedServiceConfig}
 import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexExecutionBinding, CodexExecutionProfile, CodexReasoningLevel, CodexRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeConfig, ClaudeCodeExecutionBinding, ClaudeCodeExecutionProfile, ClaudeCodeRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, AntigravityExecutionBinding, AntigravityExecutionProfile, AntigravityRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.anthropic.AnthropicConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
@@ -45,9 +46,13 @@ class ComponentFactory extends TextusAiComponent.Factory:
     val claude = configuration.flatMap { value =>
       ClaudeCodeConfig.fromConfiguration(value, ComponentFactory.claudeCodeExecutionProfiles(profiles))
     }
+    val antigravity = ComponentFactory.antigravityRuntimeConfig(
+      configuration,
+      ComponentFactory.antigravityExecutionProfiles(profiles)
+    )
     val concurrencystate = new AiConcurrencyAdmissionState()
     ComponentFactory.configureRuntimeSpi(
-      new TextusAiRuntimeComponent(codex, claude, ollama, profiles, concurrencystate),
+      new TextusAiRuntimeComponent(codex, antigravity, claude, ollama, profiles, concurrencystate),
       configuration,
       codex,
       registrations,
@@ -55,7 +60,8 @@ class ComponentFactory extends TextusAiComponent.Factory:
       concurrencystate,
       gemma,
       claude,
-      Some(bootstrapcontext)
+      Some(bootstrapcontext),
+      antigravity
     )
 
   override protected def create_Core(
@@ -107,7 +113,8 @@ object ComponentFactory:
       new AiConcurrencyAdmissionState(),
       gemmaRuntimeConfig(configuration, profiles, component.subsystem),
       configuration.flatMap(value => ClaudeCodeConfig.fromConfiguration(value, claudeCodeExecutionProfiles(profiles))),
-      component.subsystem
+      component.subsystem,
+      antigravityRuntimeConfig(configuration, antigravityExecutionProfiles(profiles))
     )
   }
 
@@ -122,6 +129,31 @@ object ComponentFactory:
     claudeconfig: Option[ClaudeCodeRuntimeConfig],
     subsystem: Option[Subsystem]
   ): Component =
+    configureRuntimeSpi(
+      component,
+      configuration,
+      codexconfig,
+      registrations,
+      profiles,
+      concurrencystate,
+      gemmaconfig,
+      claudeconfig,
+      subsystem,
+      None
+    )
+
+  private[ai] def configureRuntimeSpi(
+    component: Component,
+    configuration: Option[ResolvedConfiguration],
+    codexconfig: Option[CodexRuntimeConfig],
+    registrations: AiRunnerApplicationPurposeRegistrationSocketSet,
+    profiles: AiProfileConfig,
+    concurrencystate: AiConcurrencyAdmissionState,
+    gemmaconfig: GemmaRuntimeConfig,
+    claudeconfig: Option[ClaudeCodeRuntimeConfig],
+    subsystem: Option[Subsystem],
+    antigravityconfig: Option[AntigravityRuntimeConfig]
+  ): Component =
     val openai = configuration.flatMap(OpenAiConfig.fromConfiguration)
     val anthropic = configuration.flatMap(AnthropicConfig.fromConfiguration)
     val google = configuration.flatMap(GoogleConfig.fromConfiguration)
@@ -131,8 +163,26 @@ object ComponentFactory:
     val defaultselection = profiles.defaultSelectionC.toOption.getOrElse(
       SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama"))
     )
-    val withgenerate = AiRuntimeGenerateBinding.register(component, Some(gemmaconfig), openai, google, codex, claudeconfig, anthropic)
-    val withchat = AiRuntimeChatBinding.register(withgenerate, Some(gemmaconfig), openai, google, codex, claudeconfig, anthropic)
+    val withgenerate = AiRuntimeGenerateBinding.register(
+      component,
+      Some(gemmaconfig),
+      openai,
+      google,
+      codex,
+      claudeconfig,
+      anthropic,
+      antigravityconfig
+    )
+    val withchat = AiRuntimeChatBinding.register(
+      withgenerate,
+      Some(gemmaconfig),
+      openai,
+      google,
+      codex,
+      claudeconfig,
+      anthropic,
+      antigravityconfig
+    )
     val runnerprovider = new TextusAiRunnerProvider(
       withchat,
       defaultselection,
@@ -219,8 +269,28 @@ object ComponentFactory:
       name -> ClaudeCodeExecutionProfile(name, execution.model)
     }
 
+  private[ai] def antigravityExecutionProfiles(
+    profiles: AiProfileConfig
+  ): Map[String, AntigravityExecutionProfile] =
+    profiles.antigravityExecutionsC.toOption.getOrElse(Map.empty).map { case (name, execution) =>
+      name -> AntigravityExecutionProfile(name, execution.model, execution.tools.toSet)
+    }
+
+  private[ai] def antigravityRuntimeConfig(
+    configuration: Option[ResolvedConfiguration],
+    executions: Map[String, AntigravityExecutionProfile]
+  ): Option[AntigravityRuntimeConfig] =
+    configuration.flatMap { value =>
+      AntigravityConfig.fromConfigurationC(value, executions) match {
+        case Consequence.Success(config) => config
+        case Consequence.Failure(conclusion) =>
+          throw conclusion.getException.getOrElse(new IllegalArgumentException(conclusion.display))
+      }
+    }
+
 private final class TextusAiRuntimeComponent(
   codex: Option[CodexRuntimeConfig],
+  antigravity: Option[AntigravityRuntimeConfig],
   claude: Option[ClaudeCodeRuntimeConfig],
   ollama: Option[OllamaManagedServiceConfig],
   profiles: AiProfileConfig,
@@ -233,11 +303,15 @@ private final class TextusAiRuntimeComponent(
     val claudebinding = claude.map(ClaudeCodeExecutionBinding.definitionsAndGrantsC).getOrElse(
       Consequence.success(Vector.empty -> Vector.empty)
     )
+    val antigravitybinding = antigravity.map(AntigravityExecutionBinding.definitionsAndGrantsC).getOrElse(
+      Consequence.success(Vector.empty -> Vector.empty)
+    )
     (for {
       codexparts <- codexbinding
+      antigravityparts <- antigravitybinding
       claudeparts <- claudebinding
-      definitions = codexparts._1 ++ claudeparts._1
-      grants = codexparts._2 ++ claudeparts._2
+      definitions = codexparts._1 ++ antigravityparts._1 ++ claudeparts._1
+      grants = codexparts._2 ++ antigravityparts._2 ++ claudeparts._2
       runtime <- if (definitions.nonEmpty)
         for {
           policy <- ProcessExecutionPolicy.createC(definitions)
@@ -276,12 +350,14 @@ private final class TextusAiRuntimeComponent(
   }
 
   private def _runtime_name: String =
-    if (Vector(codex, claude, ollama).count(_.nonEmpty) > 1)
+    if (Vector(codex, antigravity, claude, ollama).count(_.nonEmpty) > 1)
       "textus-ai-local-runtime"
     else if (ollama.nonEmpty)
       "textus-ai-ollama-runtime"
     else if (codex.nonEmpty)
       "textus-ai-codex-runtime"
+    else if (antigravity.nonEmpty)
+      "textus-ai-antigravity-runtime"
     else if (claude.nonEmpty)
       "textus-ai-claude-code-runtime"
     else

@@ -36,10 +36,13 @@ set before it invokes a provider.
   class configuration only.
 - Convert admitted internal and remote tools into provider-neutral function definitions and
   execute bounded function-call continuation loops.
+- Execute admitted CNCF tools through a provider-neutral two-generation
+  question/evidence loop when the selected model does not use native function
+  calling.
 - Support Gemma/Ollama, OpenAI, Google Gemini, and Anthropic Messages through
   their respective provider bindings while retaining current no-tool and
   built-in web-tool behavior.
-- Keep Codex CLI and Claude Code CLI as separate runtime-owned managed-process
+- Keep Codex CLI, Antigravity CLI, and Claude Code CLI as separate runtime-owned managed-process
   bindings. They may use only their fixed profile capability; they do not
   receive the Textus AI function catalog or caller-provided CLI/MCP options.
 - Record application purpose, standard purpose, runtime profile, execution
@@ -60,11 +63,11 @@ set before it invokes a provider.
   provider request construction and function-call continuation semantics.
 - The initial transport is CNCF-admitted Streamable HTTP only. Stdio, SSE,
   arbitrary process execution, and arbitrary HTTP are out of scope.
-- A Gemma/Ollama execution class that selects an MCP or Operation tool set must
+- A Gemma/Ollama execution class using native `tool-grounded` execution must
   name a member of the runtime-owned `textus.ai.ollama.tool-capable-models`
-  catalog. `functiongemma` is the shipped default; an operator may replace the
-  catalog with locally tested alternatives. A plain no-tool request retains the
-  existing generate/chat path.
+  catalog. `functiongemma` is the shipped default. `prompt-grounded` execution
+  instead uses plain generation and therefore permits ordinary models such as
+  `gemma3:12b`. A plain no-tool request retains the existing generate/chat path.
 
 ## Stages
 
@@ -79,7 +82,10 @@ set before it invokes a provider.
 | MO-03 | Local provider binding | Gemma/Ollama emits and receives tool calls through `/api/chat`; no-tool generation remains unchanged. | done |
 | MO-04 | Commercial provider bindings | OpenAI Responses, Gemini Interactions, and Anthropic Messages execute the same admitted MCP tools through their native function continuation formats. | done |
 | MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | done |
+| PG-01 | Provider-neutral question loop | Plain generate providers produce a bounded question list, Textus AI invokes admitted CNCF tools, and a second generation synthesizes evidence. | done |
+| PG-02 | Scenario research contract | OpenAI native Web and Gemma prompt-grounded outputs converge on cited semantic JSON for deterministic Scenario DSL compilation. | done |
 | PC-01 | Execution-class profile calibration | Five-class provider defaults, direct Gemma-work evidence, and Gemma-first thinking policy are explicit and tested. | done |
+| CLI-01 | Managed Antigravity CLI provider | The `antigravity-cli` profile compiles a fixed sandboxed plan-mode headless process capability with one bounded text prompt argument and safe JSON metadata. | done |
 
 ## Implementation Status
 
@@ -139,9 +145,23 @@ the logical web-search mapping alongside Textus-owned function definitions.
 Google Gemini Interactions uses `function_call` / `function_result` continuation
 with its runtime-private `previous_interaction_id`; only the latest tool results
 are sent to each resumed interaction. Existing logical URL/search mappings and
-no-tool paths remain verified. Codex CLI and Claude
+no-tool paths remain verified. Codex CLI, Antigravity CLI, and Claude
 Code CLI remain fixed managed-process providers rather than participants in
 this runtime-owned function loop.
+
+CLI-01 adds a local `google` / `antigravity-cli` runtime selection without aliasing
+the remote Google API adapter. Assembly requires explicit enablement and an
+absolute executable path plus an explicit absolute home directory; ambient
+`HOME` is never inherited. The CNCF Process Execution definition fixes headless
+JSON, sandboxed plan mode, and optional profile-owned model arguments;
+callers provide one bounded prompt argument but cannot supply CLI options.
+Deterministic evidence verifies profile resolution, Web capability admission,
+response and usage parsing, and rejection of model overrides without requiring
+a Google account. An authenticated live smoke verifies the actual Antigravity
+JSON envelope. Installation and authentication remain operator provisioning
+concerns. Antigravity CLI 1.1.5 requires its prompt in argv, so CLI-01 excludes
+confidential prompts despite bounded argument admission; a future stdin or SDK
+transport must close that local process-inspection exposure.
 
 MO-04 is complete. MO-05 confirms named-server-set admission: profile and
 execution-class policy publish the logical requirement, application-purpose
@@ -165,6 +185,21 @@ container. The live result contains no prompt, tool argument, or tool-result
 payload in phase documentation. CNCF Streamable HTTP MCP transport remains
 covered by the deterministic assembled MCP fixture; live remote-MCP execution
 is intentionally not a Phase 6 closure requirement.
+
+PG-01 adds `prompt-grounded` without changing the `AiRunner` request surface.
+The planner returns a bounded `questions` array, Textus AI validates every
+catalog identity and argument payload, and CNCF invokes the admitted Operation
+or MCP service outside the provider. The synthesis call receives only bounded
+evidence. Native provider tools are removed from this path. Safe metadata
+reports prompt-loop turns and source call counts but excludes questions,
+arguments, tool results, prompts, and provider payloads.
+
+PG-02 is covered by Sanpomap executable specifications. OpenAI API profiles may
+use their native Web tool, while Gemma profiles may use `prompt-grounded` with
+`gemma3:12b`. Both return the same cited semantic stop artifact. Sanpomap
+rejects malformed or uncited artifacts after one generation and deterministically
+serializes accepted content as Scenario DSL without model-authored YAML or
+model-provided coordinates.
 
 ## Phase 6 Extension - Execution-Class Profile Calibration
 

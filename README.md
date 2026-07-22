@@ -26,14 +26,19 @@ textus:
         max-output-tokens: 240
 ```
 
-The supplied profiles are `gemma`, `gemini`, `codex-cli`, `claude-code`,
-`anthropic`, `gemma-simple-gemini`, `gemma-simple-codex-cli`,
+The supplied profiles are `gemma`, `gemini`, `antigravity-cli`, `openai`, `codex-cli`,
+`claude-code`, `anthropic`, `gemma-simple-gemini`, `gemma-simple-codex-cli`,
 `gemma-work-gemini`, and `gemma-work-codex-cli`. The `gemma-simple-*` composite
 profiles use local Gemma only for `simple-work`. The `gemma-work-*` profiles use
 local `gemma:2b` for `simple-work`, local `gemma3:12b` for `standard-work`, and
 their named commercial provider for every thinking class. Standard purposes are `software-analysis`,
 `software-design`, `software-implementation`, `command-execution`,
 `web-analysis`, and `structured-extraction`.
+
+`gemini` selects the remote Google API provider, while `antigravity-cli`
+selects a local managed Antigravity process. `openai` selects the remote OpenAI API
+provider. `codex-cli` remains a separate local managed-process provider;
+selecting one never aliases the other.
 
 An application registers its own domain purposes through its output
 `Component.Port` during bootstrap:
@@ -84,8 +89,8 @@ effective standard purpose, runtime profile, and execution class.
 Connection credentials and endpoints remain ordinary CNCF configuration. Keep
 credentials in user-local configuration and provider-independent runtime policy
 in project configuration. The current provider adapters are Gemma/Ollama,
-OpenAI, Google Gemini, Anthropic Messages API, and opt-in Codex and Claude Code
-CLI runtimes.
+OpenAI, Google Gemini, Anthropic Messages API, and opt-in Codex, Antigravity,
+and Claude Code CLI runtimes.
 
 Gemma/Ollama uses the local `gemma` profile. Its default runtime is native
 Ollama at `http://127.0.0.1:11434`; Textus AI never starts Docker as a fallback.
@@ -187,6 +192,48 @@ do not invoke a shell or pass Codex model, reasoning, or Web flags directly.
 Profiles selecting `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` require
 Codex CLI `0.144.0` or later. Textus AI verifies that requirement through a
 separate managed `codex --version` capability before it submits a prompt.
+
+Antigravity CLI is an opt-in local managed-process provider distinct from the
+remote `gemini` API profile. Install and authenticate the executable outside
+Textus AI, then configure its absolute path:
+
+```bash
+brew install --cask antigravity-cli
+agy
+```
+
+```yaml
+textus:
+  ai:
+    profile: antigravity-cli
+    antigravity-cli:
+      enabled: true
+      executable: /opt/homebrew/bin/agy
+      home: /Users/example
+```
+
+The built-in profile uses Antigravity CLI's automatic model selection. An
+operator may set an execution-class `model` to compile a fixed `--model` argument. The
+runtime uses headless JSON and sandboxed plan mode. CNCF admits exactly one
+bounded text argument as the `--print` prompt; callers cannot supply CLI options
+or environment variables. Operators must configure an absolute
+`textus.ai.antigravity-cli.home`; the runtime supplies only that fixed `HOME` so
+`agy` can read its keyring-backed profile, and no ambient environment is
+inherited. Profile-owned `web_search` and `url_context` tools use Antigravity's
+built-in Web facilities; the Textus AI CNCF function catalog is not injected
+into this managed CLI process.
+
+Antigravity CLI `1.1.5` requires the headless prompt as a process argument
+rather than stdin. CNCF bounds that argument and prevents option injection, but
+the prompt can still be visible to same-host process inspection. Do not route
+confidential prompts through this profile until Antigravity provides a stdin
+contract or Textus AI adds an SDK transport.
+
+Google ended individual free, Pro, and Ultra Gemini CLI service on 2026-06-18
+and moved those terminal workflows to Antigravity CLI. Textus AI therefore
+uses `agy` for the local Google managed-process profile. Enterprise or API-key
+Gemini CLI remains outside this profile; use the remote `gemini` API profile
+when direct API execution is required.
 
 Claude Code is also opt-in and requires an absolute executable path. Textus AI
 uses Claude Code non-interactive print mode with JSON output and a profile-owned

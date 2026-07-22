@@ -7,11 +7,12 @@ import org.goldenport.{Conclusion, Consequence}
  * Runtime-owned strategy vocabulary for bounded AI candidate execution.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  */
 private[textus] enum AiOperationalStrategyKind(val id: String) {
   case Structured extends AiOperationalStrategyKind("structured")
   case ToolGrounded extends AiOperationalStrategyKind("tool-grounded")
+  case PromptGrounded extends AiOperationalStrategyKind("prompt-grounded")
   case Decomposed extends AiOperationalStrategyKind("decomposed")
   case ValidatorRepair extends AiOperationalStrategyKind("validator-repair")
   case CandidateRanking extends AiOperationalStrategyKind("candidate-ranking")

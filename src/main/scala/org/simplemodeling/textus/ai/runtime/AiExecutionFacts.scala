@@ -293,7 +293,9 @@ private[textus] object AiExecutionFacts {
           "google.usage.cached_input_tokens" | "google.usage.reasoning_tokens" |
           "google.request_id" |
           "google.google_search_calls" | "google.google_search_results" |
-          "google.url_context_calls" | "google.url_citations" => true
+          "google.url_context_calls" | "google.url_citations" |
+          "google.antigravity_conversation_id" | "google.antigravity_profile" |
+          "google.antigravity_enabled_tools" | "google.antigravity_tool_calls" => true
       case "openai.response_id" | "openai.finish_reason" |
           "openai.usage.input_tokens" | "openai.usage.output_tokens" | "openai.usage.total_tokens" |
           "openai.usage.cached_input_tokens" | "openai.usage.reasoning_tokens" |
@@ -304,21 +306,30 @@ private[textus] object AiExecutionFacts {
           "anthropic.usage.total_tokens" | "anthropic.usage.cached_input_tokens" |
           "anthropic.tool_calls" | "anthropic.tool_turns" |
           "anthropic.tool_catalog_digest" | "anthropic.mcp_calls" |
-          "anthropic.operation_calls" => true
+          "anthropic.operation_calls" | "anthropic.prompt_loop_calls" |
+          "anthropic.prompt_loop_turns" => true
       case "gemma.finish_reason" |
           "gemma.usage.input_tokens" | "gemma.usage.output_tokens" | "gemma.usage.total_tokens" |
           "gemma.tool_calls" | "gemma.tool_turns" | "gemma.tool_catalog_digest" |
           "gemma.mcp_calls" | "gemma.mcp_turns" | "gemma.mcp_catalog_digest" |
-          "gemma.operation_calls" => true
+          "gemma.operation_calls" | "gemma.prompt_loop_calls" |
+          "gemma.prompt_loop_turns" => true
       case "google.tool_calls" | "google.tool_turns" |
           "google.tool_catalog_digest" | "google.mcp_calls" |
-          "google.operation_calls" => true
+          "google.operation_calls" | "google.prompt_loop_calls" |
+          "google.prompt_loop_turns" => true
       case "openai.tool_calls" | "openai.tool_turns" |
           "openai.tool_catalog_digest" | "openai.mcp_calls" |
-          "openai.operation_calls" => true
-      case "codex.finish_reason" => true
+          "openai.operation_calls" | "openai.prompt_loop_calls" |
+          "openai.prompt_loop_turns" => true
+      case "codex.finish_reason" | "codex.prompt_loop_calls" |
+          "codex.prompt_loop_turns" | "codex.mcp_calls" |
+          "codex.operation_calls" | "codex.tool_catalog_digest" => true
       case "claude.finish_reason" | "claude.session_id" |
-          "claude.duration_ms" | "claude.num_turns" | "claude.profile" => true
+          "claude.duration_ms" | "claude.num_turns" | "claude.profile" |
+          "claude.prompt_loop_calls" | "claude.prompt_loop_turns" |
+          "claude.mcp_calls" | "claude.operation_calls" |
+          "claude.tool_catalog_digest" => true
       case _ => false
     }
 
@@ -424,10 +435,34 @@ private[textus] object AiExecutionFacts {
         "google_search_calls",
         "google_search_results",
         "url_context_calls",
-        "url_citations"
+        "url_citations",
+        "prompt_loop_calls",
+        "prompt_loop_turns",
+        "mcp_calls",
+        "operation_calls",
+        "antigravity_tool_calls"
       )
-      case "openai" => Vector("web_search_calls")
-      case "gemma" => Vector("tool_calls", "tool_turns", "mcp_calls", "operation_calls")
+      case "openai" => Vector(
+        "web_search_calls",
+        "prompt_loop_calls",
+        "prompt_loop_turns",
+        "mcp_calls",
+        "operation_calls"
+      )
+      case "gemma" => Vector(
+        "tool_calls",
+        "tool_turns",
+        "prompt_loop_calls",
+        "prompt_loop_turns",
+        "mcp_calls",
+        "operation_calls"
+      )
+      case "anthropic" | "codex" | "claude" => Vector(
+        "prompt_loop_calls",
+        "prompt_loop_turns",
+        "mcp_calls",
+        "operation_calls"
+      )
       case _ => Vector.empty
     }
     labels.flatMap { label =>

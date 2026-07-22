@@ -2,6 +2,7 @@ package org.simplemodeling.textus.ai.runtime
 
 import java.nio.charset.StandardCharsets
 import io.circe.{Json, JsonObject}
+import io.circe.parser.parse
 import org.goldenport.Consequence
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.mcp.client.*
@@ -111,6 +112,186 @@ private[textus] object ToolOrchestrator {
         )
       ) ++ _compatibility_metadata(bindings, result)
     )
+
+  def generatePromptLoopC(
+    service: GenerateService,
+    mcpinvocation: Option[McpClientInvocation],
+    operationinvocation: Option[OperationToolInvocation],
+    prompt: String,
+    temperature: Option[Double],
+    maxTokens: Option[Int],
+    properties: Vector[Property],
+    provider: String
+  )(using ExecutionContext): Consequence[GenerateResponse] =
+    for {
+      mcpcatalog <- mcpinvocation.map(_.catalog.map(Some(_))).getOrElse(Consequence.success(None))
+      operationcatalog <- operationinvocation.map(_.catalog.map(Some(_))).getOrElse(Consequence.success(None))
+      bindings <- _bindings_c(mcpcatalog, operationcatalog)
+      _ <- if (bindings.nonEmpty) Consequence.unit else
+        Consequence.configurationInvalid("Prompt-grounded execution has no admitted tools")
+      planner <- service.generate(GenerateRequest(
+        _research_plan_prompt(prompt, bindings),
+        temperature,
+        maxTokens,
+        _without_provider_tools(properties)
+      ))
+      questions <- _research_questions_c(planner.text, bindings)
+      calls = questions.map(_.call)
+      toolmessages <- _invoke_calls_c(
+        mcpinvocation,
+        operationinvocation,
+        bindings.map(x => x.functionname -> x).toMap,
+        calls,
+        priorcalls = 0,
+        System.nanoTime()
+      )
+      result <- service.generate(GenerateRequest(
+        _evidence_synthesis_prompt(prompt, questions, toolmessages),
+        temperature,
+        maxTokens,
+        _without_provider_tools(properties)
+      ))
+    } yield {
+      val byname = bindings.map(x => x.functionname -> x).toMap
+      val mcpcount = calls.count(call => byname.get(call.name).exists(_.isInstanceOf[_McpBinding]))
+      val operationcount = calls.size - mcpcount
+      GenerateResponse(
+        result.text,
+        result.model.orElse(planner.model),
+        _aggregate_metadata(planner.metadata, result.metadata) ++ Map(
+          s"$provider.prompt_loop_calls" -> calls.size.toString,
+          s"$provider.prompt_loop_turns" -> "2",
+          s"$provider.mcp_calls" -> mcpcount.toString,
+          s"$provider.operation_calls" -> operationcount.toString,
+          s"$provider.tool_catalog_digest" -> AiExecutionFacts.digest(
+            bindings.map(_.identity).mkString("\n")
+          )
+        )
+      )
+    }
+
+  private def _research_plan_prompt(
+    prompt: String,
+    bindings: Vector[_Binding]
+  ): String = {
+    val catalog = Json.fromValues(bindings.map { binding =>
+      Json.obj(
+        "name" -> Json.fromString(binding.functionname),
+        "description" -> binding.definition.description.map(Json.fromString).getOrElse(Json.Null),
+        "input_schema" -> binding.definition.inputSchema
+      )
+    }).noSpaces
+    s"""Plan the admitted research calls needed for the task.
+       |Return only one JSON object with this exact shape:
+       |{"questions":[{"question":"one independent factual question","tool":"exact catalog name","arguments":{"required schema field":"value"}}]}
+       |Put every independent factual question in one list. Use only catalog names below.
+       |Arguments must satisfy the selected tool's input_schema. When the schema
+       |has one required string field, Textus AI can map the question into it.
+       |Do not answer the task and do not add Markdown.
+       |
+       |Tool catalog:
+       |$catalog
+       |
+       |Task:
+       |$prompt
+       |""".stripMargin.trim
+  }
+
+  private def _research_questions_c(
+    text: String,
+    bindings: Vector[_Binding]
+  ): Consequence[Vector[_ResearchQuestion]] =
+    _parse_json_c(text).flatMap { json =>
+      val admitted = bindings.map(_.functionname).toSet
+      json.hcursor.downField("questions").focus.flatMap(_.asArray) match {
+        case None => Consequence.valueInvalid("Prompt-grounded research plan has no questions array")
+        case Some(values) if values.isEmpty =>
+          Consequence.valueInvalid("Prompt-grounded research plan contains no questions")
+        case Some(values) if values.size > MAXIMUM_TOOL_CALLS =>
+          Consequence.operationIllegal(
+            "ai.tool-loop",
+            s"Tool resource limit: prompt-loop question count ${values.size} exceeds $MAXIMUM_TOOL_CALLS"
+          )
+        case Some(values) => values.foldLeft(Consequence.success(Vector.empty[_ResearchQuestion])) { (z, value) =>
+          for {
+            questions <- z
+            question <- value.hcursor.get[String]("question").toOption
+              .map(_.trim).filter(_.nonEmpty).map(Consequence.success).getOrElse(
+                Consequence.valueInvalid("Prompt-grounded research question has no question text")
+              )
+            name <- value.hcursor.get[String]("tool").toOption.map(Consequence.success).getOrElse(
+              Consequence.valueInvalid("Prompt-grounded research question has no tool")
+            )
+            _ <- if (admitted.contains(name)) Consequence.unit else
+              Consequence.configurationInvalid("Model requested an unadmitted prompt-loop tool")
+            binding = bindings.find(_.functionname == name).get
+            explicitarguments = value.hcursor.downField("arguments").focus.getOrElse(Json.obj())
+            arguments = _research_arguments(binding, question, explicitarguments)
+          } yield questions :+ _ResearchQuestion(question, ToolCall(name, arguments))
+        }
+      }
+    }
+
+  private def _research_arguments(
+    binding: _Binding,
+    question: String,
+    explicit: Json
+  ): Json =
+    explicit.asObject match {
+      case Some(arguments) =>
+        val schema = binding.definition.inputSchema.hcursor
+        val required = schema.get[Vector[String]]("required").toOption.getOrElse(Vector.empty)
+        val missing = required.filterNot(arguments.contains)
+        missing match {
+          case Vector(field) if schema.downField("properties").downField(field)
+              .get[String]("type").toOption.contains("string") =>
+            Json.fromJsonObject(arguments.add(field, Json.fromString(question)))
+          case _ => explicit
+        }
+      case None => explicit
+    }
+
+  private def _parse_json_c(text: String): Consequence[Json] = {
+    val trimmed = Option(text).getOrElse("").trim
+    val unfenced =
+      if (trimmed.startsWith("```")) {
+        val lines = trimmed.linesIterator.toVector
+        val body = lines.drop(1)
+        Option.when(body.lastOption.exists(_.trim.startsWith("```")))(body.dropRight(1)).getOrElse(body).mkString("\n").trim
+      } else trimmed
+    val candidate = for {
+      start <- Option(unfenced.indexOf('{')).filter(_ >= 0)
+      end <- Option(unfenced.lastIndexOf('}')).filter(_ >= start)
+    } yield unfenced.substring(start, end + 1)
+    candidate.flatMap(value => parse(value).toOption)
+      .map(Consequence.success)
+      .getOrElse(Consequence.valueInvalid("Prompt-grounded research plan is not valid JSON"))
+  }
+
+  private def _evidence_synthesis_prompt(
+    prompt: String,
+    questions: Vector[_ResearchQuestion],
+    messages: Vector[ToolChatMessage]
+  ): String = {
+    val evidence = questions.zip(messages).zipWithIndex.map { case ((question, message), index) =>
+      s"Question ${index + 1}: ${question.text}\nEvidence (${question.call.name}):\n${message.content}"
+    }.mkString("\n\n")
+    s"""Complete the task using only the admitted evidence below.
+       |Do not claim facts that are absent from the evidence.
+       |Return only the final artifact requested by the task.
+       |
+       |Original task:
+       |$prompt
+       |
+       |Admitted evidence:
+       |$evidence
+       |""".stripMargin.trim
+  }
+
+  private def _without_provider_tools(properties: Vector[Property]): Vector[Property] =
+    AiRequestProperties.withoutTools(properties)
+
+  private final case class _ResearchQuestion(text: String, call: ToolCall)
 
   private sealed abstract class _Binding {
     def functionname: String
@@ -481,7 +662,21 @@ private[textus] object ToolOrchestrator {
     val usagekeys = Set(
       "gemma.usage.input_tokens",
       "gemma.usage.output_tokens",
-      "gemma.usage.total_tokens"
+      "gemma.usage.total_tokens",
+      "google.usage.input_tokens",
+      "google.usage.cached_input_tokens",
+      "google.usage.output_tokens",
+      "google.usage.reasoning_tokens",
+      "google.usage.total_tokens",
+      "openai.usage.input_tokens",
+      "openai.usage.cached_input_tokens",
+      "openai.usage.output_tokens",
+      "openai.usage.reasoning_tokens",
+      "openai.usage.total_tokens",
+      "anthropic.usage.input_tokens",
+      "anthropic.usage.cached_input_tokens",
+      "anthropic.usage.output_tokens",
+      "anthropic.usage.total_tokens"
     )
     (before.keySet ++ after.keySet).map { key =>
       val value = if (usagekeys.contains(key))

@@ -68,7 +68,8 @@ for an unregistered application name.
 
 ## Runtime Profiles
 
-Textus AI ships `gemma`, `codex-cli`, `claude-code`, `anthropic`, and `gemini` runtime profiles, plus
+Textus AI ships `gemma`, `gemini`, `openai`, `codex-cli`, `antigravity-cli`,
+`claude-code`, and `anthropic` runtime profiles, plus
 `gemma-simple-gemini`, `gemma-simple-codex-cli`, `gemma-work-gemini`, and
 `gemma-work-codex-cli`. The `gemma-simple-*` profiles bind only `simple-work`
 to local Gemma. The `gemma-work-*` profiles bind `simple-work` to local
@@ -77,6 +78,15 @@ commercial provider directly for every thinking class. `textus.ai.profile` selec
 `textus.ai.execution-classes.<class>.*` settings tune that profile after
 ordinary CNCF configuration merge. Provider binding and tools remain
 runtime-owned.
+
+`gemini` selects the remote Google API adapter. `antigravity-cli` selects the
+separate local managed-process adapter and requires explicit enablement plus an
+absolute executable path and an explicit absolute home directory. It does not
+inherit ambient `HOME`, and it does not alias or replace the remote Google API.
+
+`openai` selects the direct remote OpenAI API. `codex-cli` selects the local
+managed Codex process capability. They share an execution-class model matrix
+but remain distinct provider and authentication boundaries.
 
 `anthropic` selects the direct remote Messages API provider. `claude-code`
 selects the separate local managed-process provider. They are intentionally not

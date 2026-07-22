@@ -13,7 +13,15 @@ import org.goldenport.protocol.Property
 import org.goldenport.record.Record
 
 private[textus] object AiRequestProperties:
+  private val _tool_property_names = Vector(
+    "ai.tools",
+    "textus.ai.tools",
+    "cncf.ai.tools",
+    "tools"
+  )
+
   val CODEX_EXECUTION_PROFILE = "ai.textus.codex.execution-profile"
+  val ANTIGRAVITY_EXECUTION_PROFILE = "ai.textus.antigravity-cli.execution-profile"
   val CLAUDE_CODE_EXECUTION_PROFILE = "ai.textus.claude-code.execution-profile"
 
   def model(
@@ -23,6 +31,7 @@ private[textus] object AiRequestProperties:
     val normalized = provider.trim.toLowerCase(java.util.Locale.ROOT)
     val providernames = normalized match {
       case "codex" | "codex-cli" => Vector("codex", "codex-cli")
+      case "antigravity-cli" => Vector("antigravity-cli", "antigravity", "google")
       case value => Vector(value)
     }
     _property_string(properties, providernames.flatMap { name => Vector(
@@ -123,12 +132,14 @@ private[textus] object AiRequestProperties:
   private def _tool_parse_result(
     properties: Vector[Property]
   ): Option[AiTool.ParseResult] =
-    _property_string(properties, Vector(
-      "ai.tools",
-      "textus.ai.tools",
-      "cncf.ai.tools",
-      "tools"
-    )).map(AiTool.parseResult)
+    _property_string(properties, _tool_property_names).map(AiTool.parseResult)
+
+  def withoutTools(
+    properties: Vector[Property]
+  ): Vector[Property] = {
+    val names = _tool_property_names.toSet
+    properties.filterNot(property => names.contains(property.name.toLowerCase(java.util.Locale.ROOT)))
+  }
 
   def requireNoUnsupportedTools(
     provider: String,
@@ -160,7 +171,7 @@ private[textus] object AiRequestProperties:
     properties: Vector[Property]
   ): Vector[Property] =
     properties.filterNot { property =>
-      Set(CODEX_EXECUTION_PROFILE, CLAUDE_CODE_EXECUTION_PROFILE).contains(property.name)
+      Set(CODEX_EXECUTION_PROFILE, ANTIGRAVITY_EXECUTION_PROFILE, CLAUDE_CODE_EXECUTION_PROFILE).contains(property.name)
     }
 
   def withoutInternalCodexProfile(
@@ -188,6 +199,11 @@ private[textus] object AiRequestProperties:
     properties: Vector[Property]
   ): Option[String] =
     _property_string(properties, Vector(CLAUDE_CODE_EXECUTION_PROFILE))
+
+  def antigravityExecutionProfile(
+    properties: Vector[Property]
+  ): Option[String] =
+    _property_string(properties, Vector(ANTIGRAVITY_EXECUTION_PROFILE))
 
   private def _property_string(
     properties: Vector[Property],

@@ -15,6 +15,7 @@ algorithm used inside the selected runtime profile:
 
 - `structured`
 - `tool-grounded`
+- `prompt-grounded`
 - `decomposed`
 - `validator-repair`
 - `candidate-ranking`
@@ -32,9 +33,8 @@ textus:
   ai:
     profile: gemma-first-codex-cli
     application-purposes:
-      sanpomap-scenario-generation:
-        operational-strategy: structured
-        acceptance-operation: Sanpomap.Evaluation.evaluateAiCandidate
+      sanpomap-scenario-research:
+        operational-strategy: prompt-grounded
       sanpomap-location-investigation:
         operational-strategy: tool-grounded
         acceptance-operation: Sanpomap.Evaluation.evaluateAiCandidate
@@ -71,9 +71,11 @@ Gemma rate schedule is never reused for a commercial fallback.
   output, domain validation, evidence, or ambiguity outcomes.
 - Authorization, capability, admission, credential-policy, input, and resource
   limit outcomes are terminal and never select the commercial execution.
-- A custom operational strategy requires a Gemma-primary work execution. A
-  thinking-class strategy configuration is rejected rather than causing an
-  implicit Gemma attempt.
+- Strategies other than `prompt-grounded` require a Gemma-primary work
+  execution. `prompt-grounded` may use any generate-capable runtime profile
+  because CNCF tool execution remains outside the provider protocol.
+- A thinking-class Gemma-first strategy configuration is rejected rather than
+  causing an implicit Gemma attempt.
 - A conventional profile never gains fallback behavior implicitly.
 
 ## Evidence
@@ -113,6 +115,29 @@ a commercial fallback. Cost admission uses the full worst-case continuation
 envelope: every possible model turn, catalog projection, bounded tool results,
 and accumulated assistant continuation output. Reported provider usage is
 aggregated across completed turns for final accounting.
+
+## Prompt-Grounded Execution
+
+`prompt-grounded` is the provider-neutral alternative to native function
+calling. It accepts the same operator-owned `operation-tool-set` and
+`mcp-server-set` identities, but uses only the selected provider's plain
+generation service. The first generation returns one bounded list of factual
+questions together with admitted catalog routing and typed arguments. Textus
+AI validates the plan, invokes each admitted CNCF tool outside the provider,
+and sends the resulting evidence to a second plain generation call.
+
+Provider-native tools are removed from both prompt-loop calls so one request
+cannot mix native Web execution with CNCF evidence execution. The model never
+receives an endpoint, credential, transport configuration, or unadmitted tool.
+The final response records only call counts, source counts, catalog digest,
+and the usual normalized execution facts.
+
+Unlike native `tool-grounded` execution, a Gemma prompt loop does not require
+an Ollama model with function-calling support. A normal model such as
+`gemma3:12b` is valid because it emits strict research-plan JSON and final
+semantic output rather than Ollama tool calls. The same loop is valid for
+OpenAI, Gemini, and Anthropic API profiles when CNCF tools are needed. Their
+provider-native Web tools remain a separate profile capability.
 
 ## Acceptance Operation Shape
 
