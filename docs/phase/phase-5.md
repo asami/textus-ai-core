@@ -16,9 +16,9 @@ Textus AI resolves the local provider, model, and limits.
 - Ship a `gemma` runtime profile for all four standard execution classes and
   common simple-work-only Gemma composite profiles.
 - Use the existing CNCF HTTP-bound Gemma/Ollama generate and chat services.
-- Resolve a component-owned Ollama service when no endpoint is configured,
-  through CNCF's managed service-container runtime.
-- Prefer an explicitly configured Ollama endpoint over local Docker control.
+- Use native Ollama by default and resolve a component-owned Ollama service
+  through CNCF's managed service-container runtime only when selected.
+- Permit an explicitly configured Ollama endpoint only for the native runtime.
 - Permit operator model tuning only through approved execution-class keys.
 - Preserve deterministic structured-record, timeout, and explicit endpoint
   fallback behavior.
@@ -27,8 +27,8 @@ Textus AI resolves the local provider, model, and limits.
 
 - This phase does not embed model inference in the JVM or expose Docker control
   to application callers.
-- The deployment owner must provide Docker access for the profile-owned local
-  runtime, or configure an external Ollama endpoint.
+- The deployment owner must provide native Ollama for the default local
+  runtime, or explicitly select the managed Docker runtime.
 - No application caller may select Gemma, Ollama, a model, or a local endpoint.
 - No local-to-commercial provider fallback is introduced.
 
@@ -39,6 +39,14 @@ Textus AI resolves the local provider, model, and limits.
 | GO-01 | Runtime profile | `gemma` and simple-work-only composite profiles resolve their local Ollama defaults. | complete |
 | GO-02 | Container contract | Managed service resolution is profile-owned; an endpoint override disables it. | complete |
 | GO-03 | Executable evidence | Deterministic profile, fake-gateway consumer, provider, and opt-in live Gemma provisioning specifications pass. | complete |
+
+## Superseded Operating Policy
+
+As of Jul. 22, 2026, native Ollama at `127.0.0.1:11434` is the default Gemma
+runtime. The Docker path documented below remains implemented but requires the
+explicit `textus.ai.gemma.runtime: managed-docker` selection. Native connection
+failure returns a structured provider failure and never starts Docker as a
+fallback. `managed-docker` may not be combined with `textus.ai.gemma.endpoint`.
 
 ## Phase 44 Integration Update
 

@@ -14,9 +14,10 @@ phase=[Phase 5 - Local Gemma/Ollama Runtime Activation](phase-5.md)
 
 ## GO-02 Container Contract
 
-- [x] Make managed Ollama service resolution the default for the `gemma`
-      profile.
-- [x] Prefer an explicit `textus.ai.gemma.endpoint` over managed lifecycle.
+- [x] Make native Ollama the default for the `gemma` profile and require an
+      explicit `managed-docker` selection for managed service resolution.
+- [x] Reject `textus.ai.gemma.endpoint` with `managed-docker`; do not use
+      Docker as a native-runtime fallback.
 - [x] Supersede the initial fixed Docker Process Execution capabilities with a
   typed CNCF managed service-container definition.
 - [x] Install profile-owned models as a separate Ollama HTTP follow-up after
@@ -30,7 +31,7 @@ phase=[Phase 5 - Local Gemma/Ollama Runtime Activation](phase-5.md)
 - [x] Verify a standard purpose selects the profile-owned model and reaches the
   registered Ollama HTTP binding.
 - [x] Verify fake-gateway lifecycle resolution, model-install convergence, and
-      external-endpoint precedence.
+      native-default versus explicit-Docker selection.
 - [x] Add an opt-in `GemmaOllamaLiveSpec` that is cancelled during ordinary
       test runs and exercises Docker service resolution, model installation,
       and generation when explicitly enabled.

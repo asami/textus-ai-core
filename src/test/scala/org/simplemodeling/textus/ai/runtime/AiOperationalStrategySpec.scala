@@ -14,7 +14,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /**
  * @since   Jul. 21, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  */
 final class AiOperationalStrategySpec
   extends AnyWordSpec
@@ -23,14 +23,15 @@ final class AiOperationalStrategySpec
   with GivenWhenThen {
 
   "Gemma-first operational profiles" should {
-    "resolve all strategy kinds behind application-purpose-only requests" in {
-      Given("a Gemma-first profile and registered purposes for every standard strategy")
+    "keep Gemma-first strategies within work classes and select thinking directly commercially" in {
+      Given("a Gemma-first profile and registered work and thinking purposes")
       val mappings = Vector(
+        "fixture-command" -> "command-execution",
         "fixture-structured" -> "software-implementation",
-        "fixture-tool-grounded" -> "web-analysis",
-        "fixture-decomposed" -> "software-design",
         "fixture-validator-repair" -> "structured-extraction",
-        "fixture-candidate-ranking" -> "software-analysis"
+        "fixture-design" -> "software-design",
+        "fixture-analysis" -> "software-analysis",
+        "fixture-web" -> "web-analysis"
       )
       val config = _config(Map(
         "textus.ai.profile" -> "gemma-first-gemini"
@@ -45,42 +46,47 @@ final class AiOperationalStrategySpec
         )).toOption.value
       }.toMap
 
-      Then("the profile keeps Gemma primary and identifies the five bounded strategies")
-      resolutions.values.map(_.operationalStrategy.value.id).toSet shouldBe Set(
+      Then("work purposes keep Gemma primary while thinking classes select Gemini directly")
+      Vector("fixture-command", "fixture-structured", "fixture-validator-repair").flatMap(
+        resolutions(_).operationalStrategy.map(_.id)
+      ).toSet shouldBe Set(
         "structured",
-        "tool-grounded",
-        "decomposed",
-        "validator-repair",
-        "candidate-ranking"
+        "validator-repair"
       )
-      resolutions.values.foreach { resolution =>
+      Vector("fixture-command", "fixture-structured", "fixture-validator-repair").foreach { purpose =>
+        val resolution = resolutions(purpose)
         val strategy = resolution.operationalStrategy.value
         strategy.primary.provider shouldBe "gemma"
         strategy.commercialFallback.value.provider shouldBe "google"
         strategy.maxRepairs shouldBe 1
         strategy.maxProviderAttempts shouldBe 2
       }
+      Vector("fixture-design", "fixture-analysis", "fixture-web").foreach { purpose =>
+        val resolution = resolutions(purpose)
+        resolution.requirement.provider shouldBe Some("google")
+        resolution.operationalStrategy shouldBe None
+      }
     }
 
     "allow operator policy to refine strategy defaults without caller provider selection" in {
-      Given("an application strategy override and bounded fallback overrides")
+      Given("a work-class application strategy override and bounded fallback overrides")
       val config = _config(Map(
         "textus.ai.profile" -> "gemma-first-gemini",
-        "textus.ai.application-purposes.sanpomap-location-investigation.operational-strategy" -> "candidate-ranking",
-        "textus.ai.application-purposes.sanpomap-location-investigation.acceptance-operation" ->
+        "textus.ai.application-purposes.sanpomap-scenario-generation.operational-strategy" -> "candidate-ranking",
+        "textus.ai.application-purposes.sanpomap-scenario-generation.acceptance-operation" ->
           "Sanpomap.Evaluation.evaluateAiCandidate",
-        "textus.ai.execution-classes.deep-consideration.strategy-max-repairs" -> "2",
-        "textus.ai.execution-classes.deep-consideration.strategy-max-provider-attempts" -> "2",
-        "textus.ai.execution-classes.deep-consideration.fallback-model" -> "gemini-fixture"
+        "textus.ai.execution-classes.standard-work.strategy-max-repairs" -> "2",
+        "textus.ai.execution-classes.standard-work.strategy-max-provider-attempts" -> "2",
+        "textus.ai.execution-classes.standard-work.fallback-model" -> "gemini-fixture"
       ))
       val profiles = _profiles(
         config,
-        "sanpomap-location-investigation" -> "web-analysis"
+        "sanpomap-scenario-generation" -> "software-implementation"
       )
 
       When("the application asks only for its registered purpose")
       val resolution = profiles.resolveRequired(AiRunnerRequirement(
-        purpose = Some("sanpomap-location-investigation"),
+        purpose = Some("sanpomap-scenario-generation"),
         purposeRequired = true
       )).toOption.value
       val strategy = resolution.operationalStrategy.value
@@ -197,8 +203,9 @@ final class AiOperationalStrategySpec
       executions.keySet should contain allOf (
         "runtime-simple-work",
         "runtime-standard-work",
-        "runtime-standard-consideration",
-        "runtime-deep-consideration"
+        "runtime-simple-thinking",
+        "runtime-advanced-thinking",
+        "runtime-deep-thinking"
       )
       executions("runtime-standard-work").provider shouldBe "codex"
     }

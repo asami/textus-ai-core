@@ -70,6 +70,7 @@ private[textus] final case class AiRuntimeProfile(
 private[textus] object AiRuntimeProfileCatalog {
   private def _codex(
     executionclass: AiExecutionClass,
+    model: String,
     reasoning: String
   ): AiRuntimeExecution =
     AiRuntimeExecution(
@@ -77,7 +78,7 @@ private[textus] object AiRuntimeProfileCatalog {
       provider = "codex",
       mode = "local",
       engine = "codex-cli",
-      model = "gpt-5.6-sol",
+      model = model,
       reasoningLevel = Some(reasoning)
     )
 
@@ -132,10 +133,11 @@ private[textus] object AiRuntimeProfileCatalog {
   val codexCli: AiRuntimeProfile = AiRuntimeProfile(
     "codex-cli",
     Map(
-      AiExecutionClass.SimpleWork -> _codex(AiExecutionClass.SimpleWork, "minimal"),
-      AiExecutionClass.StandardWork -> _codex(AiExecutionClass.StandardWork, "low"),
-      AiExecutionClass.StandardConsideration -> _codex(AiExecutionClass.StandardConsideration, "high"),
-      AiExecutionClass.DeepConsideration -> _codex(AiExecutionClass.DeepConsideration, "xhigh")
+      AiExecutionClass.SimpleWork -> _codex(AiExecutionClass.SimpleWork, "gpt-5.6-luna", "medium"),
+      AiExecutionClass.StandardWork -> _codex(AiExecutionClass.StandardWork, "gpt-5.6-terra", "high"),
+      AiExecutionClass.SimpleThinking -> _codex(AiExecutionClass.SimpleThinking, "gpt-5.6-sol", "medium"),
+      AiExecutionClass.AdvancedThinking -> _codex(AiExecutionClass.AdvancedThinking, "gpt-5.6-sol", "high"),
+      AiExecutionClass.DeepThinking -> _codex(AiExecutionClass.DeepThinking, "gpt-5.6-sol", "xhigh")
     )
   )
 
@@ -144,8 +146,9 @@ private[textus] object AiRuntimeProfileCatalog {
     Map(
       AiExecutionClass.SimpleWork -> _gemini(AiExecutionClass.SimpleWork, "gemini-2.5-flash"),
       AiExecutionClass.StandardWork -> _gemini(AiExecutionClass.StandardWork, "gemini-2.5-flash"),
-      AiExecutionClass.StandardConsideration -> _gemini(AiExecutionClass.StandardConsideration, "gemini-2.5-pro"),
-      AiExecutionClass.DeepConsideration -> _gemini(AiExecutionClass.DeepConsideration, "gemini-2.5-pro")
+      AiExecutionClass.SimpleThinking -> _gemini(AiExecutionClass.SimpleThinking, "gemini-2.5-pro"),
+      AiExecutionClass.AdvancedThinking -> _gemini(AiExecutionClass.AdvancedThinking, "gemini-2.5-pro"),
+      AiExecutionClass.DeepThinking -> _gemini(AiExecutionClass.DeepThinking, "gemini-2.5-pro")
     )
   )
 
@@ -154,8 +157,9 @@ private[textus] object AiRuntimeProfileCatalog {
     Map(
       AiExecutionClass.SimpleWork -> _gemma(AiExecutionClass.SimpleWork, "gemma:2b"),
       AiExecutionClass.StandardWork -> _gemma(AiExecutionClass.StandardWork, "gemma:2b"),
-      AiExecutionClass.StandardConsideration -> _gemma(AiExecutionClass.StandardConsideration, "gemma:2b"),
-      AiExecutionClass.DeepConsideration -> _gemma(AiExecutionClass.DeepConsideration, "gemma:2b")
+      AiExecutionClass.SimpleThinking -> _gemma(AiExecutionClass.SimpleThinking, "gemma:2b"),
+      AiExecutionClass.AdvancedThinking -> _gemma(AiExecutionClass.AdvancedThinking, "gemma:2b"),
+      AiExecutionClass.DeepThinking -> _gemma(AiExecutionClass.DeepThinking, "gemma:2b")
     )
   )
 
@@ -175,19 +179,37 @@ private[textus] object AiRuntimeProfileCatalog {
     )
   )
 
+  val gemmaWorkGemini: AiRuntimeProfile = AiRuntimeProfile(
+    "gemma-work-gemini",
+    gemini.executions
+      .updated(AiExecutionClass.SimpleWork, _gemma(AiExecutionClass.SimpleWork, "gemma:2b"))
+      .updated(AiExecutionClass.StandardWork, _gemma(AiExecutionClass.StandardWork, "gemma3:12b"))
+  )
+
+  val gemmaWorkCodexCli: AiRuntimeProfile = AiRuntimeProfile(
+    "gemma-work-codex-cli",
+    codexCli.executions
+      .updated(AiExecutionClass.SimpleWork, _gemma(AiExecutionClass.SimpleWork, "gemma:2b"))
+      .updated(AiExecutionClass.StandardWork, _gemma(AiExecutionClass.StandardWork, "gemma3:12b"))
+  )
+
+  private def _work_executions(
+    executions: Map[AiExecutionClass, AiRuntimeExecution]
+  ): Map[AiExecutionClass, AiRuntimeExecution] =
+    executions.filter { case (executionclass, _) =>
+      executionclass == AiExecutionClass.SimpleWork || executionclass == AiExecutionClass.StandardWork
+    }
+
   private val _gemma_first_strategies = Map(
     "command-execution" -> AiOperationalStrategyKind.Structured,
     "software-implementation" -> AiOperationalStrategyKind.Structured,
-    "structured-extraction" -> AiOperationalStrategyKind.ValidatorRepair,
-    "web-analysis" -> AiOperationalStrategyKind.ToolGrounded,
-    "software-analysis" -> AiOperationalStrategyKind.CandidateRanking,
-    "software-design" -> AiOperationalStrategyKind.Decomposed
+    "structured-extraction" -> AiOperationalStrategyKind.ValidatorRepair
   )
 
   val gemmaFirstGemini: AiRuntimeProfile = AiRuntimeProfile(
     name = "gemma-first-gemini",
-    executions = gemma.executions,
-    fallbackExecutions = gemini.executions,
+    executions = gemmaWorkGemini.executions,
+    fallbackExecutions = _work_executions(gemini.executions),
     operationalStrategies = _gemma_first_strategies,
     maxRepairs = 1,
     maxProviderAttempts = 2
@@ -195,8 +217,8 @@ private[textus] object AiRuntimeProfileCatalog {
 
   val gemmaFirstCodexCli: AiRuntimeProfile = AiRuntimeProfile(
     name = "gemma-first-codex-cli",
-    executions = gemma.executions,
-    fallbackExecutions = codexCli.executions,
+    executions = gemmaWorkCodexCli.executions,
+    fallbackExecutions = _work_executions(codexCli.executions),
     operationalStrategies = _gemma_first_strategies,
     maxRepairs = 1,
     maxProviderAttempts = 2
@@ -207,8 +229,9 @@ private[textus] object AiRuntimeProfileCatalog {
     Map(
       AiExecutionClass.SimpleWork -> _claude_code(AiExecutionClass.SimpleWork, "sonnet"),
       AiExecutionClass.StandardWork -> _claude_code(AiExecutionClass.StandardWork, "sonnet"),
-      AiExecutionClass.StandardConsideration -> _claude_code(AiExecutionClass.StandardConsideration, "opus"),
-      AiExecutionClass.DeepConsideration -> _claude_code(AiExecutionClass.DeepConsideration, "opus")
+      AiExecutionClass.SimpleThinking -> _claude_code(AiExecutionClass.SimpleThinking, "sonnet"),
+      AiExecutionClass.AdvancedThinking -> _claude_code(AiExecutionClass.AdvancedThinking, "opus"),
+      AiExecutionClass.DeepThinking -> _claude_code(AiExecutionClass.DeepThinking, "opus")
     )
   )
 
@@ -217,8 +240,9 @@ private[textus] object AiRuntimeProfileCatalog {
     Map(
       AiExecutionClass.SimpleWork -> _anthropic(AiExecutionClass.SimpleWork, "claude-sonnet-4-20250514"),
       AiExecutionClass.StandardWork -> _anthropic(AiExecutionClass.StandardWork, "claude-sonnet-4-20250514"),
-      AiExecutionClass.StandardConsideration -> _anthropic(AiExecutionClass.StandardConsideration, "claude-sonnet-4-20250514"),
-      AiExecutionClass.DeepConsideration -> _anthropic(AiExecutionClass.DeepConsideration, "claude-opus-4-20250514")
+      AiExecutionClass.SimpleThinking -> _anthropic(AiExecutionClass.SimpleThinking, "claude-sonnet-4-20250514"),
+      AiExecutionClass.AdvancedThinking -> _anthropic(AiExecutionClass.AdvancedThinking, "claude-sonnet-4-20250514"),
+      AiExecutionClass.DeepThinking -> _anthropic(AiExecutionClass.DeepThinking, "claude-opus-4-20250514")
     )
   )
 
@@ -228,6 +252,8 @@ private[textus] object AiRuntimeProfileCatalog {
     gemma,
     gemmaSimpleGemini,
     gemmaSimpleCodexCli,
+    gemmaWorkGemini,
+    gemmaWorkCodexCli,
     gemmaFirstGemini,
     gemmaFirstCodexCli,
     claudeCode,
@@ -237,11 +263,11 @@ private[textus] object AiRuntimeProfileCatalog {
   }.toMap
 
   private val _standard_purposes: Map[String, AiExecutionClass] = Map(
-    "software-analysis" -> AiExecutionClass.StandardConsideration,
-    "software-design" -> AiExecutionClass.DeepConsideration,
+    "software-analysis" -> AiExecutionClass.AdvancedThinking,
+    "software-design" -> AiExecutionClass.SimpleThinking,
     "software-implementation" -> AiExecutionClass.StandardWork,
     "command-execution" -> AiExecutionClass.SimpleWork,
-    "web-analysis" -> AiExecutionClass.DeepConsideration,
+    "web-analysis" -> AiExecutionClass.DeepThinking,
     "structured-extraction" -> AiExecutionClass.StandardWork
   )
 

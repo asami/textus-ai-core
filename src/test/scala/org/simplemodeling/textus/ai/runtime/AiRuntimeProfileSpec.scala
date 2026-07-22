@@ -22,7 +22,7 @@ final class AiRuntimeProfileSpec
       val profiles = _profiles(
         "textus.ai.profile" -> "gemini",
         "textus.ai.execution-classes.standard-work.mcp-server-set" -> "research.tools",
-        "textus.ai.execution-classes.deep-consideration.mcp-server-set" -> "research.tools"
+        "textus.ai.execution-classes.deep-thinking.mcp-server-set" -> "research.tools"
       )
 
       When("the runtime resolves its MCP client requirements")
@@ -107,8 +107,9 @@ final class AiRuntimeProfileSpec
       val resolutions = Vector(
         "command-execution" -> AiExecutionClass.SimpleWork,
         "software-implementation" -> AiExecutionClass.StandardWork,
-        "software-analysis" -> AiExecutionClass.StandardConsideration,
-        "software-design" -> AiExecutionClass.DeepConsideration
+        "software-analysis" -> AiExecutionClass.AdvancedThinking,
+        "software-design" -> AiExecutionClass.SimpleThinking,
+        "deep-thinking" -> AiExecutionClass.DeepThinking
       ).map { case (purpose, executionclass) =>
         profiles.resolveRequired(AiRunnerRequirement(purpose = Some(purpose))) -> executionclass
       }
@@ -118,10 +119,108 @@ final class AiRuntimeProfileSpec
         resolution.toOption.flatMap(_.runtimeProfile) shouldBe Some("codex-cli")
         resolution.toOption.flatMap(_.requirement.executionClass) shouldBe Some(executionclass)
         resolution.toOption.flatMap(_.requirement.provider) shouldBe Some("codex")
-        resolution.toOption.flatMap(_.requirement.model) shouldBe Some("gpt-5.6-sol")
       }
-      resolutions.head._1.toOption.flatMap(_.reasoningLevel) shouldBe Some("minimal")
+      resolutions.head._1.toOption.flatMap(_.requirement.model) shouldBe Some("gpt-5.6-luna")
+      resolutions.head._1.toOption.flatMap(_.reasoningLevel) shouldBe Some("medium")
+      resolutions(1)._1.toOption.flatMap(_.requirement.model) shouldBe Some("gpt-5.6-terra")
+      resolutions(1)._1.toOption.flatMap(_.reasoningLevel) shouldBe Some("high")
+      resolutions(2)._1.toOption.flatMap(_.requirement.model) shouldBe Some("gpt-5.6-sol")
+      resolutions(2)._1.toOption.flatMap(_.reasoningLevel) shouldBe Some("high")
+      resolutions(3)._1.toOption.flatMap(_.requirement.model) shouldBe Some("gpt-5.6-sol")
+      resolutions(3)._1.toOption.flatMap(_.reasoningLevel) shouldBe Some("medium")
+      resolutions.last._1.toOption.flatMap(_.requirement.model) shouldBe Some("gpt-5.6-sol")
       resolutions.last._1.toOption.flatMap(_.reasoningLevel) shouldBe Some("xhigh")
+    }
+
+    "resolve every shipped profile through the five-class selection matrix" in {
+      Given("the built-in runtime profiles and their five execution classes")
+      val expected = Map(
+        "codex-cli" -> Vector(
+          ("codex", "gpt-5.6-luna", Some("medium")),
+          ("codex", "gpt-5.6-terra", Some("high")),
+          ("codex", "gpt-5.6-sol", Some("medium")),
+          ("codex", "gpt-5.6-sol", Some("high")),
+          ("codex", "gpt-5.6-sol", Some("xhigh"))
+        ),
+        "gemini" -> Vector(
+          ("google", "gemini-2.5-flash", None),
+          ("google", "gemini-2.5-flash", None),
+          ("google", "gemini-2.5-pro", None),
+          ("google", "gemini-2.5-pro", None),
+          ("google", "gemini-2.5-pro", None)
+        ),
+        "gemma" -> Vector.fill(5)(("gemma", "gemma:2b", None)),
+        "gemma-simple-gemini" -> Vector(
+          ("gemma", "gemma:2b", None),
+          ("google", "gemini-2.5-flash", None),
+          ("google", "gemini-2.5-pro", None),
+          ("google", "gemini-2.5-pro", None),
+          ("google", "gemini-2.5-pro", None)
+        ),
+        "gemma-simple-codex-cli" -> Vector(
+          ("gemma", "gemma:2b", None),
+          ("codex", "gpt-5.6-terra", Some("high")),
+          ("codex", "gpt-5.6-sol", Some("medium")),
+          ("codex", "gpt-5.6-sol", Some("high")),
+          ("codex", "gpt-5.6-sol", Some("xhigh"))
+        ),
+        "gemma-work-gemini" -> Vector(
+          ("gemma", "gemma:2b", None),
+          ("gemma", "gemma3:12b", None),
+          ("google", "gemini-2.5-pro", None),
+          ("google", "gemini-2.5-pro", None),
+          ("google", "gemini-2.5-pro", None)
+        ),
+        "gemma-work-codex-cli" -> Vector(
+          ("gemma", "gemma:2b", None),
+          ("gemma", "gemma3:12b", None),
+          ("codex", "gpt-5.6-sol", Some("medium")),
+          ("codex", "gpt-5.6-sol", Some("high")),
+          ("codex", "gpt-5.6-sol", Some("xhigh"))
+        ),
+        "gemma-first-gemini" -> Vector(
+          ("gemma", "gemma:2b", None),
+          ("gemma", "gemma3:12b", None),
+          ("google", "gemini-2.5-pro", None),
+          ("google", "gemini-2.5-pro", None),
+          ("google", "gemini-2.5-pro", None)
+        ),
+        "gemma-first-codex-cli" -> Vector(
+          ("gemma", "gemma:2b", None),
+          ("gemma", "gemma3:12b", None),
+          ("codex", "gpt-5.6-sol", Some("medium")),
+          ("codex", "gpt-5.6-sol", Some("high")),
+          ("codex", "gpt-5.6-sol", Some("xhigh"))
+        ),
+        "claude-code" -> Vector(
+          ("claude", "sonnet", None),
+          ("claude", "sonnet", None),
+          ("claude", "sonnet", None),
+          ("claude", "opus", None),
+          ("claude", "opus", None)
+        ),
+        "anthropic" -> Vector(
+          ("anthropic", "claude-sonnet-4-20250514", None),
+          ("anthropic", "claude-sonnet-4-20250514", None),
+          ("anthropic", "claude-sonnet-4-20250514", None),
+          ("anthropic", "claude-sonnet-4-20250514", None),
+          ("anthropic", "claude-opus-4-20250514", None)
+        )
+      )
+
+      When("each profile resolves every direct execution-class purpose")
+
+      Then("every selection remains provider-owned and matches its approved matrix")
+      expected.foreach { case (profile, matrix) =>
+        val profiles = _profiles("textus.ai.profile" -> profile)
+        AiExecutionClass.values.toVector.zip(matrix).foreach { case (executionclass, (provider, model, reasoning)) =>
+          val resolution = profiles.resolveRequired(AiRunnerRequirement(purpose = Some(executionclass.id)))
+          resolution.toOption.flatMap(_.runtimeProfile) shouldBe Some(profile)
+          resolution.toOption.flatMap(_.requirement.provider) shouldBe Some(provider)
+          resolution.toOption.flatMap(_.requirement.model) shouldBe Some(model)
+          resolution.toOption.flatMap(_.reasoningLevel) shouldBe reasoning
+        }
+      }
     }
 
     "resolve profile-name purposes and merged execution-class overrides through Gemini" in {
@@ -181,7 +280,36 @@ final class AiRuntimeProfileSpec
       geministandard.toOption.flatMap(_.requirement.model) shouldBe Some("gemini-2.5-flash")
       codexsimple.toOption.flatMap(_.requirement.provider) shouldBe Some("gemma")
       codexstandard.toOption.flatMap(_.requirement.provider) shouldBe Some("codex")
-      codexstandard.toOption.flatMap(_.reasoningLevel) shouldBe Some("low")
+      codexstandard.toOption.flatMap(_.reasoningLevel) shouldBe Some("high")
+    }
+
+    "resolve built-in Gemma-work composite profiles" in {
+      Given("the supplied Gemma-work composite profiles")
+      val gemini = _profiles("textus.ai.profile" -> "gemma-work-gemini")
+      val codex = _profiles("textus.ai.profile" -> "gemma-work-codex-cli")
+
+      When("simple work, standard work, and thinking purposes are resolved")
+      val geminisimple = gemini.resolveRequired(AiRunnerRequirement(purpose = Some("simple-work")))
+      val geminiwork = gemini.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+      val geminithinking = gemini.resolveRequired(AiRunnerRequirement(purpose = Some("simple-thinking")))
+      val geminiadvancedthinking = gemini.resolveRequired(AiRunnerRequirement(purpose = Some("advanced-thinking")))
+      val codexwork = codex.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+      val codexthinking = codex.resolveRequired(AiRunnerRequirement(purpose = Some("simple-thinking")))
+      val codexadvancedthinking = codex.resolveRequired(AiRunnerRequirement(purpose = Some("advanced-thinking")))
+
+      Then("Gemma handles bounded work while every thinking class is directly commercial")
+      geminisimple.toOption.flatMap(_.requirement.provider) shouldBe Some("gemma")
+      geminisimple.toOption.flatMap(_.requirement.model) shouldBe Some("gemma:2b")
+      geminiwork.toOption.flatMap(_.requirement.provider) shouldBe Some("gemma")
+      geminiwork.toOption.flatMap(_.requirement.model) shouldBe Some("gemma3:12b")
+      geminithinking.toOption.flatMap(_.requirement.provider) shouldBe Some("google")
+      geminithinking.toOption.flatMap(_.requirement.model) shouldBe Some("gemini-2.5-pro")
+      geminiadvancedthinking.toOption.flatMap(_.requirement.provider) shouldBe Some("google")
+      codexwork.toOption.flatMap(_.requirement.provider) shouldBe Some("gemma")
+      codexwork.toOption.flatMap(_.requirement.model) shouldBe Some("gemma3:12b")
+      codexthinking.toOption.flatMap(_.requirement.provider) shouldBe Some("codex")
+      codexthinking.toOption.flatMap(_.reasoningLevel) shouldBe Some("medium")
+      codexadvancedthinking.toOption.flatMap(_.reasoningLevel) shouldBe Some("high")
     }
 
     "resolve the built-in Claude Code profile through fixed model aliases" in {
@@ -190,7 +318,7 @@ final class AiRuntimeProfileSpec
 
       When("standard and deep purposes are resolved")
       val standard = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
-      val deep = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("deep-consideration")))
+      val deep = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("deep-thinking")))
 
       Then("the profile owns local Claude Code selection and model aliases")
       standard.toOption.flatMap(_.requirement.provider) shouldBe Some("claude")
@@ -204,19 +332,19 @@ final class AiRuntimeProfileSpec
       val api = _profiles("textus.ai.profile" -> "anthropic")
       val cli = _profiles("textus.ai.profile" -> "claude-code")
 
-      When("the same deep-consideration purpose is resolved")
-      val apiResolution = api.resolveRequired(AiRunnerRequirement(purpose = Some("deep-consideration")))
-      val cliResolution = cli.resolveRequired(AiRunnerRequirement(purpose = Some("deep-consideration")))
+      When("the same deep-thinking purpose is resolved")
+      val apiresolution = api.resolveRequired(AiRunnerRequirement(purpose = Some("deep-thinking")))
+      val cliresolution = cli.resolveRequired(AiRunnerRequirement(purpose = Some("deep-thinking")))
 
       Then("the API uses remote Anthropic while the CLI uses a managed local Claude Code runtime")
-      apiResolution.toOption.flatMap(_.requirement.provider) shouldBe Some("anthropic")
-      apiResolution.toOption.flatMap(_.requirement.mode) shouldBe Some("remote")
-      apiResolution.toOption.flatMap(_.requirement.engine) shouldBe Some("claude")
-      apiResolution.toOption.flatMap(_.requirement.model) shouldBe Some("claude-opus-4-20250514")
-      cliResolution.toOption.flatMap(_.requirement.provider) shouldBe Some("claude")
-      cliResolution.toOption.flatMap(_.requirement.mode) shouldBe Some("local")
-      cliResolution.toOption.flatMap(_.requirement.engine) shouldBe Some("claude-code")
-      cliResolution.toOption.flatMap(_.requirement.model) shouldBe Some("opus")
+      apiresolution.toOption.flatMap(_.requirement.provider) shouldBe Some("anthropic")
+      apiresolution.toOption.flatMap(_.requirement.mode) shouldBe Some("remote")
+      apiresolution.toOption.flatMap(_.requirement.engine) shouldBe Some("claude")
+      apiresolution.toOption.flatMap(_.requirement.model) shouldBe Some("claude-opus-4-20250514")
+      cliresolution.toOption.flatMap(_.requirement.provider) shouldBe Some("claude")
+      cliresolution.toOption.flatMap(_.requirement.mode) shouldBe Some("local")
+      cliresolution.toOption.flatMap(_.requirement.engine) shouldBe Some("claude-code")
+      cliresolution.toOption.flatMap(_.requirement.model) shouldBe Some("opus")
     }
 
     "map an application purpose to its standard purpose without granting caller selection" in {

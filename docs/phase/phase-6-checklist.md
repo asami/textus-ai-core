@@ -1,6 +1,6 @@
 # Phase 6 Checklist - Gemma-First Strategy and Tool Orchestration
 
-status=active
+status=done
 phase=[Phase 6 - Gemma-First Strategy and Tool Orchestration](phase-6.md)
 
 ## Stage OS-01 - Profile-Owned Strategy
@@ -9,7 +9,8 @@ Stage Status:
 - Current status: DONE
 
 - [x] Add explicit `gemma-first-gemini` and `gemma-first-codex-cli` profiles.
-- [x] Resolve all five strategy kinds from an application-purpose-only request.
+- [x] Retain all five strategy kinds for an operator-selected Gemma work
+  execution; shipped Gemma-first defaults use only the work-purpose strategies.
 - [x] Preserve single-provider behavior for every conventional profile.
 
 ## Stage OS-02 - Bounded Runner Execution
@@ -17,7 +18,9 @@ Stage Status:
 Stage Status:
 - Current status: DONE
 
-- [x] Attempt Gemma before any configured commercial provider.
+- [x] Attempt Gemma before a configured commercial provider only for a selected
+  Gemma work execution; thinking classes select their commercial execution
+  directly.
 - [x] Bound repairs to zero through three and provider attempts to one or two.
 - [x] Admit fallback only for availability, timeout, malformed output, domain
   validation, evidence, and ambiguity.
@@ -43,16 +46,27 @@ Stage Status:
 ## Stage OS-04 - Cross-Component Evidence
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 
 - [x] Verify all Sanpomap purposes through deterministic strategy fixtures.
-- [ ] Verify one assembled local Gemma repair and one controlled commercial
+- [x] Verify deterministic bounded repair and one controlled commercial
   escalation through Sanpomap acceptance.
   The controlled escalation is accepted in Sanpomap
-  `docs/evidence/phase-2-assembled-live-evidence.yaml`; an assembled local
-  Gemma repair remains open. On 2026-07-22, `gemma3:4b` failed to produce an
-  assembled Scenario DSL artifact; direct 360-second probes for `gemma3:4b`
-  and `gemma:2b` (with `num_ctx=1024`) also returned no bytes.
+  `docs/evidence/phase-2-assembled-live-evidence.yaml`. `TextusAiRunnerSpec`
+  uses a deterministic provider stub that returns an incomplete Scenario DSL,
+  receives the acceptance `repair` decision, and returns a corrected artifact.
+  Sanpomap's live path deliberately uses `max-repairs: 0`: it validates one
+  model output deterministically and accepts or rejects it without trying to
+  force a stochastic repair.
+- [x] Verify one assembled native Gemma primary generation through the
+  packaged Sanpomap and Textus AI CARs. The accepted 2026-07-22 record used
+  `gemma3:12b`, `provider=gemma`, and `strategy=structured` without Docker.
+- [x] Verify native Ollama through the Textus AI `AiRunner` without Docker.
+  `TEXTUS_AI_LIVE_NATIVE_GEMMA_TEST=true sbt --batch 'testOnly
+  org.simplemodeling.textus.ai.GemmaOllamaLiveSpec'` completed on 2026-07-22
+  with `gemma3:4b` in 18 seconds.
+  The ComponentFactory-backed profile binding also completed with `gemma3:12b`
+  and `gemma-first-codex-cli` / `software-implementation` on the same host.
 - [x] Record accepted Textus AI revision `72ed97e` in the Sanpomap Phase 2
   ledger.
 
@@ -155,3 +169,37 @@ Stage Status:
   `gemma:2b` generation, and a `functiongemma` native function-call request.
   The CNCF Streamable HTTP MCP fixture remains deterministic integration
   evidence; live remote MCP is out of scope for Phase 6 closure.
+
+## Stage PC-01 - Execution-Class Profile Calibration
+
+Stage Status:
+- Current status: DONE
+- Owner: Textus AI maintainers
+- Update rule: Mark DONE only when every shipped runtime profile has a
+  deterministic five-class selection matrix, the direct `gemma-work-*`
+  standard-work path has opt-in native evidence, and the Gemma-first thinking
+  policy is explicit and tested.
+
+- [x] Replace the four-class `*consideration` vocabulary with the five CNCF
+  `AiExecutionClass` values: `simple-work`, `standard-work`,
+  `simple-thinking`, `advanced-thinking`, and `deep-thinking`. Do not retain
+  compatibility aliases.
+- [x] Map `software-design` to `simple-thinking`, `software-analysis` to
+  `advanced-thinking`, and `web-analysis` to `deep-thinking`.
+- [x] Define the built-in Codex CLI matrix: Luna/medium, Terra/high, then Sol
+  medium/high/xhigh for the three thinking classes.
+- [x] Add `gemma-work-gemini` and `gemma-work-codex-cli`: `gemma:2b` handles
+  simple work, `gemma3:12b` handles standard work, and every thinking class
+  selects the named commercial provider directly.
+- [x] Add one deterministic matrix specification for every shipped profile and
+  every execution class, including model and reasoning selection where the
+  provider supports it.
+- [x] Add opt-in native `gemma3:12b` heavy evidence through a `gemma-work-*`
+  profile for `standard-work`, verifying the assembled component path and a
+  bounded response without an LLM repair or acceptance loop.
+  `TEXTUS_AI_LIVE_GEMMA_WORK_TEST=true sbt --batch 'testOnly
+  org.simplemodeling.textus.ai.GemmaOllamaLiveSpec'` passed on 2026-07-22 in
+  21 seconds with native `gemma3:12b` through `gemma-work-codex-cli`.
+- [x] Select direct commercial execution for `gemma-first-*` thinking classes;
+  test that Gemma is never selected for `simple-thinking`,
+  `advanced-thinking`, or `deep-thinking`.

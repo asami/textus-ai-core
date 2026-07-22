@@ -405,24 +405,26 @@ final class TextusAiRunnerSpec
     }
 
     "execute a tool-grounded strategy through the runtime-owned MCP path" in {
-      Given("a Gemma-first web-analysis purpose with one operator-owned MCP server set")
+      Given("a Gemma-first standard-work purpose with one operator-owned MCP server set")
       given ExecutionContext = ExecutionContext.create()
       var selectedserverset: Option[String] = None
       var selectedoperationtoolset: Option[String] = None
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemma-first-gemini"),
-          "textus.ai.execution-classes.deep-consideration.model" ->
+          "textus.ai.execution-classes.standard-work.model" ->
             ConfigurationValue.StringValue("functiongemma"),
-          "textus.ai.execution-classes.deep-consideration.mcp-server-set" ->
-            ConfigurationValue.StringValue("research-tools")
+          "textus.ai.execution-classes.standard-work.mcp-server-set" ->
+            ConfigurationValue.StringValue("research-tools"),
+          "textus.ai.application-purposes.sanpomap-location-investigation.operational-strategy" ->
+            ConfigurationValue.StringValue("tool-grounded")
         )),
         ConfigurationTrace.empty
       )
       val provider = new TextusAiRunnerProvider(
         _component(),
         SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
-        _profiles(configuration, "sanpomap-location-investigation" -> "web-analysis")
+        _profiles(configuration, "sanpomap-location-investigation" -> "software-implementation")
       ) {
         override private[runtime] def generateWithToolsC(
           selection: SpiSelection,
@@ -580,8 +582,8 @@ final class TextusAiRunnerSpec
       detail should not include "requires an assembled subsystem"
     }
 
-    "apply bounded Gemma repair before accepting a candidate" in {
-      Given("a Gemma-first profile and a deterministic application acceptance gate")
+    "repair a deterministic malformed scenario candidate through the bounded runner path" in {
+      Given("a Gemma-first profile, a malformed provider candidate, and an acceptance gate")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
@@ -603,7 +605,7 @@ final class TextusAiRunnerSpec
           repairCount: Int,
           maxRepairs: Int
         ): Consequence[AiCandidateAcceptance] =
-          if (repairCount == 0)
+          if (!candidate.contains("route_intent:"))
             Consequence.success(AiCandidateAcceptance(
               "repair",
               "diagnostics: [{code: missing-route}]",
@@ -618,16 +620,18 @@ final class TextusAiRunnerSpec
         SpiSelection()
       ).toOption.value
 
-      When("the first Gemma candidate requires one repair")
+      When("the provider returns an incomplete Scenario DSL before a repaired one")
       val response = runner.generate(AiGenerateRequest(
-        "repair-once",
+        "scenario-repair-once",
         requirement = AiRunnerRequirement(
           purpose = Some("sanpomap-scenario-generation"),
           purposeRequired = true
         )
       )).toOption.value
 
-      Then("the repaired Gemma candidate is final without commercial escalation")
+      Then("the runner sends a repair request and accepts only the corrected Scenario DSL")
+      response.text should include ("route_intent:")
+      response.text should include ("from: start")
       response.metadata(AiExecutionFacts.REPAIR_COUNT) shouldBe "1"
       response.metadata(AiExecutionFacts.FINAL_PROVIDER) shouldBe "gemma"
       response.metadata(AiExecutionFacts.ATTEMPT_LINEAGE) shouldBe
@@ -1014,7 +1018,7 @@ final class TextusAiRunnerSpec
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
-          "textus.ai.execution-classes.deep-consideration.max-output-tokens" -> ConfigurationValue.StringValue("240"),
+          "textus.ai.execution-classes.deep-thinking.max-output-tokens" -> ConfigurationValue.StringValue("240"),
           "textus.ai.application-purposes.invalid-web-analysis.max-output-tokens" -> ConfigurationValue.StringValue("241")
         )),
         ConfigurationTrace.empty
@@ -1031,12 +1035,12 @@ final class TextusAiRunnerSpec
     }
 
     "apply runtime-owned tool defaults through a standard purpose" in {
-      Given("a Gemini deep-consideration override that enables logical Web tools")
+      Given("a Gemini deep-thinking override that enables logical Web tools")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
-          "textus.ai.execution-classes.deep-consideration.tools" -> ConfigurationValue.StringValue("url_context,web_search")
+          "textus.ai.execution-classes.deep-thinking.tools" -> ConfigurationValue.StringValue("url_context,web_search")
         )),
         ConfigurationTrace.empty
       )
@@ -1061,10 +1065,10 @@ final class TextusAiRunnerSpec
       Given("a bounded Web-analysis execution class and application-purpose mappings")
       val values = Map(
         "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
-        "textus.ai.execution-classes.deep-consideration.max-input-tokens" -> ConfigurationValue.StringValue("100"),
-        "textus.ai.execution-classes.deep-consideration.max-output-tokens" -> ConfigurationValue.StringValue("480"),
-        "textus.ai.execution-classes.deep-consideration.timeout-seconds" -> ConfigurationValue.StringValue("90"),
-        "textus.ai.execution-classes.deep-consideration.max-concurrent" -> ConfigurationValue.StringValue("2"),
+        "textus.ai.execution-classes.deep-thinking.max-input-tokens" -> ConfigurationValue.StringValue("100"),
+        "textus.ai.execution-classes.deep-thinking.max-output-tokens" -> ConfigurationValue.StringValue("480"),
+        "textus.ai.execution-classes.deep-thinking.timeout-seconds" -> ConfigurationValue.StringValue("90"),
+        "textus.ai.execution-classes.deep-thinking.max-concurrent" -> ConfigurationValue.StringValue("2"),
         "textus.ai.application-purposes.artscene-exhibition-web-research.max-input-tokens" -> ConfigurationValue.StringValue("50"),
         "textus.ai.application-purposes.artscene-exhibition-web-research.max-output-tokens" -> ConfigurationValue.StringValue("240"),
         "textus.ai.application-purposes.artscene-exhibition-web-research.timeout-seconds" -> ConfigurationValue.StringValue("45"),
@@ -1973,6 +1977,7 @@ final class TextusAiRunnerSpec
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.gemma.endpoint" -> ConfigurationValue.StringValue("http://127.0.0.1:11434"),
+          "textus.ai.gemma.runtime" -> ConfigurationValue.StringValue("native"),
           "textus.ai.gemma.fallback-endpoint" -> ConfigurationValue.StringValue("http://localhost:11435"),
           "textus.ai.gemma.provider" -> ConfigurationValue.StringValue("gemma"),
           "textus.ai.gemma.mode" -> ConfigurationValue.StringValue("local"),
@@ -2197,6 +2202,35 @@ final class TextusAiRunnerSpec
         Consequence.success(GenerateResponse("  ", Some(name)))
       else if (req.prompt == "empty-twice-then-strict-record")
         Consequence.success(GenerateResponse(_record_json("Retried Twice Record Exhibition"), Some(name)))
+      else if (req.prompt == "scenario-repair-once")
+        Consequence.success(GenerateResponse(
+          """title: Incomplete scenario
+            |language: en
+            |stops:
+            |  - id: start
+            |    name: Start
+            |    type: station
+            |""".stripMargin,
+          Some(name)
+        ))
+      else if (req.prompt.startsWith("Repair the candidate") && req.prompt.contains("scenario-repair-once"))
+        Consequence.success(GenerateResponse(
+          """title: Repaired scenario
+            |language: en
+            |stops:
+            |  - id: start
+            |    name: Start
+            |    type: station
+            |  - id: goal
+            |    name: Goal
+            |    type: station
+            |route_intent:
+            |  - from: start
+            |    to: goal
+            |    mode: walk
+            |""".stripMargin,
+          Some(name)
+        ))
       else if (req.prompt == "missing-record-field" || req.prompt == "missing-record-field-no-retry")
         Consequence.success(GenerateResponse("""{"exhibitions":[{"title":"Missing Date","confidence":51}]}""", Some(name)))
       else

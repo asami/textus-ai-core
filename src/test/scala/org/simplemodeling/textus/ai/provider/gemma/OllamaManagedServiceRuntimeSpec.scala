@@ -1,6 +1,7 @@
 package org.simplemodeling.textus.ai.provider.gemma
 
 import cats.~>
+import java.net.URI
 import java.nio.charset.StandardCharsets
 
 import org.goldenport.Consequence
@@ -14,6 +15,7 @@ import org.goldenport.configuration.{Configuration, ConfigurationTrace, Resolved
 import org.goldenport.datatype.{ContentType, MimeType}
 import org.goldenport.http.{HttpResponse, HttpStatus}
 import org.goldenport.protocol.Property
+import org.simplemodeling.textus.ai.ai.GenerateRequest
 import org.scalatest.GivenWhenThen
 import org.scalatest.OptionValues
 import org.scalatest.matchers.should.Matchers
@@ -24,7 +26,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * managed service-container runtime.
  *
  * @since   Jul. 20, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class OllamaManagedServiceRuntimeSpec
@@ -86,6 +88,26 @@ final class OllamaManagedServiceRuntimeSpec
       result.isFaillure shouldBe true
       driver.calls shouldBe empty
       subsystem.shutdown()
+    }
+
+    "fail before HTTP execution when Gemma runtime configuration is invalid" in {
+      Given("a Gemma service with a configuration conflict")
+      val driver = new _RecordingHttpDriver
+      given context: ExecutionContext = _context(driver)
+      val service = new GemmaOllamaGenerateService(
+        GemmaRuntimeConfig(
+          endpoint = URI.create("http://127.0.0.1:11434"),
+          configurationError = Some("Gemma managed-docker runtime may not set textus.ai.gemma.endpoint")
+        ),
+        summon[ExecutionContext]
+      )
+
+      When("a generation request is submitted")
+      val result = service.generate(GenerateRequest("Reply with ready."))
+
+      Then("the request returns a structured failure without contacting Ollama")
+      result.isFaillure shouldBe true
+      driver.calls shouldBe empty
     }
   }
 

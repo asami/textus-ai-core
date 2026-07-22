@@ -24,7 +24,7 @@ import org.simplemodeling.textus.ai.provider.codex.{CodexCliVersion, CodexConfig
  * profile proves adapter intent without a Codex binary, account, or network.
  *
  * @since   Jul. 17, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -56,7 +56,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       disabledconfig shouldBe None
       enabledconfig.map(_.schemaMaximumBytes) shouldBe Some(4096L)
       enabledconfig.map(_.executable) shouldBe Some("/runtime/codex-cli")
-      enabledconfig.flatMap(_.executionProfiles.get("runtime-standard-consideration")).map(_.reasoningLevel) shouldBe Some(Some(CodexReasoningLevel.High))
+      enabledconfig.flatMap(_.executionProfiles.get("runtime-simple-thinking")).map(_.reasoningLevel) shouldBe Some(Some(CodexReasoningLevel.Medium))
       unsafeconfig shouldBe None
       legacy.schemaMaximumBytes shouldBe 4096L
       CodexCliVersion.minimumForModel("gpt-5.6-sol") shouldBe Some(CodexCliVersion.Gpt56Minimum)
@@ -223,10 +223,10 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
     "run a Web-research purpose through its fixed admitted Codex profile" in {
       val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
         "textus.ai.profile" -> "codex-cli",
-        "textus.ai.execution-classes.deep-consideration.reasoning-level" -> "high",
-        "textus.ai.execution-classes.deep-consideration.tools" -> "url_context,web_search"
+        "textus.ai.execution-classes.deep-thinking.reasoning-level" -> "high",
+        "textus.ai.execution-classes.deep-thinking.tools" -> "url_context,web_search"
       ))))
-      val profile = _codex_executions(profiles)("runtime-deep-consideration")
+      val profile = _codex_executions(profiles)("runtime-deep-thinking")
       val fixture = _fixture(
         _result("{\"title\":\"Web result\"}"),
         profile.webCapability,
@@ -296,7 +296,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       given ExecutionContext = _context(fixture)
       val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
         "textus.ai.profile" -> "codex-cli",
-        "textus.ai.execution-classes.deep-consideration.tools" -> "url_context"
+        "textus.ai.execution-classes.deep-thinking.tools" -> "url_context"
       ))))
 
       When("the Web-research purpose is required")
@@ -322,7 +322,7 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       given ExecutionContext = _context(fixture)
       val profiles = AiProfileConfig.fromConfiguration(Some(_configuration(Map(
         "textus.ai.profile" -> "codex-cli",
-        "textus.ai.execution-classes.deep-consideration.reasoning-level" -> "experimental"
+        "textus.ai.execution-classes.deep-thinking.reasoning-level" -> "experimental"
       ))))
 
       When("the caller requires that purpose")

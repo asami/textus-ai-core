@@ -54,24 +54,26 @@ used.
 
 | Purpose | Execution class | Intent |
 | --- | --- | --- |
-| `software-analysis` | `standard-consideration` | Understand existing software and assess change impact. |
-| `software-design` | `deep-consideration` | Develop boundaries, alternatives, and implementation direction. |
+| `software-analysis` | `advanced-thinking` | Read broad context, infer behavior and constraints, and assess change impact. |
+| `software-design` | `simple-thinking` | Develop boundaries, alternatives, and implementation direction. |
 | `software-implementation` | `standard-work` | Produce bounded code and test changes. |
 | `command-execution` | `simple-work` | Carry out a bounded command-oriented task. |
-| `web-analysis` | `deep-consideration` | Consider a supplied problem using Web information. |
+| `web-analysis` | `deep-thinking` | Consider a supplied problem using Web information. |
 | `structured-extraction` | `standard-work` | Extract or normalize supplied material into a structured result. |
 
 The execution-class identifiers `simple-work`, `standard-work`,
-`standard-consideration`, and `deep-consideration` are explicit built-in direct
+`simple-thinking`, `advanced-thinking`, and `deep-thinking` are explicit built-in direct
 purpose aliases. They are catalog entries in Textus AI, not an implicit fallback
 for an unregistered application name.
 
 ## Runtime Profiles
 
 Textus AI ships `gemma`, `codex-cli`, `claude-code`, `anthropic`, and `gemini` runtime profiles, plus
-`gemma-simple-gemini` and `gemma-simple-codex-cli`. The composite profiles bind
-only `simple-work` to local Gemma and keep their remaining class defaults from
-Gemini or Codex CLI. `textus.ai.profile` selects the profile; approved
+`gemma-simple-gemini`, `gemma-simple-codex-cli`, `gemma-work-gemini`, and
+`gemma-work-codex-cli`. The `gemma-simple-*` profiles bind only `simple-work`
+to local Gemma. The `gemma-work-*` profiles bind `simple-work` to local
+`gemma:2b`, `standard-work` to local `gemma3:12b`, and select their named
+commercial provider directly for every thinking class. `textus.ai.profile` selects the profile; approved
 `textus.ai.execution-classes.<class>.*` settings tune that profile after
 ordinary CNCF configuration merge. Provider binding and tools remain
 runtime-owned.
@@ -80,6 +82,19 @@ runtime-owned.
 selects the separate local managed-process provider. They are intentionally not
 aliases: the former uses an operator-supplied API key, while the latter uses the
 installed CLI's own authentication and execution boundary.
+
+### Codex CLI Defaults
+
+The built-in `codex-cli` profile selects a fixed model and reasoning effort for
+each execution class. Callers cannot override either value.
+
+| Execution class | Model | Reasoning effort |
+| --- | --- | --- |
+| `simple-work` | `gpt-5.6-luna` | `medium` |
+| `standard-work` | `gpt-5.6-terra` | `high` |
+| `simple-thinking` | `gpt-5.6-sol` | `medium` |
+| `advanced-thinking` | `gpt-5.6-sol` | `high` |
+| `deep-thinking` | `gpt-5.6-sol` | `xhigh` |
 
 ## Registration Defaults And Tuning
 

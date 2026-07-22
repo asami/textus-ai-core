@@ -27,9 +27,11 @@ textus:
 ```
 
 The supplied profiles are `gemma`, `gemini`, `codex-cli`, `claude-code`,
-`anthropic`, `gemma-simple-gemini`, and `gemma-simple-codex-cli`. The composite
-profiles use local Gemma only for `simple-work`; all other execution classes use
-their named Gemini or Codex CLI defaults. Standard purposes are `software-analysis`,
+`anthropic`, `gemma-simple-gemini`, `gemma-simple-codex-cli`,
+`gemma-work-gemini`, and `gemma-work-codex-cli`. The `gemma-simple-*` composite
+profiles use local Gemma only for `simple-work`. The `gemma-work-*` profiles use
+local `gemma:2b` for `simple-work`, local `gemma3:12b` for `standard-work`, and
+their named commercial provider for every thinking class. Standard purposes are `software-analysis`,
 `software-design`, `software-implementation`, `command-execution`,
 `web-analysis`, and `structured-extraction`.
 
@@ -85,12 +87,12 @@ in project configuration. The current provider adapters are Gemma/Ollama,
 OpenAI, Google Gemini, Anthropic Messages API, and opt-in Codex and Claude Code
 CLI runtimes.
 
-Gemma/Ollama uses the local `gemma` profile. With no endpoint configuration,
-Textus AI declares its owned Ollama service through CNCF's managed
-service-container runtime and installs the models required by that profile after
-the service becomes ready. Container lifecycle is not exposed as component
-Process Execution capabilities; callers cannot provide Docker arguments,
-images, or models.
+Gemma/Ollama uses the local `gemma` profile. Its default runtime is native
+Ollama at `http://127.0.0.1:11434`; Textus AI never starts Docker as a fallback.
+If native Ollama is absent or unavailable, the generation or chat request fails
+with the normal structured provider failure. Container lifecycle is not exposed
+as component Process Execution capabilities; callers cannot provide Docker
+arguments, images, or models.
 
 ```yaml
 textus:
@@ -109,8 +111,7 @@ textus:
         model: gemma3:4b
 ```
 
-Use an explicit endpoint for an externally managed Ollama service. It takes
-precedence over managed-service resolution:
+Use an explicit endpoint when native Ollama listens on another host or port:
 
 ```yaml
 textus:
@@ -120,11 +121,23 @@ textus:
       endpoint: http://ollama.example:11434
 ```
 
+Docker is an explicit, operator-only alternative. Set
+`textus.ai.gemma.runtime: managed-docker` and do not set `gemma.endpoint`:
+
+```yaml
+textus:
+  ai:
+    profile: gemma
+    gemma:
+      runtime: managed-docker
+```
+
 The managed-service defaults are image `ollama/ollama:latest`, named volume
 `textus-ai-ollama`, and logical Ollama API port `11434`. Operators may override
 the image, volume, readiness timeout, and model-install timeout with
 `textus.ai.gemma.service.image`, `volume-name`, `startup-timeout-seconds`, and
-`model-install-timeout-seconds`. The runtime owns provider-specific container
+`model-install-timeout-seconds`. `managed-docker` and `gemma.endpoint` together
+are an invalid configuration. The runtime owns provider-specific container
 identity and host-port selection. CNCF Phase 44 verifies the generic Docker
 transport; the Textus AI consumer path is verified separately as an opt-in
 heavy test rather than an ordinary executable specification.
@@ -142,6 +155,20 @@ TEXTUS_AI_LIVE_GEMMA_TEST=true \
 The test starts the runtime-owned service, installs the profile model, and
 submits one generation request. It stops the service on completion but retains
 the managed model volume for reuse.
+
+Run the native path independently when Ollama is already running locally. This
+does not start or contact Docker and uses `gemma3:4b` for the live check:
+
+```bash
+TEXTUS_AI_LIVE_NATIVE_GEMMA_TEST=true \
+  sbt --batch 'testOnly org.simplemodeling.textus.ai.GemmaOllamaLiveSpec'
+```
+
+Set `TEXTUS_AI_NATIVE_GEMMA_MODEL` to validate another locally installed model
+without changing the runtime profile, for example `gemma3:12b`.
+`TEXTUS_AI_NATIVE_GEMMA_PROFILE` and `TEXTUS_AI_NATIVE_GEMMA_PURPOSE` may
+select an installed runtime profile and its standard purpose for a live profile
+binding check.
 
 Codex CLI requires explicit enablement and an absolute executable path:
 

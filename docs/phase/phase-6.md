@@ -1,8 +1,10 @@
 # Phase 6 - Gemma-First Strategy and Tool Orchestration
 
-status=active
+status=done
 planned_at=2026-07-21
 started_at=2026-07-21
+completed_at=2026-07-22
+reopened_at=2026-07-22
 strategy=[Textus AI Development Strategy](../strategy/textus-ai-development-strategy.md)
 
 ## Purpose
@@ -44,6 +46,8 @@ set before it invokes a provider.
   class, selected server-set identity, tool names, bounded result summaries,
   and structured failures without exposing endpoint, credential, prompt,
   argument, or raw tool-result payloads.
+- Calibrate the five-class work/thinking profile matrix and retain a tested
+  local-Gemma boundary for bounded work only.
 
 ## Boundaries
 
@@ -66,15 +70,16 @@ set before it invokes a provider.
 
 | ID | Stage | Outcome | Status |
 | --- | --- | --- | --- |
-| OS-01 | Profile-owned strategy | Explicit Gemma-first profiles resolve all five strategy kinds and bounded attempts. | done |
-| OS-02 | Runner execution | Generate executes Gemma first, bounded repair, and classified commercial escalation. | done |
+| OS-01 | Profile-owned strategy | Explicit Gemma-first profiles retain bounded strategy support for their Gemma work classes. | done |
+| OS-02 | Runner execution | Generate executes Gemma-first work strategies with bounded repair and classified commercial escalation. | done |
 | OS-03 | Acceptance integration | A configured application Operation controls candidate decisions without provider selection. | done |
-| OS-04 | Cross-component evidence | Sanpomap deterministic and guarded production evidence verifies the strategy end to end. | active |
+| OS-04 | Cross-component evidence | Sanpomap deterministic and guarded production evidence verifies the strategy end to end. | done |
 | MO-01 | Profile-owned MCP policy | Runtime profiles and execution classes resolve an admitted MCP server set without caller configuration. | done |
 | MO-02 | Common orchestration | One bounded, redacted tool catalog and function-call execution path bridges Textus AI to the CNCF MCP client Port. | done |
 | MO-03 | Local provider binding | Gemma/Ollama emits and receives tool calls through `/api/chat`; no-tool generation remains unchanged. | done |
 | MO-04 | Commercial provider bindings | OpenAI Responses, Gemini Interactions, and Anthropic Messages execute the same admitted MCP tools through their native function continuation formats. | done |
 | MO-05 | Executable evidence and closure | Deterministic fake MCP/provider evidence verifies policy, safety, and provider regressions; live tests remain opt-in heavy tests. | done |
+| PC-01 | Execution-class profile calibration | Five-class provider defaults, direct Gemma-work evidence, and Gemma-first thinking policy are explicit and tested. | done |
 
 ## Implementation Status
 
@@ -84,17 +89,30 @@ a classified Gemma availability failure, one Codex CLI fallback, and the
 Sanpomap acceptance operation before final Scenario DSL adoption. The accepted
 record is maintained by Sanpomap at
 `docs/evidence/phase-2-assembled-live-evidence.yaml`. The accepted Textus AI
-release revision is `72ed97e`. OS-04 remains active until an assembled local
-Gemma repair is recorded.
+release revision is `72ed97e`. OS-04 is complete: bounded repair is verified
+by deterministic provider fixtures, while packaged native Gemma evidence
+verifies the real provider/runtime boundary.
 
-On 2026-07-22, the bounded local acceptance path was remeasured with the
-generic `gemma3:4b` model. The assembled Sanpomap command completed without a
-Scenario DSL artifact. Direct, isolated Ollama probes for both `gemma3:4b` and
-the shipped `gemma:2b` model, including a `num_ctx=1024` `gemma:2b` probe,
-returned no bytes within the same 360-second envelope. This is not evidence of
-a provider-contract regression: the Textus AI live heavy test continues to
-verify bounded no-tool generation and native function calling. It is evidence
-that this host has not yet demonstrated a local-Gemma Scenario DSL repair.
+The Gemma runtime policy now uses native Ollama at `127.0.0.1:11434` by
+default. The managed Docker path remains an explicit
+`textus.ai.gemma.runtime: managed-docker` operator selection and is never an
+availability fallback. The prior Docker probes remain diagnostic evidence only.
+The opt-in native live specification completed on 2026-07-22 with `gemma3:4b`
+in 18 seconds, proving the Textus AI `AiRunner` path without Docker bootstrap.
+It is basic provider evidence. The packaged Sanpomap acceptance invocation was
+also repeated against native `gemma3:4b`; its prior short-output result remains
+diagnostic evidence, not a repair requirement.
+
+On 2026-07-22, the packaged Sanpomap command produced an accepted Scenario DSL
+through the native `gemma3:12b` profile at a 512-token primary-only envelope.
+The execution record reports `provider=gemma`, `engine=ollama`,
+`model=gemma3:12b`, `strategy=structured`, 173 output tokens, and no repair.
+This proves the assembled CNCF runtime, Textus AI CAR, and Sanpomap command can
+use native Ollama without Docker. The Sanpomap live acceptance configuration uses one-shot generation followed by
+deterministic parser/domain validation with `max-repairs: 0`; it accepts or
+rejects the artifact rather than using a stochastic live repair loop. The
+generic bounded repair mechanism remains covered by deterministic provider
+fixtures in `TextusAiRunnerSpec`.
 
 MO-01 is complete. An execution class may select one logical
 `operation-tool-set`, `mcp-server-set`, or both; the selected runtime profile
@@ -148,12 +166,58 @@ payload in phase documentation. CNCF Streamable HTTP MCP transport remains
 covered by the deterministic assembled MCP fixture; live remote-MCP execution
 is intentionally not a Phase 6 closure requirement.
 
+## Phase 6 Extension - Execution-Class Profile Calibration
+
+Phase 6 was reopened on 2026-07-22 to make the work/thinking execution-class
+matrix operational rather than merely terminological. The completed base work
+uses five public CNCF classes with no `*consideration` compatibility aliases:
+`simple-work`, `standard-work`, `simple-thinking`, `advanced-thinking`, and
+`deep-thinking`. The standard-purpose catalog maps software design to
+`simple-thinking`, software analysis to `advanced-thinking`, and Web analysis
+to `deep-thinking`.
+
+The built-in Codex CLI profile now selects Luna/medium for `simple-work`,
+Terra/high for `standard-work`, and Sol at medium/high/xhigh for the three
+thinking classes. The `gemma-work-gemini` and `gemma-work-codex-cli` profiles
+select native `gemma:2b` for simple work and native `gemma3:12b` for standard
+work, then select their named commercial provider directly for every thinking
+class.
+
+The reopened work completed the matrix and operational-boundary evidence before
+Phase 6 was reclosed:
+
+1. Add a deterministic matrix specification for every shipped profile across
+   all five classes, including the provider/model/reasoning selection and the
+   invariant that `gemma-work-*` never selects Gemma for a thinking class.
+2. Add an opt-in heavy specification that invokes native `gemma3:12b` through
+   a `gemma-work-*` profile for `standard-work`; it must verify the assembled
+   component path, selected local model, and one bounded response. It must not
+   make a stochastic repair or acceptance loop a live-test condition.
+3. Decide and encode the Gemma-first policy for thinking classes. It must
+   either permit a bounded Gemma-first attempt with an explicit rationale, or
+   select the commercial execution directly. The selected behavior requires a
+   deterministic strategy specification and a documented cost/admission rule.
+
+All three items are complete. `AiRuntimeProfileSpec` resolves every shipped
+profile against every class. `gemma-work-*` keeps Gemma for the two work
+classes only, while `gemma-first-*` selects the named commercial provider
+directly for all thinking classes; its bounded strategy and commercial fallback
+remain available only on a Gemma-primary work execution. On 2026-07-22, the
+opt-in `TEXTUS_AI_LIVE_GEMMA_WORK_TEST=true sbt --batch 'testOnly
+org.simplemodeling.textus.ai.GemmaOllamaLiveSpec'` specification selected
+native `gemma3:12b` for `software-implementation` through
+`gemma-work-codex-cli` and completed one bounded component-facing generation
+in 21 seconds. The evidence deliberately does not require a stochastic repair
+or application acceptance loop.
+
 ## Dependencies
 
 - CNCF Phase 45 must define and implement the MCP client Port, transport
   ExtensionPoint, server-set admission, bounded calls, and redacted diagnostics.
 - Phase 5 is complete and supplies the profile-owned local service provisioning
   contract used by this phase.
+- The Phase 6 extension depends on the CNCF five-class `AiExecutionClass`
+  contract published by `goldenport-cncf` `0.5.1-SNAPSHOT` or a successor.
 
 ## References
 

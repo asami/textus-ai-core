@@ -14,7 +14,7 @@ import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, HttpSupport}
 
 /*
  * @since   Jul. 20, 2026
- * @version Jul. 20, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class OllamaManagedServiceConfig(
@@ -61,7 +61,9 @@ object OllamaManagedServiceConfig {
     configuration: Option[ResolvedConfiguration],
     profiles: AiProfileConfig
   ): Option[OllamaManagedServiceConfig] =
-    if (configuration.flatMap(GemmaConfig.endpointFromConfiguration).nonEmpty)
+    if (!configuration.flatMap(GemmaConfig.fromConfiguration).exists { value =>
+      value.runtime == "managed-docker" && value.configurationError.isEmpty
+    })
       None
     else
       profiles.gemmaModelsC.toOption.flatten.map { models =>

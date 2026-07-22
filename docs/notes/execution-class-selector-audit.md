@@ -40,8 +40,9 @@ The standard initial execution-class values are:
 
 - `simple-work`
 - `standard-work`
-- `standard-consideration`
-- `deep-consideration`
+- `simple-thinking`
+- `advanced-thinking`
+- `deep-thinking`
 
 The standard semantic purposes remain independent values, including
 `software-analysis`, `software-design`, `software-implementation`,
@@ -49,8 +50,8 @@ The standard semantic purposes remain independent values, including
 
 ## Follow-up
 
-EC-01 must define the CNCF source-compatible migration, `AiExecutionClass`
-value semantics, `execution-class` configuration placement and precedence,
-purpose-plus-class conflict behavior, metadata publication, and deterministic
-specifications. No API, configuration, or runtime implementation change is
-made by this audit.
+The current contract defines the five `AiExecutionClass` values,
+`execution-class` configuration placement and precedence, purpose-plus-class
+conflict behavior, metadata publication, and deterministic specifications.
+The migration intentionally provides no API, configuration, or runtime
+compatibility aliases for the replaced `*consideration` identifiers.

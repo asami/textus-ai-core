@@ -19,16 +19,18 @@ final case class GemmaRuntimeConfig(
   mode: String = "local",
   engine: String = "ollama",
   endpoint: URI,
+  runtime: String = "native",
   fallbackEndpoint: Option[URI] = None,
   model: String = "gemma:2b",
   timeoutSeconds: Long = 30L,
   maxConcurrency: Int = 2,
-  bootstrap: Option[OllamaManagedServiceBootstrap] = None
+  bootstrap: Option[OllamaManagedServiceBootstrap] = None,
+  configurationError: Option[String] = None
 )
 
 object GemmaConfig:
   val default: GemmaRuntimeConfig = GemmaRuntimeConfig(
-    endpoint = URI.create("http://ollama:11434")
+    endpoint = URI.create("http://127.0.0.1:11434")
   )
 
   def fromConfiguration(
@@ -39,29 +41,36 @@ object GemmaConfig:
     val provider = _config_string(configuration, "provider")
     val mode = _config_string(configuration, "mode")
     val engine = _config_string(configuration, "engine")
+    val runtime = _config_string(configuration, "runtime")
     val model = _config_string(configuration, "model")
     val timeout = _config_string(configuration, "timeout-seconds", "timeoutSeconds")
     val concurrency = _config_string(configuration, "max-concurrency", "maxConcurrency")
     Option.when(
-      Vector(endpoint, fallbackendpoint, provider, mode, engine, model, timeout, concurrency).exists(_.nonEmpty)
+      Vector(endpoint, fallbackendpoint, provider, mode, engine, runtime, model, timeout, concurrency).exists(_.nonEmpty)
     )(
-      GemmaRuntimeConfig(
-        provider = provider.getOrElse("gemma"),
-        mode = mode.getOrElse("local"),
-        engine = engine.getOrElse("ollama"),
-        endpoint = URI.create(endpoint.getOrElse("http://ollama:11434")),
-        fallbackEndpoint = fallbackendpoint.map(URI.create),
-        model = model.getOrElse("gemma:2b"),
-        timeoutSeconds = timeout.flatMap(_.toLongOption).getOrElse(30L),
-        maxConcurrency = concurrency.flatMap(_.toIntOption).getOrElse(2)
-      )
+      {
+        val selectedruntime = runtime.map(_.toLowerCase(java.util.Locale.ROOT)).getOrElse("native")
+        val configurationerror = selectedruntime match {
+          case "native" => None
+          case "managed-docker" if endpoint.isEmpty => None
+          case "managed-docker" => Some("Gemma managed-docker runtime may not set textus.ai.gemma.endpoint")
+          case other => Some(s"Unsupported Gemma runtime: $other")
+        }
+        GemmaRuntimeConfig(
+          provider = provider.getOrElse("gemma"),
+          mode = mode.getOrElse("local"),
+          engine = engine.getOrElse("ollama"),
+          endpoint = URI.create(endpoint.getOrElse("http://127.0.0.1:11434")),
+          runtime = selectedruntime,
+          fallbackEndpoint = fallbackendpoint.map(URI.create),
+          model = model.getOrElse("gemma:2b"),
+          timeoutSeconds = timeout.flatMap(_.toLongOption).getOrElse(30L),
+          maxConcurrency = concurrency.flatMap(_.toIntOption).getOrElse(2),
+          configurationError = configurationerror
+        )
+      }
     )
   }
-
-  def endpointFromConfiguration(
-    configuration: ResolvedConfiguration
-  ): Option[String] =
-    _config_string(configuration, "endpoint")
 
   private def _config_string(
     configuration: ResolvedConfiguration,
@@ -81,6 +90,9 @@ object GemmaConfig:
       .find(_.nonEmpty)
 
 private object GemmaSupport:
+  def requireValidConfiguration(config: GemmaRuntimeConfig): Consequence[Unit] =
+    config.configurationError.map(Consequence.configurationInvalid).getOrElse(Consequence.unit)
+
   def endpoints(
     config: GemmaRuntimeConfig,
     primary: URI
@@ -107,31 +119,22 @@ private object GemmaSupport:
       ))
       .getOrElse(Json.obj())
 
-final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: ExecutionContext) extends GenerateService:
-  override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
-    given ExecutionContext = context
-    for
-      _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
-      endpoint <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.success(config.endpoint))
-      model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
-      body = Json.obj(
-        "model" -> Json.fromString(model),
-        "prompt" -> Json.fromString(req.prompt),
-        "stream" -> Json.False
-      ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
-      response <- _request_with_fallback(GemmaSupport.endpoints(config, endpoint), "/api/generate", body, req.properties) { json =>
-        json.hcursor.get[String]("response") match
-          case Right(text) => Consequence.success(GenerateResponse(text, Some(model), GemmaSupport.responseMetadata(json)))
-          case Left(e) => Consequence.valueInvalid(e.getMessage)
-      }
-    yield response
+  def request[A](
+    config: GemmaRuntimeConfig,
+    primary: URI,
+    path: String,
+    body: Json,
+    properties: Vector[Property]
+  )(extract: Json => Consequence[A])(using context: ExecutionContext): Consequence[A] =
+    _request(config, GemmaSupport.endpoints(config, primary), path, body, properties)(extract)
 
-  private def _request_with_fallback[A](
+  private def _request[A](
+    config: GemmaRuntimeConfig,
     endpoints: Vector[URI],
     path: String,
     body: Json,
     properties: Vector[Property]
-  )(extract: Json => Consequence[A])(using ExecutionContext): Consequence[A] =
+  )(extract: Json => Consequence[A])(using context: ExecutionContext): Consequence[A] =
     endpoints.toList match
       case Nil => Consequence.serviceUnavailable("Gemma/Ollama request failed")
       case x :: xs =>
@@ -142,14 +145,35 @@ final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: Exec
           AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, properties),
           properties = properties
         ).flatMap(extract) recoverWith {
-          case conclusion if xs.nonEmpty => _request_with_fallback(xs.toVector, path, body, properties)(extract)
+          case conclusion if xs.nonEmpty => _request(config, xs.toVector, path, body, properties)(extract)
           case conclusion => Consequence.Failure(conclusion)
         }
+
+final class GemmaOllamaGenerateService(config: GemmaRuntimeConfig, context: ExecutionContext) extends GenerateService:
+  override def generate(req: GenerateRequest): Consequence[GenerateResponse] =
+    given ExecutionContext = context
+    for
+      _ <- GemmaSupport.requireValidConfiguration(config)
+      _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
+      endpoint <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.success(config.endpoint))
+      model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
+      body = Json.obj(
+        "model" -> Json.fromString(model),
+        "prompt" -> Json.fromString(req.prompt),
+        "stream" -> Json.False
+      ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
+      response <- GemmaSupport.request(config, endpoint, "/api/generate", body, req.properties) { json =>
+        json.hcursor.get[String]("response") match
+          case Right(text) => Consequence.success(GenerateResponse(text, Some(model), GemmaSupport.responseMetadata(json)))
+          case Left(e) => Consequence.valueInvalid(e.getMessage)
+      }
+    yield response
 
 final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: ExecutionContext) extends ToolCallingChatService:
   override def chat(req: ChatRequest): Consequence[ChatResponse] =
     given ExecutionContext = context
     for
+      _ <- GemmaSupport.requireValidConfiguration(config)
       _ <- AiRequestProperties.requireNoUnsupportedTools("gemma", req.properties)
       endpoint <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.success(config.endpoint))
       model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
@@ -165,7 +189,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
         ),
         "stream" -> Json.False
       ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
-      response <- _request_with_fallback(GemmaSupport.endpoints(config, endpoint), "/api/chat", body, req.properties) { json =>
+      response <- GemmaSupport.request(config, endpoint, "/api/chat", body, req.properties) { json =>
         json.hcursor.downField("message").get[String]("content") match
           case Right(text) => Consequence.success(ChatResponse(Message(MessageRole.Assistant, text), Some(model), GemmaSupport.responseMetadata(json)))
           case Left(e) => Consequence.valueInvalid(e.getMessage)
@@ -175,6 +199,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
   override def chatWithTools(req: ToolChatRequest): Consequence[ToolChatResponse] =
     given ExecutionContext = context
     for
+      _ <- GemmaSupport.requireValidConfiguration(config)
       endpoint <- config.bootstrap.map(_.ensureC).getOrElse(Consequence.success(config.endpoint))
       model = AiRequestProperties.effectiveModel(config.model, req.properties, "gemma")
       body = Json.obj(
@@ -189,7 +214,7 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
         }),
         "stream" -> Json.False
       ).deepMerge(GemmaSupport.generationOptions(req.maxTokens))
-      response <- _request_with_fallback(GemmaSupport.endpoints(config, endpoint), "/api/chat", body, req.properties) { json =>
+      response <- GemmaSupport.request(config, endpoint, "/api/chat", body, req.properties) { json =>
         val cursor = json.hcursor.downField("message")
         for
           content <- cursor.get[String]("content").orElse(Right("")) match
@@ -232,26 +257,6 @@ final class GemmaOllamaChatService(config: GemmaRuntimeConfig, context: Executio
     })).map(value => base.deepMerge(Json.obj("tool_calls" -> value))).getOrElse(base)
     message.toolName.map(value => withcalls.deepMerge(Json.obj("tool_name" -> Json.fromString(value)))).getOrElse(withcalls)
   }
-
-  private def _request_with_fallback[A](
-    endpoints: Vector[URI],
-    path: String,
-    body: Json,
-    properties: Vector[Property]
-  )(extract: Json => Consequence[A])(using ExecutionContext): Consequence[A] =
-    endpoints.toList match
-      case Nil => Consequence.serviceUnavailable("Gemma/Ollama request failed")
-      case x :: xs =>
-        HttpSupport.post(
-          x,
-          path,
-          body,
-          AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, properties),
-          properties = properties
-        ).flatMap(extract) recoverWith {
-          case conclusion if xs.nonEmpty => _request_with_fallback(xs.toVector, path, body, properties)(extract)
-          case conclusion => Consequence.Failure(conclusion)
-        }
 
 final class GemmaGenerateExtensionPoint(config: GemmaRuntimeConfig)
   extends ExtensionPoint[GenerateService]:

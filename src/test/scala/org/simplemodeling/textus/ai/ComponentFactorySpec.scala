@@ -25,7 +25,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 16, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ComponentFactorySpec
@@ -239,12 +239,13 @@ final class ComponentFactorySpec
       component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
     }
 
-    "declare a managed Ollama service without installing Docker lifecycle process capabilities" in {
-      Given("a Gemma runtime profile with managed image and volume overrides")
+    "declare a managed Ollama service only when the Docker runtime is explicit" in {
+      Given("a Gemma runtime profile with an explicit managed Docker selection")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.gemma.runtime" -> ConfigurationValue.StringValue("managed-docker"),
           "textus.ai.gemma.service.image" -> ConfigurationValue.StringValue("example/ollama:test"),
           "textus.ai.gemma.service.volume-name" -> ConfigurationValue.StringValue("textus-ai-test-models")
         )),
@@ -280,13 +281,12 @@ final class ComponentFactorySpec
       component.scopeContext.processExecutionDriverOption shouldBe empty
     }
 
-    "skip managed Ollama lifecycle for an explicit external endpoint" in {
-      Given("a Gemma profile configured to use an externally managed Ollama endpoint")
+    "use native Ollama by default without declaring a managed Docker service" in {
+      Given("a Gemma profile with no Docker or endpoint configuration")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
-          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
-          "textus.ai.gemma.endpoint" -> ConfigurationValue.StringValue("http://ollama.example:11434")
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma")
         )),
         ConfigurationTrace.empty
       )
@@ -306,10 +306,40 @@ final class ComponentFactorySpec
 
       When("the managed service configuration and component scope are inspected")
       val managed = ComponentFactory.ollamaManagedServiceConfig(Some(configuration), profiles)
+      val gemma = ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem))
 
-      Then("the external endpoint takes precedence and managed lifecycle is not installed")
+      Then("native Ollama remains selected and managed lifecycle is not installed")
       managed shouldBe empty
+      gemma.runtime shouldBe "native"
+      gemma.endpoint.toString shouldBe "http://127.0.0.1:11434"
       component.scopeContext.processExecutionDriverOption shouldBe empty
+    }
+
+    "reject a managed Docker selection that also supplies a native endpoint" in {
+      Given("a conflicting managed Docker and native endpoint configuration")
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.gemma.endpoint" -> ConfigurationValue.StringValue("http://127.0.0.1:11434"),
+          "textus.ai.gemma.runtime" -> ConfigurationValue.StringValue("managed-docker")
+        )),
+        ConfigurationTrace.empty
+      )
+      val profiles = AiProfileConfig.fromConfiguration(Some(configuration), AiApplicationPurposeCatalog.empty)
+      val subsystem = new Subsystem(
+        name = "textus-ai-native-ollama-fallback-config-spec",
+        configuration = configuration
+      )
+
+      When("the Gemma runtime configuration is resolved")
+      val managed = ComponentFactory.ollamaManagedServiceConfig(Some(configuration), profiles)
+      val gemma = ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem))
+
+      Then("the managed runtime records a structural configuration error and never bootstraps Docker")
+      managed shouldBe empty
+      gemma.bootstrap shouldBe empty
+      gemma.configurationError shouldBe Some("Gemma managed-docker runtime may not set textus.ai.gemma.endpoint")
+      subsystem.shutdown()
     }
 
     "combine managed Gemma lifecycle with the Codex CLI one-shot capability" in {
@@ -385,15 +415,15 @@ final class ComponentFactorySpec
     }
 
     "compile a Codex runtime-profile binding into fixed model, reasoning, and Web arguments" in {
-      Given("an enabled Codex runtime and a deep-consideration Web binding")
+      Given("an enabled Codex runtime and a deep-thinking Web binding")
       given ExecutionContext = ExecutionContext.create()
       val configuration = ResolvedConfiguration(
         Configuration(Map(
           "textus.ai.profile" -> ConfigurationValue.StringValue("codex-cli"),
           "textus.ai.codex.enabled" -> ConfigurationValue.StringValue("true"),
           "textus.ai.codex.executable" -> ConfigurationValue.StringValue("/runtime/codex-cli"),
-          "textus.ai.execution-classes.deep-consideration.reasoning-level" -> ConfigurationValue.StringValue("high"),
-          "textus.ai.execution-classes.deep-consideration.tools" -> ConfigurationValue.StringValue("url_context,web_search")
+          "textus.ai.execution-classes.deep-thinking.reasoning-level" -> ConfigurationValue.StringValue("high"),
+          "textus.ai.execution-classes.deep-thinking.tools" -> ConfigurationValue.StringValue("url_context,web_search")
         )),
         ConfigurationTrace.empty
       )
@@ -407,8 +437,8 @@ final class ComponentFactorySpec
         None,
         summon[ExecutionContext].observability
       ))
-      val capability = ProcessCapabilityId.parseC("codex-cli-profile-runtime-deep-consideration-web").toOption.get
-      val versioncapability = ProcessCapabilityId.parseC("codex-cli-profile-runtime-deep-consideration-version").toOption.get
+      val capability = ProcessCapabilityId.parseC("codex-cli-profile-runtime-deep-thinking-web").toOption.get
+      val versioncapability = ProcessCapabilityId.parseC("codex-cli-profile-runtime-deep-thinking-version").toOption.get
 
       When("the runtime-profile Web capability is resolved")
       val result = ProcessExecutionAdmission.resolveC(
@@ -530,10 +560,10 @@ final class ComponentFactorySpec
 
       Then("the fixed command, empty environment, and bounded schema file are executed in provider-owned managed WorkAreas")
       withClue(generated.toString) {
-        generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5.6-sol --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+      generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
       }
-      recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --model gpt-5.6-sol --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
-      chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5.6-sol --config model_reasoning_effort=low --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+      recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
+      chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
       callerscope.processExecutionDriverOption shouldBe None
       callerscope.processExecutionAdmissionOption shouldBe None
     }

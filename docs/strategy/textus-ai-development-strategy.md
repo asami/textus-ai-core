@@ -179,9 +179,9 @@ Scope:
   standard execution class;
 - bind the selected profile to the existing CNCF HTTP adapter without exposing
   provider or model selection to application callers;
-- resolve the profile-owned Ollama service through CNCF's managed
-  service-container runtime and install required models after readiness, unless
-  an endpoint is configured;
+- use native Ollama as the default profile-owned runtime and resolve a CNCF
+  managed service-container only when the operator explicitly selects
+  `managed-docker`;
 - document external endpoint precedence, managed-service configuration, and
   execution-class model tuning; and
 - add deterministic profile, process-binding, and provider evidence, with an
@@ -272,13 +272,13 @@ completed on 2026-07-18.
 - Phase 5: complete on 2026-07-21. The opt-in `GemmaOllamaLiveSpec` verified
   the managed Docker service, retained model volume, `gemma:2b` generation,
   and stop-on-shutdown cleanup through the component-facing runner path.
-- Phase 6: active from 2026-07-21. MO-01 through MO-03 resolve profile-owned
-  Operation/MCP inputs, perform bounded common orchestration, and bind
-  Gemma/Ollama tool calls. Anthropic Messages now implements native
-  `tool_use` / `tool_result` continuation as the first MO-04 provider binding.
-- Latest phase closure: `docs/phase/phase-5-closure.md`
-- Current next task: implement OpenAI Responses and Google Gemini native
-  function continuations for Phase 6 MO-04, then complete MO-05 evidence.
+- Phase 6: reclosed on 2026-07-22 after PC-01 completed the five-class
+  runtime-profile matrix, direct `gemma-work-*` `gemma3:12b` evidence, and the
+  Gemma-first thinking policy. Sanpomap deliberately uses one-shot generation
+  and deterministic validation; live repair is not a production or closure
+  requirement.
+- Current phase ledger: `docs/phase/phase-6.md`
+- Current next task: define the next runtime capability phase.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

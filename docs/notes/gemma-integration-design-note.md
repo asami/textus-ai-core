@@ -14,7 +14,7 @@ The design establishes:
 
 - a stable, provider-independent Textus AI runtime interface
 - Gemma as the primary lightweight local LLM backend
-- Docker-based deployment using Ollama as the default runtime
+- Native Ollama as the default runtime, with explicit Docker deployment
 - configuration-based switching to remote LLM services
 
 The key architectural decision is:
@@ -131,8 +131,12 @@ Instead, it MUST delegate inference to:
 Supersession note (Jul. 20, 2026): the initial fixed Docker Process Execution
 binding is replaced by CNCF Phase 44's managed service-container runtime.
 
-Selecting `textus.ai.profile: gemma` with no explicit Gemma endpoint creates a
-typed runtime-owned Ollama service definition. Textus AI supplies only logical
+Supersession note (Jul. 22, 2026): native Ollama at `127.0.0.1:11434` is now the
+default runtime. Docker is not a fallback. A deployment selects the following
+runtime-owned Docker path only with `textus.ai.gemma.runtime: managed-docker`.
+
+Selecting `textus.ai.profile: gemma` with that explicit runtime creates a typed
+runtime-owned Ollama service definition. Textus AI supplies only logical
 owner/service identity, image, named persistence, container port, readiness,
 reuse, and cleanup policy. CNCF resolves the endpoint through the Subsystem
 lifecycle runtime; Textus AI receives neither Docker commands nor provider
@@ -149,17 +153,19 @@ using Ollama's `/api/pull` HTTP API through the CNCF internal HTTP DSL. It is
 not part of generic service lifecycle and does not require a provider instance
 id.
 
-An explicit `textus.ai.gemma.endpoint` selects an externally managed Ollama
-service and disables Textus AI managed-service resolution.
+An explicit `textus.ai.gemma.endpoint` selects a native or externally managed
+Ollama service and disables Textus AI managed-service resolution. It may not be
+combined with `managed-docker`.
 
 ---
 
 ## Runtime Endpoint
 
-The runtime-owned local endpoint is returned by CNCF after readiness and may
-use a deployment-selected host port. Textus AI appends `/api/generate`,
-`/api/chat`, or `/api/pull` only after that resolution. An explicit endpoint
-configuration takes precedence and bypasses managed lifecycle entirely.
+The native default endpoint is `http://127.0.0.1:11434`. Textus AI appends
+`/api/generate` or `/api/chat` to that endpoint and reports an unavailable
+native runtime as a provider failure. When `managed-docker` is selected, CNCF
+returns the runtime-owned local endpoint after readiness; Textus AI then also
+uses `/api/pull` to install the selected profile model.
 
 ---
 
@@ -205,15 +211,17 @@ textus:
   ai:
     profile: gemma
     gemma:
+      runtime: managed-docker
       service:
         image: ollama/ollama:latest
         volume-name: textus-ai-ollama
 
 ## Mode Semantics
 
-An explicit `textus.ai.gemma.endpoint` controls endpoint selection behavior.
-When it is absent, the selected Gemma profile owns one local service definition
-resolved by CNCF's managed service-container runtime.
+`textus.ai.gemma.runtime` controls runtime selection. It defaults to `native`.
+Only `managed-docker` makes the selected Gemma profile own one local service
+definition resolved by CNCF's managed service-container runtime. An explicit
+endpoint is for the native runtime and is invalid with `managed-docker`.
 
 ---
 
@@ -222,7 +230,8 @@ resolved by CNCF's managed service-container runtime.
 - provider selects model family
 - mode selects local or remote execution
 - local.engine selects runtime (default: ollama)
-- endpoint defines an externally managed connection target
+- runtime selects native Ollama or explicit managed Docker
+- endpoint defines a native or externally managed connection target
 - model is selected by the runtime profile and execution class
 
 ---

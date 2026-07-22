@@ -23,7 +23,7 @@ import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConc
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -194,6 +194,8 @@ object ComponentFactory:
     (ollamaManagedServiceConfig(configuration, profiles), subsystem) match {
       case (Some(config), Some(owner)) =>
         gemma.copy(bootstrap = Some(new OllamaManagedServiceBootstrap(owner, config)))
+      case (Some(_), None) =>
+        gemma.copy(configurationError = Some("Gemma managed-docker runtime requires a Component Subsystem"))
       case _ => gemma
     }
   }

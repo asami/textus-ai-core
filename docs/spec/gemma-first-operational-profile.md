@@ -1,7 +1,7 @@
 # Gemma-First Operational Profile
 
 status=active
-version=2026-07-21
+version=2026-07-22
 
 ## Contract
 
@@ -19,9 +19,11 @@ algorithm used inside the selected runtime profile:
 - `validator-repair`
 - `candidate-ranking`
 
-The shipped `gemma-first-gemini` and `gemma-first-codex-cli` profiles map all
-standard purposes to one of these strategies. Existing profiles retain their
-single-provider, no-fallback behavior.
+The shipped `gemma-first-gemini` and `gemma-first-codex-cli` profiles use these
+strategies only for standard purposes in a Gemma work class. The three thinking
+classes select their named commercial execution directly and do not acquire a
+Gemma attempt or an operational strategy implicitly. Existing profiles retain
+their single-provider, no-fallback behavior.
 
 ## Operator Configuration
 
@@ -42,9 +44,6 @@ textus:
         strategy-max-provider-attempts: 2
         rate-schedule: gemma-standard
         fallback-rate-schedule: codex-standard
-      deep-consideration:
-        strategy-max-repairs: 1
-        strategy-max-provider-attempts: 2
         operation-tool-set: builtin-tools
         mcp-server-set: admitted-research
 ```
@@ -61,7 +60,9 @@ Gemma rate schedule is never reused for a commercial fallback.
 
 ## Attempt Rules
 
-- Gemma is always the first provider for a Gemma-first profile.
+- Gemma is the first provider only when the selected execution class is
+  `simple-work` or `standard-work`. `simple-thinking`, `advanced-thinking`,
+  and `deep-thinking` select the named commercial execution directly.
 - Repairs are limited to `0..3`; provider attempts are limited to `1..2`.
 - A configured acceptance Operation returns `accept`, `repair`, `confirm`,
   `escalate`, or `reject` through a Record response.
@@ -70,6 +71,9 @@ Gemma rate schedule is never reused for a commercial fallback.
   output, domain validation, evidence, or ambiguity outcomes.
 - Authorization, capability, admission, credential-policy, input, and resource
   limit outcomes are terminal and never select the commercial execution.
+- A custom operational strategy requires a Gemma-primary work execution. A
+  thinking-class strategy configuration is rejected rather than causing an
+  implicit Gemma attempt.
 - A conventional profile never gains fallback behavior implicitly.
 
 ## Evidence
