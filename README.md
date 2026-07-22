@@ -26,6 +26,13 @@ textus:
         max-output-tokens: 240
 ```
 
+`textus.ai.profile` is a declared CNCF component initialization parameter.
+The runtime resolves its fixed configuration precedence before Textus AI
+constructs provider bindings, Ports, or process policy. A named component
+instance may therefore select its own profile through assembly component
+configuration; an invalid higher-precedence value fails initialization and
+never falls back to a lower default.
+
 The supplied profiles are `gemma`, `gemini`, `antigravity-cli`, `openai`, `codex-cli`,
 `claude-code`, `anthropic`, `gemma-simple-gemini`, `gemma-simple-codex-cli`,
 `gemma-work-gemini`, and `gemma-work-codex-cli`. The `gemma-simple-*` composite

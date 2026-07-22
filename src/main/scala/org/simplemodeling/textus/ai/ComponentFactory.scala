@@ -2,9 +2,9 @@ package org.simplemodeling.textus.ai
 
 import scala.util.Try
 import org.goldenport.Consequence
-import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentId, ComponentOrigin}
+import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentId, ComponentInit, ComponentOrigin}
 import org.goldenport.cncf.admission.ScopedConcurrencyAdmission
-import org.goldenport.cncf.config.RuntimeConfig
+import org.goldenport.cncf.config.{ComponentParameterDecoder, ComponentParameterKey, RuntimeConfig}
 import org.goldenport.cncf.context.{ScopeContext, ScopeKind}
 import org.goldenport.cncf.mcp.client.McpClientSocket
 import org.goldenport.cncf.operationtool.OperationToolSocket
@@ -20,7 +20,7 @@ import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, Ant
 import org.simplemodeling.textus.ai.provider.anthropic.AnthropicConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
-import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
+import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, AiRuntimeProfileCatalog, TextusAiRunnerProvider}
 
 /*
  * @since   Apr.  9, 2026
@@ -28,41 +28,54 @@ import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConc
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
+  override def initializationParameterDeclarations: Vector[ComponentParameterKey[?]] =
+    Vector(ComponentFactory.profileParameterKey)
+
   override protected def create_Component(
     params: ComponentCreate
   ): Component =
-    val bootstrapcontext = params.subsystem
-    val configuration = Some(bootstrapcontext.configuration)
-    val registrations = new AiRunnerApplicationPurposeRegistrationSocketSet {}
-    val profiles = AiProfileConfig.fromConfiguration(
-      configuration,
-      AiApplicationPurposeCatalog.fromSocket(registrations)
-    )
-    val codex = configuration.flatMap { value =>
-      CodexConfig.fromConfiguration(value, ComponentFactory.codexExecutionProfiles(profiles))
+    new TextusAiRuntimeComponent()
+
+  override protected def initialize_component_c(
+    component: Component,
+    params: ComponentInit
+  ): Consequence[Component] =
+    val runtime = component.asInstanceOf[TextusAiRuntimeComponent]
+    params.initializationParameters.resolve(ComponentFactory.profileParameterKey).flatMap { resolution =>
+      val bootstrapcontext = params.subsystem
+      val configuration = Some(bootstrapcontext.configuration)
+      val profiles = AiProfileConfig.fromConfiguration(
+        configuration,
+        AiApplicationPurposeCatalog.fromSocket(runtime.registrations),
+        resolution.value
+      )
+      val codex = configuration.flatMap { value =>
+        CodexConfig.fromConfiguration(value, ComponentFactory.codexExecutionProfiles(profiles))
+      }
+      val gemma = ComponentFactory.gemmaRuntimeConfig(configuration, profiles, Some(bootstrapcontext))
+      val ollama = ComponentFactory.ollamaManagedServiceConfig(configuration, profiles)
+      val claude = configuration.flatMap { value =>
+        ClaudeCodeConfig.fromConfiguration(value, ComponentFactory.claudeCodeExecutionProfiles(profiles))
+      }
+      val antigravity = ComponentFactory.antigravityRuntimeConfig(
+        configuration,
+        ComponentFactory.antigravityExecutionProfiles(profiles)
+      )
+      runtime.configure(codex, antigravity, claude, ollama, profiles)
+      val configured = ComponentFactory.configureRuntimeSpi(
+        runtime,
+        configuration,
+        codex,
+        runtime.registrations,
+        profiles,
+        runtime.concurrencyState,
+        gemma,
+        claude,
+        Some(bootstrapcontext),
+        antigravity
+      )
+      super.initialize_component_c(configured, params)
     }
-    val gemma = ComponentFactory.gemmaRuntimeConfig(configuration, profiles, Some(bootstrapcontext))
-    val ollama = ComponentFactory.ollamaManagedServiceConfig(configuration, profiles)
-    val claude = configuration.flatMap { value =>
-      ClaudeCodeConfig.fromConfiguration(value, ComponentFactory.claudeCodeExecutionProfiles(profiles))
-    }
-    val antigravity = ComponentFactory.antigravityRuntimeConfig(
-      configuration,
-      ComponentFactory.antigravityExecutionProfiles(profiles)
-    )
-    val concurrencystate = new AiConcurrencyAdmissionState()
-    ComponentFactory.configureRuntimeSpi(
-      new TextusAiRuntimeComponent(codex, antigravity, claude, ollama, profiles, concurrencystate),
-      configuration,
-      codex,
-      registrations,
-      profiles,
-      concurrencystate,
-      gemma,
-      claude,
-      Some(bootstrapcontext),
-      antigravity
-    )
 
   override protected def create_Core(
     params: ComponentCreate,
@@ -82,6 +95,19 @@ class ComponentFactory extends TextusAiComponent.Factory:
   private val _runtime_component_id = "TextusAiRuntime"
 
 object ComponentFactory:
+  val profileParameterKey: ComponentParameterKey[String] =
+    ComponentParameterKey.optional(
+      "textus.ai.profile",
+      ComponentParameterDecoder { value =>
+        ComponentParameterDecoder.string.decode(value).flatMap { name =>
+          AiRuntimeProfileCatalog.profile(name) match {
+            case Some(profile) => Consequence.success(profile.name)
+            case None => Consequence.configurationInvalid(s"AI runtime profile is not supported: $name")
+          }
+        }
+      }
+    )
+
   def create(componentCreate: ComponentCreate): Seq[Component] =
     new ComponentFactory().create(componentCreate).participants
 
@@ -288,22 +314,43 @@ object ComponentFactory:
       }
     }
 
-private final class TextusAiRuntimeComponent(
-  codex: Option[CodexRuntimeConfig],
-  antigravity: Option[AntigravityRuntimeConfig],
-  claude: Option[ClaudeCodeRuntimeConfig],
-  ollama: Option[OllamaManagedServiceConfig],
-  profiles: AiProfileConfig,
-  concurrencystate: AiConcurrencyAdmissionState
-) extends TextusAiComponent {
+private[ai] final class TextusAiRuntimeComponent() extends TextusAiComponent {
+  private var _codex: Option[CodexRuntimeConfig] = None
+  private var _antigravity: Option[AntigravityRuntimeConfig] = None
+  private var _claude: Option[ClaudeCodeRuntimeConfig] = None
+  private var _ollama: Option[OllamaManagedServiceConfig] = None
+  private var _profiles: AiProfileConfig = AiProfileConfig.empty
+  private val _registrations = new AiRunnerApplicationPurposeRegistrationSocketSet {}
+  private val _concurrency_state = new AiConcurrencyAdmissionState()
+
+  private[ai] def registrations: AiRunnerApplicationPurposeRegistrationSocketSet =
+    _registrations
+
+  private[ai] def concurrencyState: AiConcurrencyAdmissionState =
+    _concurrency_state
+
+  private[ai] def configure(
+    codex: Option[CodexRuntimeConfig],
+    antigravity: Option[AntigravityRuntimeConfig],
+    claude: Option[ClaudeCodeRuntimeConfig],
+    ollama: Option[OllamaManagedServiceConfig],
+    profiles: AiProfileConfig
+  ): Unit = {
+    _codex = codex
+    _antigravity = antigravity
+    _claude = claude
+    _ollama = ollama
+    _profiles = profiles
+  }
+
   private lazy val _process_runtime: Option[(ProcessExecutionAdmission, ProcessExecutionDriver)] = {
-    val codexbinding = codex.map(CodexExecutionBinding.definitionsAndGrantsC).getOrElse(
+    val codexbinding = _codex.map(CodexExecutionBinding.definitionsAndGrantsC).getOrElse(
       Consequence.success(Vector.empty -> Vector.empty)
     )
-    val claudebinding = claude.map(ClaudeCodeExecutionBinding.definitionsAndGrantsC).getOrElse(
+    val claudebinding = _claude.map(ClaudeCodeExecutionBinding.definitionsAndGrantsC).getOrElse(
       Consequence.success(Vector.empty -> Vector.empty)
     )
-    val antigravitybinding = antigravity.map(AntigravityExecutionBinding.definitionsAndGrantsC).getOrElse(
+    val antigravitybinding = _antigravity.map(AntigravityExecutionBinding.definitionsAndGrantsC).getOrElse(
       Consequence.success(Vector.empty -> Vector.empty)
     )
     (for {
@@ -323,7 +370,7 @@ private final class TextusAiRuntimeComponent(
   }
 
   private lazy val _concurrency: Option[(ScopedConcurrencyAdmission, Set[org.goldenport.cncf.admission.ConcurrencyScopeId])] =
-    profiles.concurrencyAdmissionWithScopesC.toOption.flatten
+    _profiles.concurrencyAdmissionWithScopesC.toOption.flatten
 
   override def withScopeContext(parent: ScopeContext): Component = {
     val localruntime = _process_runtime
@@ -345,20 +392,20 @@ private final class TextusAiRuntimeComponent(
           scopedConcurrencyAdmissionOption = admission.map(_._1)
         )
     }
-    concurrencystate.registerBootstrap(_concurrency.map(_._2).getOrElse(Set.empty))
+    _concurrency_state.registerBootstrap(_concurrency.map(_._2).getOrElse(Set.empty))
     super.withScopeContext(scope)
   }
 
   private def _runtime_name: String =
-    if (Vector(codex, antigravity, claude, ollama).count(_.nonEmpty) > 1)
+    if (Vector(_codex, _antigravity, _claude, _ollama).count(_.nonEmpty) > 1)
       "textus-ai-local-runtime"
-    else if (ollama.nonEmpty)
+    else if (_ollama.nonEmpty)
       "textus-ai-ollama-runtime"
-    else if (codex.nonEmpty)
+    else if (_codex.nonEmpty)
       "textus-ai-codex-runtime"
-    else if (antigravity.nonEmpty)
+    else if (_antigravity.nonEmpty)
       "textus-ai-antigravity-runtime"
-    else if (claude.nonEmpty)
+    else if (_claude.nonEmpty)
       "textus-ai-claude-code-runtime"
     else
       "textus-ai-concurrency-runtime"

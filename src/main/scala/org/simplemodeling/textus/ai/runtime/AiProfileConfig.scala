@@ -784,7 +784,8 @@ private[textus] object AiApplicationPurposeCatalog {
 
 private[textus] final class AiProfileConfig(
   configuration: Option[ResolvedConfiguration],
-  catalog: AiApplicationPurposeCatalog = AiApplicationPurposeCatalog.empty
+  catalog: AiApplicationPurposeCatalog = AiApplicationPurposeCatalog.empty,
+  selectedprofile: Option[String] = None
 ) {
   def resolveRequired(
     requirement: AiRunnerRequirement
@@ -871,7 +872,7 @@ private[textus] final class AiProfileConfig(
 
   /** Runtime-owned logical MCP requirements published through the CNCF Port. */
   def mcpClientRequirementsC: Consequence[Vector[McpClientRequirement]] =
-    if (_config_string(Vector("textus.ai.profile")).isEmpty)
+    if (_selected_profile_name.isEmpty)
       Consequence.success(Vector.empty)
     else
       for {
@@ -891,7 +892,7 @@ private[textus] final class AiProfileConfig(
 
   /** Runtime-owned in-process Operation tool requirements published separately from remote MCP. */
   def operationToolRequirementsC: Consequence[Vector[OperationToolRequirement]] =
-    if (_config_string(Vector("textus.ai.profile")).isEmpty)
+    if (_selected_profile_name.isEmpty)
       Consequence.success(Vector.empty)
     else
       for {
@@ -1014,13 +1015,16 @@ private[textus] final class AiProfileConfig(
   }
 
   private def _runtime_profile_c: Consequence[AiRuntimeProfile] =
-    _config_string(Vector("textus.ai.profile")) match {
+    _selected_profile_name match {
       case Some(name) => AiRuntimeProfileCatalog.profile(name) match {
         case Some(profile) => Consequence.success(profile)
         case None => Consequence.configurationInvalid(s"AI runtime profile is not supported: $name")
       }
       case None => Consequence.configurationInvalid("AI runtime profile is required: textus.ai.profile")
     }
+
+  private def _selected_profile_name: Option[String] =
+    selectedprofile.orElse(_config_string(Vector("textus.ai.profile")))
 
   private def _is_gemma(provider: Option[String]): Boolean =
     provider.exists(_.trim.equalsIgnoreCase("gemma"))
@@ -1703,7 +1707,8 @@ private[textus] object AiProfileConfig {
 
   def fromConfiguration(
     configuration: Option[ResolvedConfiguration],
-    catalog: AiApplicationPurposeCatalog = AiApplicationPurposeCatalog.empty
+    catalog: AiApplicationPurposeCatalog = AiApplicationPurposeCatalog.empty,
+    selectedprofile: Option[String] = None
   ): AiProfileConfig =
-    new AiProfileConfig(configuration, catalog)
+    new AiProfileConfig(configuration, catalog, selectedprofile)
 }
