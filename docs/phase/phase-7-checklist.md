@@ -64,6 +64,16 @@ Stage Status:
 - Update rule: Mark DONE only when one safe observation contract can represent
   local, CLI, and API execution without requiring every route to be run.
 
+Implementation evidence (2026-07-23): Textus AI provides the public
+`AiExecutionObservation` projection and `safeFacts` artifact map. It whitelists
+normalized execution metadata, application-owned acceptance facts, safe CNCF
+source identities, and opaque artifact references; it excludes prompt/output
+content, provider payloads and request IDs, credentials, endpoints, and
+arbitrary metadata. The focused specification proves API, local, subscription
+CLI, and admission-estimate cost states plus reference confinement. SP-02 must
+still persist the projection from a selected Sanpomap flow through the assembled
+Corpus/Experiment SPI path.
+
 - [ ] Record accepted result, schema validity, evidence validity, elapsed time,
   provider calls, tool calls, reported usage, local/commercial allocation, and
   failure classification.

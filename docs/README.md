@@ -20,6 +20,7 @@ This repository follows the document lifecycle defined by `ai/directive/core`.
 - `docs/notes/ai-component-dev-environment.md` records implementation-oriented TextusAi setup notes
 - `docs/notes/car-review-ai-runtime-design.md` explores the bounded AI runtime design for CAR Review
 - `docs/notes/ai-provider-feature-cost-evaluation.md` explores the Phase 7 cross-route evaluation evidence model
+- `docs/notes/ai-execution-observation-contract.md` defines the safe Phase 7 execution observation projection
 - `docs/notes/sanpomap-ai-usage-profiles.md` classifies Sanpomap AI steps into reusable detailed purposes and provider-neutral profiles
 - `docs/spec/ai-execution-class-resolution.md` records execution-class selection and migration behavior
 - `docs/spec/ai-execution-facts.md` records source-qualified usage and safe accounting metadata behavior
