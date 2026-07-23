@@ -45,9 +45,16 @@ before a comparison route runs and retain its terminal disposition afterward.
 
 | ID | Work item | Status |
 | --- | --- | --- |
-| P8-RS-01 | Persisted reservation lifecycle through Experiment and assembled Sanpomap SPI | in-progress |
-| P8-RS-02 | Operational replay scheduler integration and recovery procedure | pending |
+| P8-RS-01 | Persisted reservation lifecycle through Experiment and assembled Sanpomap SPI | complete |
+| P8-RS-02 | Operational replay scheduler integration and recovery procedure | complete |
 | P8-RS-03 | Accumulated-evidence comparison and measurement policy | pending |
+
+## Current Evidence
+
+- `scripts/check-phase8-comparison-replay-scheduler.sh` builds current local
+  CARs, starts and stops an isolated runtime, verifies the provider-backed
+  reservation reaches `Consumed`, and verifies a no-provider reservation is
+  explicitly recovered as `Cancelled`.
 
 ## Closure Criteria
 

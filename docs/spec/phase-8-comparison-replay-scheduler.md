@@ -1,7 +1,7 @@
 # Phase 8 Comparison Replay Scheduler Specification
 
 status=draft
-scope=P8-RS-01
+scope=P8-RS-01,P8-RS-02
 
 ## Reservation Contract
 
@@ -56,4 +56,7 @@ assembled CNCF component port.
 
 Deterministic specifications must demonstrate idempotence, envelope admission,
 single consumption, cancellation, expiry, terminal-state rejection, and an
-assembled Sanpomap-to-Experiment path.
+assembled Sanpomap-to-Experiment path. The heavy assembled path must build
+current CARs, start and stop an isolated runtime, prove the provider-backed
+reservation is `Consumed`, and prove an unstarted reservation is recoverable by
+explicit cancellation without a provider request.
