@@ -347,6 +347,33 @@ final class TextusAiRunnerSpec
       driver.body.value should include ("\"model\":\"gemma:2b\"")
     }
 
+    "reject a detailed purpose when its runtime binding lacks the required provider tool" in {
+      Given("a local Gemma runtime profile and the grounded-research purpose")
+      given ExecutionContext = ExecutionContext.create()
+      val configuration = ResolvedConfiguration(
+        Configuration(Map("textus.ai.profile" -> ConfigurationValue.StringValue("gemma"))),
+        ConfigurationTrace.empty
+      )
+      val runner = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        AiProfileConfig.fromConfiguration(Some(configuration))
+      ).provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.get
+
+      When("the caller selects only grounded research")
+      val result = runner.generate(AiGenerateRequest(
+        "find current evidence",
+        requirement = AiRunnerRequirement(purpose = Some("grounded-research"))
+      ))
+
+      Then("provider admission fails before the Gemma service can execute")
+      result.isFaillure shouldBe true
+      result.toString should include ("AI tools are not supported by provider 'gemma': web_search")
+    }
+
     }
 
     "operational strategies" which {

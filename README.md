@@ -40,7 +40,28 @@ profiles use local Gemma only for `simple-work`. The `gemma-work-*` profiles use
 local `gemma:2b` for `simple-work`, local `gemma3:12b` for `standard-work`, and
 their named commercial provider for every thinking class. Standard purposes are `software-analysis`,
 `software-design`, `software-implementation`, `command-execution`,
-`web-analysis`, and `structured-extraction`.
+`web-analysis`, `structured-extraction`, `grounded-research`,
+`evidence-synthesis`, `candidate-proposal`, `candidate-ranking`, and
+`constrained-planning`.
+
+A deployment may bind one standard purpose before its shared execution-class
+default. This remains runtime-owned and is distinct from application-purpose
+policy tuning:
+
+```yaml
+textus:
+  ai:
+    purpose-bindings:
+      evidence-synthesis:
+        provider: gemma
+        mode: local
+        engine: ollama
+        model: gemma3:12b
+```
+
+`grounded-research` always adds the logical `web_search` requirement after
+binding resolution. A binding to a provider without that capability fails before
+provider execution.
 
 `gemini` selects the remote Google API provider, while `antigravity-cli`
 selects a local managed Antigravity process. `openai` selects the remote OpenAI API

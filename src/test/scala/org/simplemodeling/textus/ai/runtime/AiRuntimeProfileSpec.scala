@@ -8,7 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 18, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiRuntimeProfileSpec
@@ -290,6 +290,104 @@ final class AiRuntimeProfileSpec
         resolution.toOption.flatMap(_.requirement.model) shouldBe Some("gemini-project-work")
         resolution.toOption.flatMap(_.requirement.executionClass) shouldBe Some(AiExecutionClass.StandardWork)
         resolution.toOption.flatMap(_.policy.maxOutputTokens) shouldBe Some(240)
+      }
+
+      "resolve detailed purpose profiles with runtime-owned required tools" in {
+        Given("the shipped detailed-purpose catalog and a Gemini runtime profile")
+        val profiles = _profiles("textus.ai.profile" -> "gemini")
+        val expected = Vector(
+          "grounded-research" -> AiExecutionClass.AdvancedThinking,
+          "evidence-synthesis" -> AiExecutionClass.StandardWork,
+          "candidate-proposal" -> AiExecutionClass.StandardWork,
+          "candidate-ranking" -> AiExecutionClass.SimpleThinking,
+          "constrained-planning" -> AiExecutionClass.AdvancedThinking,
+          "structured-extraction" -> AiExecutionClass.StandardWork
+        )
+
+        When("each detailed purpose is resolved without caller provider or tool selection")
+        val resolutions = expected.map { case (purpose, executionclass) =>
+          purpose -> profiles.resolveRequired(AiRunnerRequirement(purpose = Some(purpose)))
+        }.toMap
+
+        Then("the catalog selects its fixed execution class and only grounded research requires Web")
+        expected.foreach { case (purpose, executionclass) =>
+          resolutions(purpose).toOption.flatMap(_.requirement.executionClass) shouldBe Some(executionclass)
+        }
+        resolutions("grounded-research").toOption.map(_.requirement.tools) shouldBe Some(Vector(org.goldenport.cncf.spi.ai.runner.AiTool.WebSearch))
+        resolutions("evidence-synthesis").toOption.map(_.requirement.tools) shouldBe Some(Vector.empty)
+        resolutions("candidate-ranking").toOption.map(_.requirement.tools) shouldBe Some(Vector.empty)
+      }
+
+      "prefer an operator purpose binding to its shared execution-class default" in {
+        Given("a Gemini profile with two standard-work purposes and one purpose binding")
+        val profiles = _profiles(
+          "textus.ai.profile" -> "gemini",
+          "textus.ai.execution-classes.standard-work.model" -> "gemini-class-default",
+          "textus.ai.purpose-bindings.evidence-synthesis.provider" -> "gemma",
+          "textus.ai.purpose-bindings.evidence-synthesis.mode" -> "local",
+          "textus.ai.purpose-bindings.evidence-synthesis.engine" -> "ollama",
+          "textus.ai.purpose-bindings.evidence-synthesis.model" -> "gemma3:12b"
+        )
+
+        When("the two purposes are resolved")
+        val synthesis = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("evidence-synthesis")))
+        val proposal = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("candidate-proposal")))
+
+        Then("only the explicitly bound purpose replaces the shared class provider selection")
+        synthesis.toOption.flatMap(_.requirement.provider) shouldBe Some("gemma")
+        synthesis.toOption.flatMap(_.requirement.mode) shouldBe Some("local")
+        synthesis.toOption.flatMap(_.requirement.engine) shouldBe Some("ollama")
+        synthesis.toOption.flatMap(_.requirement.model) shouldBe Some("gemma3:12b")
+        proposal.toOption.flatMap(_.requirement.provider) shouldBe Some("google")
+        proposal.toOption.flatMap(_.requirement.model) shouldBe Some("gemini-class-default")
+      }
+
+      "reject an unrecognized purpose runtime binding" in {
+        Given("a configuration that tries to bind a name outside the standard-purpose catalog")
+        val profiles = _profiles(
+          "textus.ai.profile" -> "gemini",
+          "textus.ai.purpose-bindings.unregistered-purpose.model" -> "unsafe-model"
+        )
+
+        When("the runtime resolves a request")
+        val resolution = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+
+        Then("configuration fails before a provider can be selected")
+        resolution.isFaillure shouldBe true
+        resolution.toString should include ("Invalid AI purpose runtime binding")
+      }
+
+      "reject an unknown logical tool in a runtime purpose binding" in {
+        Given("a recognized purpose binding with an unsupported logical tool")
+        val profiles = _profiles(
+          "textus.ai.profile" -> "gemini",
+          "textus.ai.purpose-bindings.grounded-research.tools" -> "web_search,future-tool"
+        )
+
+        When("the runtime resolves the detailed purpose")
+        val resolution = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("grounded-research")))
+
+        Then("configuration fails instead of silently dropping the unknown tool")
+        resolution.isFaillure shouldBe true
+        resolution.toString should include ("Unknown AI tools in runtime binding: future-tool")
+      }
+
+      "publish a distinct managed CLI execution profile for a purpose binding" in {
+        Given("a Gemini profile whose evidence synthesis purpose selects Codex CLI")
+        val profiles = _profiles(
+          "textus.ai.profile" -> "gemini",
+          "textus.ai.purpose-bindings.evidence-synthesis.provider" -> "codex",
+          "textus.ai.purpose-bindings.evidence-synthesis.mode" -> "local",
+          "textus.ai.purpose-bindings.evidence-synthesis.engine" -> "codex-cli",
+          "textus.ai.purpose-bindings.evidence-synthesis.model" -> "gpt-5.6-terra"
+        )
+
+        When("the runtime publishes managed Codex execution profiles")
+        val executions = profiles.codexExecutionsC.toOption.get
+
+        Then("the purpose does not collide with the shared standard-work profile")
+        executions("runtime-evidence-synthesis").model shouldBe "gpt-5.6-terra"
+        executions("runtime-evidence-synthesis").purposeBinding shouldBe Some("evidence-synthesis")
       }
 
       "resolve every standard purpose through the built-in Gemma/Ollama defaults" in {

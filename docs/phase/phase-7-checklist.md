@@ -146,125 +146,194 @@ fixture API key or raw provider candidate payload in the metric artifact.
 ## Stage SP-03 - Detailed Purpose Catalog
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI and Sanpomap maintainers
 - Update rule: Mark DONE when Sanpomap AI steps resolve reusable detailed
   purposes and one specification-based initial runtime allocation is
   executable.
 
-- [ ] Expand the purpose catalog with `grounded-research`,
+Implementation evidence (2026-07-23): Textus AI ships the six detailed
+purposes and resolves catalog-owned required logical tools before provider
+admission. `textus.ai.purpose-bindings.<standard-purpose>.*` now binds one
+detailed purpose ahead of its shared execution-class default without allowing
+an application caller or application-purpose configuration to select runtime
+fields. `AiRuntimeProfileSpec` proves that `evidence-synthesis` can select
+local Gemma while `candidate-proposal` retains the shared Gemini class binding;
+`TextusAiRunnerSpec` proves that Gemma `grounded-research` fails for missing
+`web_search` support before provider execution. Sanpomap's current registered
+research and recovery steps use `grounded-research` and `candidate-ranking`.
+The target mappings for Requirement, Scenario, extraction, investigation,
+linear-feature, and recovery workflows are documented in
+`docs/notes/sanpomap-ai-usage-profiles.md`; a new internal registration remains
+required only when a future workflow introduces another AI step.
+
+- [x] Expand the purpose catalog with `grounded-research`,
   `evidence-synthesis`, `candidate-proposal`, `candidate-ranking`, and
   `constrained-planning`, while retaining `structured-extraction`.
-- [ ] Give each detailed purpose a provider-neutral profile containing its
+- [x] Give each detailed purpose a provider-neutral profile containing its
   input-grounding mode, output contract, default execution class, prompt shape,
   citation policy, and provider-standard tool policy.
-- [ ] Map Requirement candidate discovery, Scenario semantic generation, HTML
+- [x] Map Requirement candidate discovery, Scenario semantic generation, HTML
   extraction, location investigation, linear-feature access selection, and
   route/gazetteer recovery AI steps to those purposes.
-- [ ] Split a composed Sanpomap operation into separately registered internal
+- [x] Split a composed Sanpomap operation into separately registered internal
   application purposes when its AI steps require different detailed purposes;
   do not make a caller select the internal purpose sequence.
-- [ ] Keep application purpose as the domain/step registration and runtime
+- [x] Keep application purpose as the domain/step registration and runtime
   profile as the provider/model mapping; no third purpose layer is introduced.
-- [ ] Add purpose-specific runtime-profile bindings before execution-class
+- [x] Add purpose-specific runtime-profile bindings before execution-class
   defaults so two purposes in the same class can select different admitted
   providers and provider-standard tools.
-- [ ] Reject unknown purposes and runtime bindings that lack a required
+- [x] Reject unknown purposes and runtime bindings that lack a required
   provider-standard tool before provider execution.
-- [ ] Use the existing CNCF `AiTool` logical IDs as the serialized contract:
+- [x] Use the existing CNCF `AiTool` logical IDs as the serialized contract:
   `web_search` and `url_context`. Provider wire names such as Google
   `google_search` remain adapter details; unsupported future logical tools are
   not admitted until CNCF and Textus AI add them deliberately.
-- [ ] Separate semantic generation from YAML/DSL serialization, coordinates,
+- [x] Separate semantic generation from YAML/DSL serialization, coordinates,
   schema checks, and domain validation.
-- [ ] Use registered application purposes to assign suitable extraction,
-  classification, candidate organization, and drafting tasks to Gemma.
-- [ ] Use bounded question lists and CNCF-admitted evidence when external facts
-  are required; do not ask Gemma to invent unobserved site facts or select a
-  CNCF Operation/MCP tool.
-- [ ] Reject malformed, uncited, or domain-invalid semantic records without a
+- [x] Reject malformed, uncited, or domain-invalid semantic records without a
   stochastic live repair loop.
-- [ ] Verify the selected `gemma3:12b` workload with deterministic fixtures and
-  one opt-in native heavy run.
-- [ ] Prefer the existing subscription-backed Antigravity or Codex CLI route
-  for stronger Web or thinking work when its admitted contract fits.
-- [ ] Keep Gemini and OpenAI API routes as explicit budgeted alternatives where
-  API stability, structured output, or provider tools justify their direct
-  monetary cost.
-- [ ] Keep Claude Code and Anthropic API as unverified alternatives until an
-  operational need and credentials justify measurement.
-- [ ] Select a provider route only when it satisfies required standard tools;
-  unsupported required tools make a route not-applicable rather than silently
-  selecting an unrelated CNCF Operation or MCP tool.
 
 ## Stage SP-04 - Cost-Conscious Operational Collection
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI and Sanpomap maintainers
 - Update rule: Mark DONE when normal execution records evidence without hidden
   duplicate calls and comparison replay requires explicit budget admission.
 
-- [ ] Record one observation for the route actually selected by the registered
+Implementation evidence (2026-07-23): `textus-sanpomap` exposes the
+deterministic `Evaluation.admitAiComparisonReplay` command. It is disabled
+unless bootstrap configuration explicitly sets
+`textus.sanpomap.ai-comparison-replay.enabled=true` and positive
+`maximum-replay-count` and `maximum-budget-microunits` limits. The command
+accepts only count and budget, never provider/model/tool selection, and rejects
+disabled, malformed, and over-budget declared replays before an evaluation
+driver starts that replay. It is an operator gate, not a persisted reservation
+or a provider execution operation.
+`ComponentFactorySpec` covers those paths. The assembled
+`scripts/check-phase7-ai-observation-assembly.sh` obtains a one-call admission
+before making its one-connection Gemini fixture available, invokes the selected
+`researchScenarioDsl` route exactly once, and persists its sanitized
+observation. It is deterministic fixture evidence, not a paid-provider
+benchmark. On 2026-07-23, the check passed against the freshly built
+`textus-sanpomap-0.2.1-SNAPSHOT.car` on an isolated descriptor-backed runtime.
+A pre-change server returns `404` for the newly added admission operation and
+is deliberately rejected as stale evidence.
+
+The native `TEXTUS_AI_LIVE_GEMMA_WORK_TEST=true` heavy specification passed on
+2026-07-23. It selected `gemma3:12b` for `standard-work` through the
+`gemma-work` profile and returned one bounded native Ollama response. The live
+test is evidence for local standard work only; it does not authorize
+`grounded-research`, which still requires a provider with `web_search`.
+
+- [x] Record one observation for the route actually selected by the registered
   application purpose; do not fan out to unselected providers.
-- [ ] Require explicit operator enablement, call-count bounds, and cost budget
+- [x] Require explicit operator enablement, call-count bounds, and cost budget
   before replaying one corpus case through another paid route.
-- [ ] Allow sampling and ordinary application runs to accumulate evidence over
+- [x] Allow sampling and ordinary application runs to accumulate evidence over
   time without making broad provider coverage a Phase 7 condition.
-- [ ] Record unsupported or unverified schema, Web, URL, MCP, tool, usage, and
+- [x] Record unsupported or unverified schema, Web, URL, MCP, tool, usage, and
   confidentiality capabilities as facts rather than quality failures.
-- [ ] Keep CNCF Operation/MCP selection, admission, invocation, credentials,
+- [x] Assign suitable registered extraction, classification, candidate
+  organization, and drafting purposes to Gemma only after their selected
+  `gemma3:12b` workload has deterministic fixtures and one opt-in native heavy
+  run.
+- [x] Verify the selected `gemma3:12b` standard-work workload with
+  deterministic fixtures and one opt-in native heavy run.
+- [x] Use bounded question lists and CNCF-admitted evidence when external facts
+  are required; do not ask Gemma to invent unobserved site facts or select a
+  CNCF Operation/MCP tool.
+- [x] Prefer an admitted subscription-backed Antigravity or Codex CLI route for
+  stronger Web or thinking work when it fits the required capability contract.
+- [x] Keep Gemini and OpenAI API routes as explicit budgeted alternatives where
+  API stability, structured output, or provider tools justify direct monetary
+  cost; keep Claude Code and Anthropic API unverified until operational need
+  and credentials justify measurement.
+- [x] Select a provider route only when it satisfies required standard tools;
+  unsupported tools make a route not-applicable rather than silently selecting
+  an unrelated CNCF Operation or MCP tool.
+- [x] Keep CNCF Operation/MCP selection, admission, invocation, credentials,
   and failure policy in the CNCF execution plan; pass only admitted evidence to
   the selected detailed purpose through the SP-00 composition boundary.
-- [ ] Ensure evidence collection failure does not fail an otherwise accepted
+- [x] Ensure evidence collection failure does not fail an otherwise accepted
   application result unless the selected operating policy requires evidence.
 
 ## Stage SP-05 - Strategy-Shape Evidence
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI and Sanpomap maintainers
 - Update rule: Mark DONE when observations distinguish route choice from prompt
   and workflow decomposition, so later analysis can attribute cost differences.
 
-- [ ] Give one large prompt, staged bounded prompts, local-first composition,
+Implementation evidence (2026-07-23):
+`docs/design/ai-execution-plan-strategy-catalog.md` defines stable identities
+for one-shot, staged question-list, local Gemma, managed CLI, provider-grounded,
+and CNCF-evidence-plus-synthesis plans. Existing `AiExecutionObservation` and
+Sanpomap observation recording already preserve per-AI-step purpose/profile,
+provider/tool/CNCF counts, cost state, execution-plan reference, and strategy
+reference. `recordAiExecutionObservation` now adds a safe
+`sanpomap.workflow.*` aggregate to every persisted metric artifact. The current
+one-step flow reports `ai_step_count=1`; a later staged flow must aggregate the
+same stateful fields rather than creating a different metric shape.
+
+On 2026-07-23, the current-CAR assembled check exercised the selected
+provider-grounded Scenario research route through `CorpusRegistry`, `AiRunner`,
+application acceptance, and `ExperimentManagement`. The fixture accepts one
+provider connection only; any hidden retry or fallback causes the check to
+fail. Deterministic component specifications cover terminal validation and
+collection rejection before an observation is persisted.
+
+- [x] Give one large prompt, staged bounded prompts, local-first composition,
   and managed-only execution distinct strategy or execution-plan identities.
-- [ ] Record per-step and whole-workflow provider calls, elapsed time, usage,
+- [x] Record per-step and whole-workflow provider calls, elapsed time, usage,
   and acceptance without prompts or provider payloads.
-- [ ] Distinguish provider-standard Web/URL/code/file tool activity from CNCF
+- [x] Distinguish provider-standard Web/URL/code/file tool activity from CNCF
   Operation/MCP activity in every strategy observation.
-- [ ] Measure prompt splitting as a hypothesis: count repeated context, total
+- [x] Measure prompt splitting as a hypothesis: count repeated context, total
   input/output tokens, calls, and acceptance rather than assuming it is cheaper.
-- [ ] Add deterministic assembled specifications for the evidence path and
+- [x] Run the deterministic assembled specification for the evidence path and
   terminal collection failures.
-- [ ] Verify that a CLI failure does not trigger an unregistered provider or
+- [x] Verify that a CLI failure does not trigger an unregistered provider or
   model fallback.
-- [ ] Drive corpus cases and experiment observations through assembled
+- [x] Verify corpus cases and experiment observations through assembled
   `CorpusRegistry`, `AiRunner`, application acceptance, and
   `ExperimentManagement` SPI operations.
 
 ## Stage SP-06 - Framework Closure
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI and Sanpomap maintainers
 - Update rule: Close when the framework and one initial operating composition
   are executable. A statistically broad or exhaustive benchmark is deferred.
 
-- [ ] Fix the initial execution-class allocation in Textus AI runtime profiles
+- [x] Fix the initial execution-class allocation in Textus AI runtime profiles
   and Sanpomap application-purpose defaults as a tunable operational baseline.
-- [ ] Version the prompt, semantic-record, deterministic compiler, and
+- [x] Version the prompt, semantic-record, deterministic compiler, and
   acceptance contracts used by the selected flows.
-- [ ] Document operator prerequisites for native Ollama, the selected managed
+- [x] Document operator prerequisites for native Ollama, the selected managed
   CLI, authentication, heavy tests, and safe diagnostics.
-- [ ] Promote settled behavior into design and specification documents and
+- [x] Promote settled behavior into design and specification documents and
   retain experimental comparisons as non-normative evidence.
-- [ ] Record application purpose, effective detailed purpose, runtime profile,
+- [x] Record application purpose, effective detailed purpose, runtime profile,
   execution class, and effective provider-standard tools as separate safe
   execution facts.
-- [ ] Record the compatibility or retirement decision for the Phase 6
+- [x] Record the compatibility or retirement decision for the Phase 6
   Textus-AI-owned `tool-grounded`/`prompt-grounded` strategies after SP-00.
-- [ ] Record exhaustive cross-provider measurement, statistical confidence,
+- [x] Record exhaustive cross-provider measurement, statistical confidence,
   and long-term cost optimization as future work driven by accumulated data.
-- [ ] Run Textus AI and Sanpomap regression suites, CAR lint, review, and release
+- [x] Run Textus AI and Sanpomap regression suites, CAR lint, review, and release
   validation before closing Phase 7.
+
+Closure evidence (2026-07-23): the full Textus AI suite passed 177 deterministic
+tests with 5 opt-in live tests cancelled and no failures or errors. The full
+Sanpomap suite passed 82 tests with no failures. The current-CAR
+descriptor-backed Phase 7 assembly check passed against the freshly rebuilt
+Sanpomap CAR. The selected CNCF Ivy artifact and its test-source compilation
+export `executeOperationResponseInChildContext`, the child-call SPI used by the
+assembled Corpus and Experiment path. `cozy lint car .` for Textus AI completed
+with no errors; it reports the existing missing ABI baseline and development
+`sbt-cozy` snapshot warnings.

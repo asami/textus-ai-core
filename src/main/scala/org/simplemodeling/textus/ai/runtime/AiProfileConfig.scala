@@ -23,7 +23,7 @@ import org.goldenport.configuration.ResolvedConfiguration
  * - textus.ai.application-purposes.<application-purpose>.<policy>
  *
  * @since   Jul.  4, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 /**
@@ -41,13 +41,17 @@ private[textus] final case class AiRuntimeExecution(
   reasoningLevel: Option[String] = None,
   tools: Vector[AiTool] = Vector.empty,
   mcpServerSet: Option[McpServerSetId] = None,
-  operationToolSet: Option[OperationToolSetId] = None
+  operationToolSet: Option[OperationToolSetId] = None,
+  purposeBinding: Option[String] = None
 ) {
-  def codexExecutionProfile: String = s"runtime-${executionClass.id}"
+  private def _execution_profile_id: String =
+    purposeBinding.getOrElse(executionClass.id)
 
-  def antigravityExecutionProfile: String = s"runtime-${executionClass.id}"
+  def codexExecutionProfile: String = s"runtime-${_execution_profile_id}"
 
-  def claudeCodeExecutionProfile: String = s"runtime-${executionClass.id}"
+  def antigravityExecutionProfile: String = s"runtime-${_execution_profile_id}"
+
+  def claudeCodeExecutionProfile: String = s"runtime-${_execution_profile_id}"
 }
 
 private[textus] final case class AiRuntimeProfile(
@@ -310,14 +314,27 @@ private[textus] object AiRuntimeProfileCatalog {
     profile.name -> profile
   }.toMap
 
-  private val _standard_purposes: Map[String, AiExecutionClass] = Map(
-    "software-analysis" -> AiExecutionClass.AdvancedThinking,
-    "software-design" -> AiExecutionClass.SimpleThinking,
-    "software-implementation" -> AiExecutionClass.StandardWork,
-    "command-execution" -> AiExecutionClass.SimpleWork,
-    "web-analysis" -> AiExecutionClass.DeepThinking,
-    "structured-extraction" -> AiExecutionClass.StandardWork
+  private final case class _StandardPurpose(
+    executionClass: AiExecutionClass,
+    requiredTools: Vector[AiTool] = Vector.empty
   )
+
+  private val _standard_purpose_profiles: Map[String, _StandardPurpose] = Map(
+    "software-analysis" -> _StandardPurpose(AiExecutionClass.AdvancedThinking),
+    "software-design" -> _StandardPurpose(AiExecutionClass.SimpleThinking),
+    "software-implementation" -> _StandardPurpose(AiExecutionClass.StandardWork),
+    "command-execution" -> _StandardPurpose(AiExecutionClass.SimpleWork),
+    "web-analysis" -> _StandardPurpose(AiExecutionClass.DeepThinking),
+    "structured-extraction" -> _StandardPurpose(AiExecutionClass.StandardWork),
+    "grounded-research" -> _StandardPurpose(AiExecutionClass.AdvancedThinking, Vector(AiTool.WebSearch)),
+    "evidence-synthesis" -> _StandardPurpose(AiExecutionClass.StandardWork),
+    "candidate-proposal" -> _StandardPurpose(AiExecutionClass.StandardWork),
+    "candidate-ranking" -> _StandardPurpose(AiExecutionClass.SimpleThinking),
+    "constrained-planning" -> _StandardPurpose(AiExecutionClass.AdvancedThinking)
+  )
+
+  private val _standard_purposes: Map[String, AiExecutionClass] =
+    _standard_purpose_profiles.view.mapValues(_.executionClass).toMap
 
   private val _execution_class_purposes: Map[String, AiExecutionClass] =
     AiExecutionClass.values.map(value => value.id -> value).toMap
@@ -330,6 +347,12 @@ private[textus] object AiRuntimeProfileCatalog {
 
   def standardPurpose(name: String): Option[AiExecutionClass] =
     standardPurposes.get(name.trim.toLowerCase(java.util.Locale.ROOT))
+
+  def requiredTools(name: String): Vector[AiTool] =
+    _standard_purpose_profiles
+      .get(name.trim.toLowerCase(java.util.Locale.ROOT))
+      .map(_.requiredTools)
+      .getOrElse(Vector.empty)
 
   def implicitExecutionClass(name: String): Option[AiExecutionClass] =
     AiExecutionClass.parse(name.trim)
@@ -811,51 +834,29 @@ private[textus] final class AiProfileConfig(
     for {
       _ <- _reject_legacy_configuration
       profile <- _runtime_profile_c
-      executions <- (profile.executions.keySet ++ profile.fallbackExecutions.keySet).toVector.foldLeft(
-        Consequence.success(Map.empty[String, AiRuntimeExecution])
-      ) { (z, executionclass) =>
-        z.flatMap { values =>
-          _profile_executions_c(profile, executionclass).map { executions =>
-            executions.filter(execution => _is_codex(Some(execution.provider))).foldLeft(values) {
-              (result, execution) => result.updated(execution.codexExecutionProfile, execution)
-            }
-          }
-        }
-      }
+      executions <- _managed_executions_c(
+        profile,
+        execution => _is_codex(Some(execution.provider)),
+        _.codexExecutionProfile
+      )
     } yield executions
 
   def claudeCodeExecutionsC: Consequence[Map[String, AiRuntimeExecution]] =
     for {
       _ <- _reject_legacy_configuration
       profile <- _runtime_profile_c
-      executions <- (profile.executions.keySet ++ profile.fallbackExecutions.keySet).toVector.foldLeft(
-        Consequence.success(Map.empty[String, AiRuntimeExecution])
-      ) { (z, executionclass) =>
-        z.flatMap { values =>
-          _profile_executions_c(profile, executionclass).map { executions =>
-            executions.filter(execution => _is_claude(Some(execution.provider))).foldLeft(values) {
-              (result, execution) => result.updated(execution.claudeCodeExecutionProfile, execution)
-            }
-          }
-        }
-      }
+      executions <- _managed_executions_c(
+        profile,
+        execution => _is_claude(Some(execution.provider)),
+        _.claudeCodeExecutionProfile
+      )
     } yield executions
 
   def antigravityExecutionsC: Consequence[Map[String, AiRuntimeExecution]] =
     for {
       _ <- _reject_legacy_configuration
       profile <- _runtime_profile_c
-      executions <- (profile.executions.keySet ++ profile.fallbackExecutions.keySet).toVector.foldLeft(
-        Consequence.success(Map.empty[String, AiRuntimeExecution])
-      ) { (z, executionclass) =>
-        z.flatMap { values =>
-          _profile_executions_c(profile, executionclass).map { executions =>
-            executions.filter(execution => _is_antigravity(execution)).foldLeft(values) {
-              (result, execution) => result.updated(execution.antigravityExecutionProfile, execution)
-            }
-          }
-        }
-      }
+      executions <- _managed_executions_c(profile, execution => _is_antigravity(execution), _.antigravityExecutionProfile)
     } yield executions
 
   private def _profile_executions_c(
@@ -869,6 +870,39 @@ private[textus] final class AiProfileConfig(
       }
       fallback <- _runtime_fallback_execution_c(profile, executionclass)
     } yield primary.toVector ++ fallback.toVector
+
+  private def _managed_executions_c(
+    profile: AiRuntimeProfile,
+    predicate: AiRuntimeExecution => Boolean,
+    key: AiRuntimeExecution => String
+  ): Consequence[Map[String, AiRuntimeExecution]] =
+    for {
+      defaults <- (profile.executions.keySet ++ profile.fallbackExecutions.keySet).toVector.foldLeft(
+        Consequence.success(Vector.empty[AiRuntimeExecution])
+      ) { (z, executionclass) =>
+        z.flatMap(values => _profile_executions_c(profile, executionclass).map(values ++ _))
+      }
+      bindings <- _purpose_bound_executions_c(profile)
+    } yield (defaults ++ bindings)
+      .filter(predicate)
+      .foldLeft(Map.empty[String, AiRuntimeExecution]) { (result, execution) =>
+        result.updated(key(execution), execution)
+      }
+
+  private def _purpose_bound_executions_c(
+    profile: AiRuntimeProfile
+  ): Consequence[Vector[AiRuntimeExecution]] =
+    _configured_purpose_binding_names.foldLeft(Consequence.success(Vector.empty[AiRuntimeExecution])) {
+      (z, purpose) =>
+        AiRuntimeProfileCatalog.standardPurpose(purpose) match {
+          case Some(executionclass) =>
+            z.flatMap(values =>
+              _runtime_execution_c(profile, executionclass, Some(purpose)).map(values :+ _)
+            )
+          case None =>
+            z
+        }
+    }
 
   /** Runtime-owned logical MCP requirements published through the CNCF Port. */
   def mcpClientRequirementsC: Consequence[Vector[McpClientRequirement]] =
@@ -938,7 +972,11 @@ private[textus] final class AiProfileConfig(
       }
       runtimeprofile <- _runtime_profile_c
       identity <- _purpose_identity_c(purpose)
-      execution <- _runtime_execution_c(runtimeprofile, identity.executionClass)
+      execution <- _runtime_execution_c(
+        runtimeprofile,
+        identity.executionClass,
+        Some(identity.standardPurpose)
+      )
       baseprofile = _runtime_purpose_profile(identity, execution)
       basepolicy <- _purpose_policy(baseprofile)
       registrationprofile = identity.registration.map { value =>
@@ -1034,22 +1072,27 @@ private[textus] final class AiProfileConfig(
 
   private def _runtime_execution_c(
     profile: AiRuntimeProfile,
-    executionclass: AiExecutionClass
+    executionclass: AiExecutionClass,
+    standardpurpose: Option[String] = None
   ): Consequence[AiRuntimeExecution] =
     profile.execution(executionclass) match {
       case Some(default) =>
-        val provider = _config_string(_execution_class_keys(executionclass.id, "provider")).getOrElse(default.provider)
-        val mode = _config_string(_execution_class_keys(executionclass.id, "mode")).getOrElse(default.mode)
-        val engine = _config_string(_execution_class_keys(executionclass.id, "engine")).getOrElse(default.engine)
-        val model = _config_string(_execution_class_keys(executionclass.id, "model")).getOrElse(default.model)
-        val reasoning = _config_string(
-          _execution_class_keys(executionclass.id, "reasoning-level") ++
-            _execution_class_keys(executionclass.id, "reasoningLevel")
+        val provider = _binding_string(standardpurpose, "provider", executionclass).getOrElse(default.provider)
+        val mode = _binding_string(standardpurpose, "mode", executionclass).getOrElse(default.mode)
+        val engine = _binding_string(standardpurpose, "engine", executionclass).getOrElse(default.engine)
+        val model = _binding_string(standardpurpose, "model", executionclass).getOrElse(default.model)
+        val reasoning = _binding_string(
+          standardpurpose,
+          "reasoning-level",
+          executionclass,
+          Vector("reasoningLevel")
         ).orElse(default.reasoningLevel)
-        val tools = _config_string(
-          _execution_class_keys(executionclass.id, "tools") ++
-            _execution_class_keys(executionclass.id, "enabled-tools")
-        ).map(AiTool.parseList).getOrElse(default.tools)
+        val toolsc = _binding_string(
+          standardpurpose,
+          "tools",
+          executionclass,
+          Vector("enabled-tools")
+        ).map(_runtime_tools_c).getOrElse(Consequence.success(default.tools))
         val mcpserversetc = _config_string(
           _execution_class_keys(executionclass.id, "mcp-server-set") ++
             _execution_class_keys(executionclass.id, "mcpServerSet")
@@ -1065,6 +1108,7 @@ private[textus] final class AiProfileConfig(
           case None => Consequence.success(default.operationToolSet)
         }
         for {
+          tools <- toolsc
           mcpserverset <- mcpserversetc
           operationtoolset <- operationtoolsetc
           execution = default.copy(
@@ -1075,12 +1119,37 @@ private[textus] final class AiProfileConfig(
             reasoningLevel = reasoning,
             tools = tools,
             mcpServerSet = mcpserverset,
-            operationToolSet = operationtoolset
+            operationToolSet = operationtoolset,
+            purposeBinding = standardpurpose.filter(_has_purpose_binding)
           )
         } yield execution
       case None =>
         Consequence.configurationInvalid(s"AI runtime profile '${profile.name}' has no execution class: ${executionclass.id}")
     }
+
+  private def _binding_string(
+    standardpurpose: Option[String],
+    leaf: String,
+    executionclass: AiExecutionClass,
+    aliases: Vector[String] = Vector.empty
+  ): Option[String] = {
+    val leaves = leaf +: aliases
+    val purposekeys = standardpurpose.toVector.flatMap { purpose =>
+      leaves.flatMap(_purpose_binding_keys(purpose, _))
+    }
+    val classkeys = leaves.flatMap(_execution_class_keys(executionclass.id, _))
+    _config_string(purposekeys ++ classkeys)
+  }
+
+  private def _runtime_tools_c(value: String): Consequence[Vector[AiTool]] = {
+    val parsed = AiTool.parseResult(value)
+    if (parsed.unknown.nonEmpty)
+      Consequence.configurationInvalid(
+        s"Unknown AI tools in runtime binding: ${parsed.unknown.mkString(",")}"
+      )
+    else
+      Consequence.success(parsed.tools)
+  }
 
   private def _operational_strategy_c(
     profile: AiRuntimeProfile,
@@ -1211,7 +1280,7 @@ private[textus] final class AiProfileConfig(
       mode = Some(execution.mode),
       engine = Some(execution.engine),
       model = Some(execution.model),
-      tools = execution.tools,
+      tools = (execution.tools ++ AiRuntimeProfileCatalog.requiredTools(identity.standardPurpose)).distinct,
       maxInputTokens = _config_string(_execution_class_keys(identity.executionClass.id, "max-input-tokens")),
       maxOutputTokens = _config_string(_execution_class_keys(identity.executionClass.id, "max-output-tokens")),
       maxReasoningTokens = _config_string(_execution_class_keys(identity.executionClass.id, "max-reasoning-tokens")),
@@ -1347,17 +1416,52 @@ private[textus] final class AiProfileConfig(
         key.endsWith(".level")
     }
     val standardpurpose = keys.find(_.startsWith("textus.ai.purposes."))
+    val invalidpurposebinding = keys.find(_is_invalid_purpose_binding_key)
     val invalidapplication = keys.find(_is_invalid_application_purpose_key)
     legacy match {
       case Some(key) => Consequence.configurationInvalid(s"Legacy AI configuration is not supported: $key")
       case None => standardpurpose match {
         case Some(key) => Consequence.configurationInvalid(s"Standard AI purposes are runtime-owned and may not be configured: $key")
-        case None => invalidapplication match {
-          case Some(key) => Consequence.configurationInvalid(s"AI application purpose may not configure this key: $key")
-          case None => Consequence.unit
+        case None => invalidpurposebinding match {
+          case Some(key) => Consequence.configurationInvalid(s"Invalid AI purpose runtime binding: $key")
+          case None => invalidapplication match {
+            case Some(key) => Consequence.configurationInvalid(s"AI application purpose may not configure this key: $key")
+            case None => Consequence.unit
+          }
         }
       }
     }
+  }
+
+  private def _is_invalid_purpose_binding_key(key: String): Boolean = {
+    val prefix = "textus.ai.purpose-bindings."
+    val permitted = Set(
+      "provider",
+      "mode",
+      "engine",
+      "model",
+      "reasoning-level",
+      "reasoningLevel",
+      "tools",
+      "enabled-tools"
+    )
+    val parts = key.drop(prefix.length).split("\\.").filter(_.nonEmpty)
+    key.startsWith(prefix) && parts.length >= 2 && (
+      !AiRuntimeProfileCatalog.standardPurpose(parts.head).isDefined ||
+        !permitted.contains(parts.last)
+    )
+  }
+
+  private def _has_purpose_binding(purpose: String): Boolean =
+    _configured_purpose_binding_names.contains(purpose)
+
+  private def _configured_purpose_binding_names: Vector[String] = {
+    val prefix = "textus.ai.purpose-bindings."
+    configuration.toVector.flatMap(_.configuration.values.keys).flatMap { key =>
+      Option.when(key.startsWith(prefix)) {
+        key.drop(prefix.length).split("\\.").headOption.getOrElse("").trim.toLowerCase(java.util.Locale.ROOT)
+      }
+    }.filter(_.nonEmpty).distinct.sorted
   }
 
   private def _is_invalid_application_purpose_key(key: String): Boolean = {
@@ -1613,6 +1717,14 @@ private[textus] final class AiProfileConfig(
       s"textus.runtime.ai.execution-classes.$executionclass.$leaf",
       s"cncf.ai.execution-classes.$executionclass.$leaf",
       s"cncf.runtime.ai.execution-classes.$executionclass.$leaf"
+    )
+
+  private def _purpose_binding_keys(
+    purpose: String,
+    leaf: String
+  ): Vector[String] =
+    Vector(
+      s"textus.ai.purpose-bindings.$purpose.$leaf"
     )
 
   private def _rate_schedule_keys(

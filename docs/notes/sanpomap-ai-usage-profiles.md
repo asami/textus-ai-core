@@ -157,7 +157,9 @@ serialization stay deterministic or CNCF-owned.
 
 ## Internal Application Purpose Mapping
 
-The current broad registrations can be refined into step identities such as:
+The following are the target step identities for composed workflows. They are
+not public operation names and are introduced only when a workflow contains
+more than one AI step with distinct contracts:
 
 | Internal application purpose | Detailed purpose |
 | --- | --- |
@@ -176,6 +178,24 @@ The current broad registrations can be refined into step identities such as:
 
 Public Sanpomap operation names do not have to match these internal AI
 application-purpose names.
+
+## Current Sanpomap Registrations
+
+The current executable registration catalog has one AI step per registered
+application purpose. It therefore uses the stable existing names directly:
+
+| Registered application purpose | Detailed purpose |
+| --- | --- |
+| `sanpomap-scenario-research` | `grounded-research` |
+| `sanpomap-location-investigation` | `grounded-research` |
+| `sanpomap-linear-feature-research` | `grounded-research` |
+| `sanpomap-route-location-recovery` | `candidate-ranking` |
+| `sanpomap-gazetteer-location-recovery` | `candidate-ranking` |
+
+`candidate-proposal`, `evidence-synthesis`, `structured-extraction`, and
+`constrained-planning` remain catalog contracts ready for the next composed
+Sanpomap flow. They must receive their own internal registration before a
+workflow invokes them; configuration does not create those registrations.
 
 ## Runtime Selection
 

@@ -123,10 +123,10 @@ slice. A Textus AI release does not include sibling repository changes.
 | SP-00 | CNCF evidence-execution boundary | A Phase 7 flow composes admitted CNCF Operation/MCP evidence outside Textus AI and passes only evidence to the runner. | done |
 | SP-01 | Observation framework | Safe capability, usage, latency, acceptance, and schedule-relative cost evidence has a stable referenced contract. | done |
 | SP-02 | Corpus and experiment SPI integration | Selected Sanpomap executions can consume immutable cases and record observations through assembled component SPI operations. | done |
-| SP-03 | Detailed purpose catalog | Sanpomap AI steps map to reusable provider-neutral purposes with behavior, output, grounding, and standard-tool profiles. | open |
-| SP-04 | Cost-conscious operational collection | Normal operation records evidence without automatic provider fan-out; replay is explicit and budgeted. | open |
-| SP-05 | Strategy-shape evidence | One-shot, staged-prompt, local-first, and managed-only strategies can be distinguished and compared when exercised. | open |
-| SP-06 | Framework closure | The evidence path, initial profiles, operating controls, and deferred benchmark boundary are executable and documented. | open |
+| SP-03 | Detailed purpose catalog | Sanpomap AI steps map to reusable provider-neutral purposes with behavior, output, grounding, and standard-tool profiles. | done |
+| SP-04 | Cost-conscious operational collection | Normal operation records evidence without automatic provider fan-out; replay is explicit and budgeted. | done |
+| SP-05 | Strategy-shape evidence | One-shot, staged-prompt, local-first, and managed-only strategies can be distinguished and compared when exercised. | done |
+| SP-06 | Framework closure | The evidence path, initial profiles, operating controls, and deferred benchmark boundary are executable and documented. | done |
 
 ## Completion Conditions
 
@@ -163,5 +163,6 @@ Phase 7 closes only when all items in the Phase 7 checklist are complete and:
 - [AI Purpose Catalog](../design/ai-purpose-catalog.md)
 - [Gemma-First Operational Profile](../spec/gemma-first-operational-profile.md)
 - [AI Provider Feature and Cost Evaluation](../notes/ai-provider-feature-cost-evaluation.md)
+- [AI Execution-Plan Strategy Catalog](../design/ai-execution-plan-strategy-catalog.md)
 - [Sanpomap AI Purpose Resolution](../notes/sanpomap-ai-usage-profiles.md)
 - [Phase 6 Dashboard](phase-6.md)

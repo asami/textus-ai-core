@@ -2,7 +2,7 @@
 
 status=accepted
 scope=textus-ai runtime-owned purpose vocabulary and application-purpose registration
-updated_at=2026-07-18
+updated_at=2026-07-23
 
 ## Decision
 
@@ -16,7 +16,7 @@ application Component.Port registration
   -> application purpose catalog
   -> standard purpose
   -> execution class
-  -> selected runtime profile defaults
+  -> selected runtime profile purpose binding or execution-class default
   -> merged CNCF execution-class configuration
   -> registered policy and registered-purpose configuration tuning
   -> provider, mode, engine, model, reasoning, tools, and limits
@@ -60,11 +60,23 @@ used.
 | `command-execution` | `simple-work` | Carry out a bounded command-oriented task. |
 | `web-analysis` | `deep-thinking` | Consider a supplied problem using Web information. |
 | `structured-extraction` | `standard-work` | Extract or normalize supplied material into a structured result. |
+| `grounded-research` | `advanced-thinking` | Discover current public evidence and return a cited evidence set. Requires runtime-owned `web_search`; `url_context` remains an optional provider capability. |
+| `evidence-synthesis` | `standard-work` | Turn admitted CNCF or application evidence into a cited semantic record or bounded prose. |
+| `candidate-proposal` | `standard-work` | Produce typed candidates and reasons from an objective and supplied evidence. |
+| `candidate-ranking` | `simple-thinking` | Rank supplied candidates under explicit constraints with bounded reasons. |
+| `constrained-planning` | `advanced-thinking` | Produce a typed semantic plan from accepted candidates, geography, and constraints. |
 
 The execution-class identifiers `simple-work`, `standard-work`,
 `simple-thinking`, `advanced-thinking`, and `deep-thinking` are explicit built-in direct
 purpose aliases. They are catalog entries in Textus AI, not an implicit fallback
 for an unregistered application name.
+
+The standard-purpose catalog owns logical required tools. A resolved
+`grounded-research` request includes `web_search` before provider admission;
+providers without that capability fail structurally before execution. The other
+detailed purposes do not require provider-standard tools. They may receive
+CNCF-composed evidence, but that composition remains application-owned and is
+not a provider tool requirement.
 
 ## Runtime Profiles
 
@@ -92,6 +104,40 @@ but remain distinct provider and authentication boundaries.
 selects the separate local managed-process provider. They are intentionally not
 aliases: the former uses an operator-supplied API key, while the latter uses the
 installed CLI's own authentication and execution boundary.
+
+### Purpose-Specific Runtime Bindings
+
+An operator may bind a standard purpose differently from its shared execution
+class through `textus.ai.purpose-bindings.<standard-purpose>.*`. These bindings
+are resolved before `execution-classes.<class>.*` and may set only the concrete
+runtime fields `provider`, `mode`, `engine`, `model`, `reasoning-level`, and
+`tools`. They cannot define a purpose, change its execution class, or tune an
+application-purpose policy.
+
+```yaml
+textus:
+  ai:
+    profile: gemma-work-gemini
+    purpose-bindings:
+      evidence-synthesis:
+        provider: gemma
+        mode: local
+        engine: ollama
+        model: gemma3:12b
+```
+
+This lets `evidence-synthesis` use local Gemma while `candidate-proposal`,
+which also defaults to `standard-work`, retains the profile's Gemini binding.
+The catalog-owned required tools are always added after binding resolution.
+For example, binding `grounded-research` to Gemma still requires
+`web_search`, so provider admission fails before execution rather than silently
+downgrading the purpose.
+
+When a binding selects Codex CLI, Claude Code, or Antigravity CLI, Textus AI
+also publishes a distinct managed execution profile named for that detailed
+purpose. It does not reuse the shared execution-class CLI profile, so the
+binding's model, reasoning level, and admitted tool contract cannot collide
+with another purpose in the same class.
 
 ### Codex CLI Defaults
 
