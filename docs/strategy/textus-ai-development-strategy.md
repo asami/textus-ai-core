@@ -368,28 +368,24 @@ completed on 2026-07-18.
   generation providers. Textus AI resolves and invokes only CNCF-admitted
   Operation/MCP tools, strips provider-native tool selection, and publishes
   counts and digests without prompt, argument, evidence, or provider payloads.
-- Phase 7: open on 2026-07-23. Sanpomap is the development driver for a
-  cost-aware operational evidence framework. The initial hypothesis is that
-  local Gemma plus subscription-backed CLI execution and staged prompts can
-  reduce direct API cost; the framework records evidence without assuming that
-  hypothesis is true or requiring exhaustive replay.
-- Phase 7 also increases purpose resolution and separates provider-standard
-  tools from CNCF-owned Operation/MCP evidence application.
-- Completed Work A: SP-00 - `researchScenarioDsl` composes bootstrap-admitted
-  CNCF Operation/MCP evidence outside Textus AI, bounds it as ordinary prompt
-  input, and rejects any attempt to re-enter a runner-owned CNCF tool loop.
-  The released CNCF Port contracts were sufficient; no CNCF source change was
-  required.
-- Current phase ledger: `docs/phase/phase-7.md`
-- Required Work B: SP-01 - fix the safe observation and metric-reference
-  contract.
-- Required Work C: SP-02 - connect one Sanpomap operational flow to Textus
-  Corpus and Textus Experiment through assembled SPI operations.
-- Required Work D: SP-03 - implement detailed purposes, purpose-specific
-  runtime bindings, Sanpomap internal step mappings, and provider-standard tool
-  compatibility validation.
-- Exploration input: `docs/notes/car-review-ai-runtime-design.md`
-- Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
+- Phase 7: complete on 2026-07-23. It establishes the cost-aware operational
+  evidence framework, detailed-purpose runtime bindings, safe observation
+  recording, and one assembled Sanpomap/CNCF/Corpus/Experiment reference flow.
+  The framework records evidence without assuming that any provider allocation
+  is optimal or requiring exhaustive replay.
+- Phase 7 separates provider-standard tools from CNCF-owned Operation/MCP
+  evidence application. `researchScenarioDsl` composes admitted CNCF evidence
+  outside Textus AI, passes it as bounded ordinary input, and rejects a
+  runner-owned CNCF tool loop.
+- The CNCF child-context SPI supports assembled Corpus and Experiment calls;
+  commit `5ce3128e` records that framework boundary.
+- Closure artifacts: [Phase 7 dashboard](../phase/phase-7.md),
+  [Phase 7 closure](../phase/phase-7-closure.md),
+  [AI Operations Evidence Framework](../design/ai-operations-evidence-framework.md),
+  and [Phase 7 AI Operations Evidence Specification](../spec/phase-7-ai-operations-evidence.md).
+- A later phase must define persisted replay reservation, broad provider/cost
+  measurement, and optimization from accumulated observations before extending
+  the public operation surface.
 
 ## Document Roles
 

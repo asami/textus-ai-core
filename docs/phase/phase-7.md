@@ -166,3 +166,4 @@ Phase 7 closes only when all items in the Phase 7 checklist are complete and:
 - [AI Execution-Plan Strategy Catalog](../design/ai-execution-plan-strategy-catalog.md)
 - [Sanpomap AI Purpose Resolution](../notes/sanpomap-ai-usage-profiles.md)
 - [Phase 6 Dashboard](phase-6.md)
+- [Phase 7 Closure](phase-7-closure.md)
