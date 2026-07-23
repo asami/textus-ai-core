@@ -551,6 +551,58 @@ final class TextusAiRunnerSpec
       response.metadata.values.exists(_.contains("research intermediate scenario stops")) shouldBe false
     }
 
+    "reject a runner-owned tool strategy when the application composes CNCF evidence" in {
+      Given("a prompt-grounded profile and a request whose evidence is already composed by the application")
+      given ExecutionContext = ExecutionContext.create()
+      var promptloopcalled = false
+      val configuration = ResolvedConfiguration(
+        Configuration(Map(
+          "textus.ai.profile" -> ConfigurationValue.StringValue("gemma"),
+          "textus.ai.execution-classes.standard-work.operation-tool-set" ->
+            ConfigurationValue.StringValue("sanpomap-research"),
+          "textus.ai.application-purposes.sanpomap-scenario-research.operational-strategy" ->
+            ConfigurationValue.StringValue("prompt-grounded")
+        )),
+        ConfigurationTrace.empty
+      )
+      val provider = new TextusAiRunnerProvider(
+        _component(),
+        SpiSelection(provider = Some("gemma"), mode = Some("local"), engine = Some("ollama")),
+        _profiles(configuration, "sanpomap-scenario-research" -> "standard-work")
+      ) {
+        override private[runtime] def generateWithPromptLoopC(
+          selection: SpiSelection,
+          mcpServerSet: Option[McpServerSetId],
+          operationToolSet: Option[OperationToolSetId],
+          prompt: String,
+          temperature: Option[Double],
+          maxTokens: Option[Int],
+          properties: Vector[Property]
+        )(using ExecutionContext): Consequence[GenerateResponse] = {
+          promptloopcalled = true
+          Consequence.success(GenerateResponse("must not execute", Some("fixture")))
+        }
+      }
+      val runner = provider.provide(
+        SpiContract("ai-runner", classOf[AiRunner]),
+        SpiSelection()
+      ).toOption.value
+
+      When("the application submits external evidence to its registered purpose")
+      val result = runner.generate(AiGenerateRequest(
+        "Research using supplied evidence.",
+        requirement = AiRunnerRequirement(
+          purpose = Some("sanpomap-scenario-research"),
+          purposeRequired = true
+        ),
+        metadata = Map("cncf.evidence.composed" -> "true")
+      ))
+
+      Then("the incompatible strategy is rejected before a runner-owned tool loop starts")
+      result should matchPattern { case Consequence.Failure(_) => }
+      promptloopcalled shouldBe false
+    }
+
     "reject prompt-grounded execution when aggregate admission exceeds the purpose budget" in {
       Given("a prompt-grounded purpose whose bounded multi-turn envelope exceeds its cost budget")
       given ExecutionContext = ExecutionContext.create()

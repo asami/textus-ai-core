@@ -2,7 +2,7 @@
 
 status=draft
 scope=internal development strategy
-updated_at=2026-07-22
+updated_at=2026-07-23
 
 ## Purpose
 
@@ -243,6 +243,86 @@ Artifacts:
 - [Phase 6 Dashboard](../phase/phase-6.md)
 - [Phase 6 Checklist](../phase/phase-6-checklist.md)
 
+### Phase 7: Cost-Aware AI Operations Evidence Framework
+
+Goal: use Sanpomap as the development driver to build a reusable framework that
+resolves detailed AI purposes and collects capability, acceptance, usage,
+latency, and cost evidence from selected practical operations. Start from
+specification-based choices and improve them as operational evidence
+accumulates.
+
+Scope:
+
+- select representative Sanpomap location-investigation, requirement, and
+  Scenario-generation flows as executable development drivers;
+- decompose each flow so deterministic code owns YAML/DSL structure,
+  coordinates, validation, and final assembly while AI calls produce only
+  bounded semantic content;
+- use local Gemma for suitable `simple-work` and `standard-work` tasks, including
+  extraction, classification, candidate organization, and bounded drafting;
+- use a managed CLI or remote API route only for an explicitly registered
+  application purpose that requires Web-grounded research, structured output,
+  provider tools, or stronger thinking;
+- treat provider-standard tools as AI route capabilities and cost-bearing
+  execution facts used by logic selection;
+- apply CNCF Operations and MCP tools in CNCF-owned execution and pass admitted
+  evidence to AI, rather than presenting those capabilities as provider tools;
+- increase the resolution of the existing Textus AI purpose catalog so each
+  Sanpomap AI step resolves a reusable provider-neutral purpose before runtime
+  binding;
+- observe the selected route during ordinary operation without automatically
+  duplicating a paid request across providers;
+- consume immutable comparison cases from `textus-corpus` and record route
+  arms, runs, and observations through `textus-experiment`, using their
+  assembled CNCF component SPI surfaces rather than implementation imports;
+- allow execution-plan arms to distinguish provider route and workflow shape,
+  including one-shot prompts, staged prompts, and local-first compositions;
+- record provider calls, local/commercial allocation, reported usage,
+  elapsed time, capability facts, failure class, and accepted-result rate;
+- derive API cost from a versioned operator rate schedule and observed usage,
+  without inventing a per-call monetary cost for subscription-backed CLI
+  execution;
+- use explicit call and cost budgets for occasional comparison replay; and
+- promote the initial plausible allocation into tunable runtime profiles,
+  application-purpose defaults, prompt contracts, and Sanpomap executable
+  specifications.
+
+Boundaries:
+
+- Sanpomap owns task decomposition, source authority, domain validation,
+  Scenario/Requirement DSL compilation, and final acceptance.
+- Textus AI owns application-purpose resolution, provider execution,
+  provider-standard tool handling, and safe execution facts; it does not
+  acquire a hidden Sanpomap or CNCF Operation/MCP workflow.
+- The preceding boundary is a Phase 7 target. Current Phase 6
+  `tool-grounded` and `prompt-grounded` strategies still orchestrate CNCF tools
+  inside Textus AI. SP-00 establishes the CNCF-composed path for new Phase 7
+  application flows before detailed-purpose routing depends on it; the legacy
+  strategies remain bounded compatibility behavior until separately decided.
+- Provider use is selected by registered application purpose and execution
+  class, not by caller-supplied provider, model, CLI option, or endpoint.
+- A detailed purpose owns a reusable usage profile describing behavior,
+  grounding, output, prompt shape, and provider-standard tool requirements. It
+  is selected by a registered application purpose and remains distinct from a
+  provider/model runtime profile.
+- Runtime profiles may bind a detailed purpose explicitly before using its
+  execution-class default. This is operator-owned deterministic selection, not
+  caller choice or runtime failure fallback.
+- A hybrid run is an explicit application composition of admitted AI calls. It
+  is not an implicit provider fallback after an arbitrary failure.
+- Generated YAML is not accepted as an AI-authored artifact when deterministic
+  serialization can produce it from validated semantic records.
+- Live CLI and Gemma evidence is opt-in heavy validation. Deterministic fixtures
+  remain the closure authority for failure and boundary behavior.
+- Exhaustive cross-provider measurement is deferred. Phase 7 closes on the
+  evidence framework and one useful operating composition, not on statistical
+  proof of a globally optimal provider allocation.
+
+Artifacts:
+
+- [Phase 7 Dashboard](../phase/phase-7.md)
+- [Phase 7 Checklist](../phase/phase-7-checklist.md)
+
 ## Phase Ordering
 
 Phase 1 was reopened on 2026-07-16 after the user clarified that Codex CLI is
@@ -288,8 +368,26 @@ completed on 2026-07-18.
   generation providers. Textus AI resolves and invokes only CNCF-admitted
   Operation/MCP tools, strips provider-native tool selection, and publishes
   counts and digests without prompt, argument, evidence, or provider payloads.
-- Current phase ledger: `docs/phase/phase-6.md`
-- Current next task: define the next runtime capability phase.
+- Phase 7: open on 2026-07-23. Sanpomap is the development driver for a
+  cost-aware operational evidence framework. The initial hypothesis is that
+  local Gemma plus subscription-backed CLI execution and staged prompts can
+  reduce direct API cost; the framework records evidence without assuming that
+  hypothesis is true or requiring exhaustive replay.
+- Phase 7 also increases purpose resolution and separates provider-standard
+  tools from CNCF-owned Operation/MCP evidence application.
+- Completed Work A: SP-00 - `researchScenarioDsl` composes bootstrap-admitted
+  CNCF Operation/MCP evidence outside Textus AI, bounds it as ordinary prompt
+  input, and rejects any attempt to re-enter a runner-owned CNCF tool loop.
+  The released CNCF Port contracts were sufficient; no CNCF source change was
+  required.
+- Current phase ledger: `docs/phase/phase-7.md`
+- Required Work B: SP-01 - fix the safe observation and metric-reference
+  contract.
+- Required Work C: SP-02 - connect one Sanpomap operational flow to Textus
+  Corpus and Textus Experiment through assembled SPI operations.
+- Required Work D: SP-03 - implement detailed purposes, purpose-specific
+  runtime bindings, Sanpomap internal step mappings, and provider-standard tool
+  compatibility validation.
 - Exploration input: `docs/notes/car-review-ai-runtime-design.md`
 - Historical handoff: `docs/journal/2026/07/2026-07-16-car-review-ai-runtime-requirements.md`
 

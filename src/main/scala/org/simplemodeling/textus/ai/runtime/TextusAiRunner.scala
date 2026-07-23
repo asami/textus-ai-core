@@ -27,7 +27,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -49,6 +49,7 @@ final class TextusAiRunner(
       )
       _with_generate_calltree(req, resolution.requirement, maxtokens, policymetadata) {
         for {
+          _ <- _validate_external_cncf_evidence_strategy(req, resolution)
           _ <- resolution.policy.validateInputBudget(inputestimate)
           costadmission <- if (resolution.operationalStrategy.isEmpty)
             resolution.costAdmissionC(inputestimate, maxtokens)
@@ -82,6 +83,23 @@ final class TextusAiRunner(
         } yield response
       }
     }
+
+  /* Application-composed CNCF evidence must never re-enter a runner-owned tool loop. */
+  private def _validate_external_cncf_evidence_strategy(
+    req: AiGenerateRequest,
+    resolution: AiProfileResolution
+  ): Consequence[Unit] =
+    if (
+      req.metadata.get("cncf.evidence.composed").contains("true") &&
+      resolution.operationalStrategy.exists { strategy =>
+        strategy.primary.mcpServerSet.nonEmpty || strategy.primary.operationToolSet.nonEmpty
+      }
+    )
+      Consequence.configurationInvalid(
+        "Application-composed CNCF evidence cannot use a Textus AI Operation/MCP tool strategy."
+      )
+    else
+      Consequence.unit
 
   private def _generate_once(
     req: AiGenerateRequest,
