@@ -176,10 +176,48 @@ final case class AiExecutionObservationContext(
 )
 
 object AiExecutionObservation {
+  // This response metadata is a safe, generic AiRunner handoff. Applications
+  // add their assessment, evidence identities, and artifact references later.
+  val rateScheduleSnapshotMetadataKey = "ai.observation.identity.rate_schedule_snapshot"
+
+  def runtimeFacts(response: AiGenerateResponse): Map[String, String] = {
+    val runtime = _runtime(response)
+    runtime.identity.map { case (key, value) => s"ai.observation.identity.$key" -> value } ++
+      runtime.measurements.toVector.flatMap { case (key, measurement) =>
+        measurement.safeFacts(s"ai.observation.measurement.$key")
+      }.toMap ++
+      runtime.providerStandardTools.safeFacts ++
+      runtime.cncfEvidence.safeFacts ++
+      Option.when(runtime.limitations.nonEmpty)(
+        "ai.observation.limitations" -> runtime.limitations.mkString(",")
+      )
+  }
+
   def from(
     response: AiGenerateResponse,
     context: AiExecutionObservationContext
   ): AiExecutionObservation = {
+    val runtime = _runtime(response)
+    AiExecutionObservation(
+      identity = runtime.identity,
+      measurements = runtime.measurements,
+      providerStandardTools = runtime.providerStandardTools,
+      cncfEvidence = runtime.cncfEvidence.copy(sources = _ids(context.cncfEvidenceSources)),
+      assessment = _sanitize_assessment(context.assessment),
+      references = context.references,
+      limitations = runtime.limitations
+    )
+  }
+
+  private final case class _Runtime(
+    identity: Map[String, String],
+    measurements: Map[String, AiObservationMeasurement],
+    providerStandardTools: AiProviderStandardToolObservation,
+    cncfEvidence: AiCncfEvidenceObservation,
+    limitations: Vector[String]
+  )
+
+  private def _runtime(response: AiGenerateResponse): _Runtime = {
     val metadata = response.metadata
     val provider = _value(metadata, AiExecutionFacts.PROVIDER)
     val identity = Vector(
@@ -195,7 +233,7 @@ object AiExecutionObservation {
       "location" -> _value(metadata, AiExecutionFacts.LOCATION),
       "operational_strategy" -> _value(metadata, AiExecutionFacts.OPERATIONAL_STRATEGY),
       "policy_snapshot" -> _value(metadata, AiExecutionFacts.POLICY_SNAPSHOT_ID),
-      "rate_schedule" -> _value(metadata, AiExecutionFacts.RATE_SCHEDULE_ID),
+      "rate_schedule_snapshot" -> _value(metadata, rateScheduleSnapshotMetadataKey),
       "input_digest" -> _value(metadata, AiExecutionFacts.INPUT_DIGEST),
       "output_digest" -> _value(metadata, AiExecutionFacts.OUTPUT_DIGEST)
     ).collect { case (key, Some(value)) => key -> value }.toMap
@@ -211,17 +249,15 @@ object AiExecutionObservation {
       "total_tokens" -> _usage_measurement(metadata, AiExecutionFacts.TOTAL_TOKENS),
       "monetary_cost_microunits" -> _cost_measurement(metadata, local, managedcli)
     )
-    AiExecutionObservation(
+    _Runtime(
       identity = identity,
       measurements = measurements,
       providerStandardTools = _provider_standard_tools(metadata, provider),
       cncfEvidence = AiCncfEvidenceObservation(
-        sources = _ids(context.cncfEvidenceSources),
+        sources = Vector.empty,
         operationCalls = _cncf_measurement(metadata, "operation_calls"),
         mcpCalls = _cncf_measurement(metadata, "mcp_calls")
       ),
-      assessment = _sanitize_assessment(context.assessment),
-      references = context.references,
       limitations = _ids(metadata.get(AiExecutionFacts.LIMITATION_CODES).toVector.flatMap(_.split(",")))
     )
   }

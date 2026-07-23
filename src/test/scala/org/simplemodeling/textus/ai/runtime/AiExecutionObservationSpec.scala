@@ -28,7 +28,7 @@ final class AiExecutionObservationSpec extends AnyWordSpec with Matchers {
           "ai.usage.input_tokens_source" -> "reported",
           "ai.usage.output_tokens" -> "80",
           "ai.usage.output_tokens_source" -> "reported",
-          "ai.accounting.rate_schedule_id" -> "openai-2026-07",
+          "ai.observation.identity.rate_schedule_snapshot" -> "sha256:openai-2026-07",
           "ai.accounting.cost_microunits" -> "340",
           "ai.accounting.cost_basis" -> "measured",
           "ai.execution.input_digest" -> "sha256:input",
@@ -59,6 +59,27 @@ final class AiExecutionObservationSpec extends AnyWordSpec with Matchers {
       observation.cncfEvidence.sources shouldBe Vector("mcp:places.lookup", "operation:place-search")
       observation.safeFacts.values.mkString("\n") should not include response.text
       observation.safeFacts.values.mkString("\n") should not include "must-not-escape"
+    }
+
+    "publish a generic runtime handoff without application evidence fields" in {
+      val response = AiGenerateResponse(
+        "This response must not be retained.",
+        metadata = Map(
+          "ai.execution.provider" -> "gemma",
+          "ai.execution.location" -> "local",
+          "ai.execution.input_digest" -> "sha256:input",
+          "ai.accounting.rate_schedule_id" -> "operator-private-rate-id"
+        )
+      )
+
+      val facts = AiExecutionObservation.runtimeFacts(response)
+
+      facts("ai.observation.identity.provider") shouldBe "gemma"
+      facts("ai.observation.measurement.monetary_cost_microunits.state") shouldBe "not-applicable"
+      facts.values.mkString("\n") should not include response.text
+      facts.values.mkString("\n") should not include "operator-private-rate-id"
+      facts.keys.exists(_.contains("reference")) shouldBe false
+      facts.keys.exists(_.contains("assessment")) shouldBe false
     }
 
     "keep local and subscription CLI monetary cost distinct from zero" in {

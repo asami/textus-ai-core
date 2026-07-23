@@ -57,6 +57,7 @@ private[textus] final case class AiAccountingFacts(
   def responseMetadata: Map[String, String] =
     Vector(
       AiExecutionFacts.POLICY_SNAPSHOT_ID -> policySnapshotId,
+      AiExecutionObservation.rateScheduleSnapshotMetadataKey -> rateScheduleId.map(AiExecutionFacts.digest),
       AiExecutionFacts.PROVIDER_REQUEST_ID -> providerRequestId,
       AiExecutionFacts.LIMITATION_CODES -> Option.when(limitations.nonEmpty)(
         limitations.map(_.trim.toLowerCase(Locale.ROOT)).filter(_.nonEmpty).distinct.sorted.mkString(",")

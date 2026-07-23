@@ -17,6 +17,13 @@ The contract is implemented in
 projection is intentionally limited to generate responses; chat can gain the
 same projection when a Phase 7 application needs it.
 
+`TextusAiRunner` additionally emits the runtime-owned subset under
+`ai.observation.*` in the generic `AiGenerateResponse.metadata` and
+`AiChatResponse.metadata` contracts. This is the application integration
+boundary: an assembled consumer such as Sanpomap must consume only those facts
+through the CNCF `AiRunner` SPI. It must not add a source-level dependency on
+the Textus AI runtime implementation in order to construct an observation.
+
 ## Input Boundary
 
 The projection accepts:
@@ -43,6 +50,11 @@ The projection deliberately does not accept or retain:
 It uses only the normalized Textus AI keys required for comparison. The
 execution and output digests are retained as stable correlation facts rather
 than the corresponding contents.
+
+The runtime-owned fact subset contains no application acceptance or artifact
+references. The application adds those fields after deterministic validation.
+The rate-schedule identity remains CallTree-only; response metadata carries a
+digest snapshot when a schedule is active.
 
 ## Recorded Facts
 

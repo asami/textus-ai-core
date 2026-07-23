@@ -74,6 +74,12 @@ CLI, and admission-estimate cost states plus reference confinement. SP-02 must
 still persist the projection from a selected Sanpomap flow through the assembled
 Corpus/Experiment SPI path.
 
+Textus AI also publishes the runtime-owned `ai.observation.*` subset on the
+generic `AiRunner` response metadata contract. This keeps the selected
+application flow on assembled SPI surfaces: consumers add only their
+deterministic assessment and artifact identities and do not link to Textus AI
+implementation classes.
+
 - [ ] Record accepted result, schema validity, evidence validity, elapsed time,
   provider calls, tool calls, reported usage, local/commercial allocation, and
   failure classification.

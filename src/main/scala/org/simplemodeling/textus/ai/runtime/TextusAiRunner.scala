@@ -1014,11 +1014,13 @@ final class TextusAiRunner(
         estimatedusage = inputestimate.usageFacts
       ) ++ AiExecutionFacts.digestMetadata(req.prompt, response.text)
     val accounting = resolution.accountingFacts(metadata, costadmission)
-    _Accounted(AiGenerateResponse(
+    val responsemetadata = AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting)
+    val result = AiGenerateResponse(
       response.text,
       _effective_model(response.model),
-      AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting)
-    ), accounting)
+      responsemetadata
+    )
+    _Accounted(result.copy(metadata = result.metadata ++ AiExecutionObservation.runtimeFacts(result)), accounting)
   }
 
   private def _to_ai_chat_response(
@@ -1039,11 +1041,15 @@ final class TextusAiRunner(
         estimatedusage = inputestimate.usageFacts
       ) ++ AiExecutionFacts.digestMetadata(_chat_input(req), response.message.content)
     val accounting = resolution.accountingFacts(metadata, costadmission)
-    _Accounted(AiChatResponse(
+    val responsemetadata = AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting)
+    val result = AiChatResponse(
       _to_ai_message(response.message),
       _effective_model(response.model),
-      AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting)
-    ), accounting)
+      responsemetadata
+    )
+    _Accounted(result.copy(metadata = result.metadata ++ AiExecutionObservation.runtimeFacts(
+      AiGenerateResponse(result.message.content, result.model, result.metadata)
+    )), accounting)
   }
 
   private def _normalize_record_response(
