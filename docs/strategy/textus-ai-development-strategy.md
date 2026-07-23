@@ -387,6 +387,25 @@ completed on 2026-07-18.
   measurement, and optimization from accumulated observations before extending
   the public operation surface.
 
+### Phase 8: Persisted Comparison Replay Scheduling
+
+Goal: replace the Phase 7 stateless comparison-admission gate with durable,
+operator-bounded replay reservations owned by Textus Experiment and consumed by
+applications through assembled CNCF SPI calls.
+
+Scope:
+
+- retain a reservation lifecycle for reserve, consume, cancel, expiry, and
+  audit;
+- enforce per-run replay-count and budget envelopes without provider selection;
+- retain only safe scheduling facts and opaque evidence references; and
+- establish deterministic Sanpomap assembled-SPI evidence.
+
+Non-goals:
+
+- provider execution, provider/model/tool selection, automatic fan-out,
+  broad provider measurement, and cost optimization.
+
 ## Document Roles
 
 - `docs/strategy/` defines direction and phase ordering.
