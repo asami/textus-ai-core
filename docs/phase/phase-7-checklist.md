@@ -203,24 +203,19 @@ Stage Status:
 - Update rule: Mark DONE when normal execution records evidence without hidden
   duplicate calls and comparison replay requires explicit budget admission.
 
-Implementation evidence (2026-07-23): `textus-sanpomap` exposes the
-deterministic `Evaluation.admitAiComparisonReplay` command. It is disabled
-unless bootstrap configuration explicitly sets
-`textus.sanpomap.ai-comparison-replay.enabled=true` and positive
-`maximum-replay-count` and `maximum-budget-microunits` limits. The command
-accepts only count and budget, never provider/model/tool selection, and rejects
-disabled, malformed, and over-budget declared replays before an evaluation
-driver starts that replay. It is an operator gate, not a persisted reservation
-or a provider execution operation.
-`ComponentFactorySpec` covers those paths. The assembled
-`scripts/check-phase7-ai-observation-assembly.sh` obtains a one-call admission
-before making its one-connection Gemini fixture available, invokes the selected
-`researchScenarioDsl` route exactly once, and persists its sanitized
-observation. It is deterministic fixture evidence, not a paid-provider
-benchmark. On 2026-07-23, the check passed against the freshly built
-`textus-sanpomap-0.2.1-SNAPSHOT.car` on an isolated descriptor-backed runtime.
-A pre-change server returns `404` for the newly added admission operation and
-is deliberately rejected as stale evidence.
+Historical implementation evidence (2026-07-23): Phase 7 first used the
+application-local `Evaluation.admitAiComparisonReplay` gate to prove that
+comparison work was explicitly bounded before a fixture route ran. Phase 8
+supersedes that non-durable gate with Experiment-owned
+`reserveComparisonReplay`, which Sanpomap invokes through
+`Evaluation.reserveAiComparisonReplay`.
+
+The retained `scripts/check-phase7-ai-observation-assembly.sh` fixture now
+reserves one bounded replay, invokes the selected `researchScenarioDsl` route
+exactly once, persists its sanitized observation, consumes the reservation,
+completes the run, and verifies the immutable Experiment summary. It remains
+deterministic fixture evidence, not a paid-provider benchmark. The Phase 8
+wrapper also verifies explicit cancellation of an unstarted reservation.
 
 The native `TEXTUS_AI_LIVE_GEMMA_WORK_TEST=true` heavy specification passed on
 2026-07-23. It selected `gemma3:12b` for `standard-work` through the

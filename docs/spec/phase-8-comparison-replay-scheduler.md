@@ -1,6 +1,6 @@
 # Phase 8 Comparison Replay Scheduler Specification
 
-status=draft
+status=accepted
 scope=P8-RS-01,P8-RS-02
 
 ## Reservation Contract

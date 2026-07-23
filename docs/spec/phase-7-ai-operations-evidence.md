@@ -51,14 +51,18 @@ failure. It does not select an implicit provider, model, tool, or fallback.
   payloads, credentials, endpoints, request identifiers, and arbitrary
   metadata.
 
-### Comparison Replay
+### Historical Comparison Replay Boundary
 
-- `Evaluation.admitAiComparisonReplay` is disabled unless the operator enables
-  it and supplies positive replay-count and budget limits.
-- The command rejects malformed or over-limit declarations and accepts no
-  provider/model/endpoint/tool selection.
-- The assembled evaluation driver calls this gate before its bounded comparison
-  replay. Ordinary operation does not invoke a duplicate route.
+Phase 7 established that a comparison replay must be explicitly bounded and
+must not accept provider/model/endpoint/tool selection. Its initial
+application-local `Evaluation.admitAiComparisonReplay` gate has been replaced
+by the durable Phase 8 scheduler.
+
+The current contract is `ExperimentManagement.reserveComparisonReplay`, used
+by Sanpomap through `Evaluation.reserveAiComparisonReplay`. It retains the
+reservation lifecycle, capacity envelope, and terminal audit state before an
+application starts its bounded comparison route. See the Phase 8 scheduler
+specification for the active contract.
 
 ## Executable Evidence
 
@@ -68,11 +72,12 @@ failure. It does not select an implicit provider, model, tool, or fallback.
 | Required tool admission before provider execution | `TextusAiRunnerSpec`, `AiProviderAdmissionSpec` |
 | Safe runtime observation projection | `AiExecutionObservationSpec` |
 | Application-purpose ownership and CNCF evidence boundary | Sanpomap `ComponentFactorySpec` |
-| Replay gate and observation validation | Sanpomap `ComponentFactorySpec` |
+| Observation validation and Phase 8 reservation lifecycle | Sanpomap and Experiment `ComponentFactorySpec` |
 | Current-CAR assembled path | `textus-sanpomap/scripts/check-phase7-ai-observation-assembly.sh` |
 
 The assembled specification publishes an immutable Corpus revision, selects
 `scenario-simple`, defines an Experiment arm/run, invokes one deterministic
 Gemini Interactions fixture through the selected `grounded-research` route,
 records the sanitized observation, and re-reads it through
-`ExperimentManagement`.
+`ExperimentManagement`. The Phase 8 wrapper also proves reservation terminal
+states and completed-run aggregation.

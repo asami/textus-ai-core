@@ -47,7 +47,7 @@ before a comparison route runs and retain its terminal disposition afterward.
 | --- | --- | --- |
 | P8-RS-01 | Persisted reservation lifecycle through Experiment and assembled Sanpomap SPI | complete |
 | P8-RS-02 | Operational replay scheduler integration and recovery procedure | complete |
-| P8-RS-03 | Accumulated-evidence comparison and measurement policy | pending |
+| P8-RS-03 | Accumulated-evidence comparison and measurement policy | complete |
 
 ## Current Evidence
 
@@ -55,6 +55,10 @@ before a comparison route runs and retain its terminal disposition afterward.
   CARs, starts and stops an isolated runtime, verifies the provider-backed
   reservation reaches `Consumed`, and verifies a no-provider reservation is
   explicitly recovered as `Cancelled`.
+- The same assembled path completes the provider-backed Experiment run and
+  verifies its immutable `summarizeExperimentRun` aggregate. The accepted
+  policy defines that completed run as the comparison boundary without adding
+  provider ranking, pricing, or cross-run normalization.
 
 ## Closure Criteria
 
@@ -65,6 +69,9 @@ before a comparison route runs and retain its terminal disposition afterward.
   reservations remain auditable and counted.
 - Sanpomap has executable assembled-SPI evidence and retains no independent
   reservation state.
+- A completed provider-backed run has executable evidence for its deterministic
+  accumulated outcome summary, and the comparison policy preserves opaque
+  measurement evidence without inferring a score or cost.
 - No Textus AI provider/model/tool selection enters the scheduler contract.
 - Deterministic component tests, relevant assembled tests, and CAR lint pass
   without a new failure.

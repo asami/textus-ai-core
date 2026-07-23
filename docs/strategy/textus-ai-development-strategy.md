@@ -383,9 +383,9 @@ completed on 2026-07-18.
   [Phase 7 closure](../phase/phase-7-closure.md),
   [AI Operations Evidence Framework](../design/ai-operations-evidence-framework.md),
   and [Phase 7 AI Operations Evidence Specification](../spec/phase-7-ai-operations-evidence.md).
-- A later phase must define persisted replay reservation, broad provider/cost
-  measurement, and optimization from accumulated observations before extending
-  the public operation surface.
+- Phase 8 now defines persisted replay reservation and a completed-run
+  accumulated-evidence policy. Broad provider/cost measurement and optimization
+  remain later work before extending the public operation surface.
 
 ### Phase 8: Persisted Comparison Replay Scheduling
 
@@ -399,7 +399,9 @@ Scope:
   audit;
 - enforce per-run replay-count and budget envelopes without provider selection;
 - retain only safe scheduling facts and opaque evidence references; and
-- establish deterministic Sanpomap assembled-SPI evidence.
+- establish deterministic Sanpomap assembled-SPI evidence; and
+- define completed-run accumulated-evidence comparison without provider ranking
+  or cost inference.
 
 Non-goals:
 

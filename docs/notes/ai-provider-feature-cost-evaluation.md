@@ -95,13 +95,15 @@ counts.
 7. Record an immutable Experiment observation with references to those
    artifacts, then complete and summarize the run.
 
-The initial replay gate is Sanpomap
-`Evaluation.admitAiComparisonReplay`. It is default-disabled and reads only
-operator bootstrap configuration for enablement, a maximum replay count, and a
-maximum budget in microunits. The command has no provider/model/tool inputs.
-An evaluation driver must obtain that admission before starting an additional
-assembled execution-plan arm. Sanpomap's Phase 7 assembled specification does
-so before its deterministic provider fixture is made available; it does not
+The initial Phase 7 replay gate has been replaced by the durable Phase 8
+Experiment scheduler. Sanpomap invokes
+`Evaluation.reserveAiComparisonReplay`, which delegates to
+`ExperimentManagement.reserveComparisonReplay` before starting an additional
+assembled execution-plan arm. The scheduler owns enablement, per-run replay
+count and budget envelopes, expiry, consumption, cancellation, and audit state;
+it accepts no provider/model/tool inputs. Sanpomap's assembled fixture reserves
+one bounded replay before making its deterministic provider fixture available,
+then consumes the reservation and completes the Experiment run. It does not
 start a paid provider or claim comparison results.
 
 ## Comparable Facts
