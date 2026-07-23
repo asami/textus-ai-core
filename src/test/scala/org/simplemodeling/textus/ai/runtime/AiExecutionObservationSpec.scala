@@ -122,6 +122,61 @@ final class AiExecutionObservationSpec extends AnyWordSpec with Matchers {
       )
     }
 
+    "retain tool, CNCF, failure, and rate evidence without retaining provider payloads" in {
+      val observation = AiExecutionObservation.from(
+        AiGenerateResponse("unused", metadata = Map(
+          "ai.execution.provider" -> "google",
+          "ai.execution.location" -> "remote",
+          "ai.execution.attempt_lineage" -> "1:google:initial:success,2:google:retry:success",
+          "ai.execution.tools" -> "web_search,url_context",
+          "ai.execution.enabled_tools" -> "web_search,url_context",
+          "ai.execution.tool_result_summary" -> "google_search_calls=2;google_search_results=3;url_context_calls=1;url_context_citations=4",
+          "google.operation_calls" -> "1",
+          "google.mcp_calls" -> "2",
+          "ai.usage.input_tokens" -> "100",
+          "ai.usage.input_tokens_source" -> "estimated",
+          "ai.usage.output_tokens" -> "40",
+          "ai.usage.output_tokens_source" -> "reported",
+          "ai.accounting.cost_microunits" -> "320",
+          "ai.accounting.cost_basis" -> "measured",
+          "ai.observation.identity.rate_schedule_snapshot" -> "sha256:operator-rate-snapshot",
+          "google.raw_grounding_payload" -> "must-not-escape"
+        )),
+        _context.copy(assessment = AiObservationAssessment(
+          AiObservationOutcome.Failed,
+          AiObservationValidity.Unavailable,
+          AiObservationValidity.NotApplicable,
+          failureClassification = Some("PROVIDER_TIMEOUT"),
+          reasonCodes = Vector("retry-exhausted")
+        ))
+      )
+
+      observation.identity("rate_schedule_snapshot") shouldBe "sha256:operator-rate-snapshot"
+      observation.measurements("provider_calls") shouldBe AiObservationMeasurement(
+        AiObservationMeasurementState.Reported,
+        Some(2),
+        Some("attempt-lineage")
+      )
+      observation.measurements("input_tokens") shouldBe AiObservationMeasurement(
+        AiObservationMeasurementState.Estimated,
+        Some(100)
+      )
+      observation.measurements("output_tokens") shouldBe AiObservationMeasurement(
+        AiObservationMeasurementState.Reported,
+        Some(40)
+      )
+      observation.measurements("cached_input_tokens").state shouldBe AiObservationMeasurementState.Unavailable
+      observation.providerStandardTools.admitted shouldBe Vector("url_context", "web_search")
+      observation.providerStandardTools.admissionState shouldBe AiObservationMeasurementState.Reported
+      observation.providerStandardTools.calls("web_search").value shouldBe Some(2)
+      observation.providerStandardTools.returnedContext("url_context").value shouldBe Some(4)
+      observation.providerStandardTools.chargeBasis("web_search") shouldBe AiObservationMeasurementState.Unavailable
+      observation.cncfEvidence.operationCalls.value shouldBe Some(1)
+      observation.cncfEvidence.mcpCalls.value shouldBe Some(2)
+      observation.assessment.failureClassification shouldBe Some("provider_timeout")
+      observation.safeFacts.values.mkString("\n") should not include "must-not-escape"
+    }
+
     "reject references that could carry a payload or arbitrary URL" in {
       an[IllegalArgumentException] shouldBe thrownBy {
         AiObservationReferences(

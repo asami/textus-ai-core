@@ -281,8 +281,8 @@ object AiExecutionObservation {
       val label = if (wire == "google_search") "google_search_results" else s"${wire}_citations"
       logical -> _summary_measurement(summary, label)
     }.toMap
-    val requested = _ids(_value(metadata, AiExecutionFacts.TOOLS).toVector.flatMap(_.split(",")))
-    val admitted = _ids(_value(metadata, AiExecutionFacts.ENABLED_TOOLS).toVector.flatMap(_.split(",")))
+    val requested = _ids(metadata.get(AiExecutionFacts.TOOLS).toVector.flatMap(_.split(",")))
+    val admitted = _ids(metadata.get(AiExecutionFacts.ENABLED_TOOLS).toVector.flatMap(_.split(",")))
     AiProviderStandardToolObservation(
       requested = requested,
       admitted = admitted,
@@ -298,10 +298,15 @@ object AiExecutionObservation {
   }
 
   private def _provider_calls(metadata: Map[String, String]): AiObservationMeasurement =
-    _value(metadata, AiExecutionFacts.ATTEMPT_LINEAGE) match {
-      case Some(value) => AiObservationMeasurement(AiObservationMeasurementState.Reported, Some(value.split(",").count(_.trim.nonEmpty)), Some("attempt-lineage"))
+    _attempt_count(metadata.get(AiExecutionFacts.ATTEMPT_LINEAGE)) match {
+      case Some(value) => AiObservationMeasurement(AiObservationMeasurementState.Reported, Some(value), Some("attempt-lineage"))
       case None => AiObservationMeasurement(AiObservationMeasurementState.Unavailable)
     }
+
+  private def _attempt_count(value: Option[String]): Option[Long] =
+    value.map(_.split(",").toVector.map(_.trim).filter(_.matches("[0-9]+:[a-z0-9._-]+:[a-z0-9._-]+:[a-z0-9._-]+")).size)
+      .filter(_ > 0)
+      .map(_.toLong)
 
   private def _cost_measurement(
     metadata: Map[String, String],

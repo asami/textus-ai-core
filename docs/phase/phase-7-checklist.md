@@ -59,7 +59,7 @@ before its loop starts.
 ## Stage SP-01 - Observation Framework
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI, Textus Experiment, and Sanpomap maintainers
 - Update rule: Mark DONE only when one safe observation contract can represent
   local, CLI, and API execution without requiring every route to be run.
@@ -70,30 +70,37 @@ normalized execution metadata, application-owned acceptance facts, safe CNCF
 source identities, and opaque artifact references; it excludes prompt/output
 content, provider payloads and request IDs, credentials, endpoints, and
 arbitrary metadata. The focused specification proves API, local, subscription
-CLI, and admission-estimate cost states plus reference confinement. SP-02 must
-still persist the projection from a selected Sanpomap flow through the assembled
+CLI, and admission-estimate cost states plus reference confinement. SP-02
+persists the projection from a selected Sanpomap flow through the assembled
 Corpus/Experiment SPI path.
 
 Textus AI also publishes the runtime-owned `ai.observation.*` subset on the
 generic `AiRunner` response metadata contract. This keeps the selected
 application flow on assembled SPI surfaces: consumers add only their
 deterministic assessment and artifact identities and do not link to Textus AI
-implementation classes.
+implementation classes. `AiExecutionObservationSpec` verifies the
+provider-neutral safe projection for measured and estimated API usage,
+unavailable usage, local not-applicable cost, subscription CLI unavailable
+cost, provider attempt count, requested/admitted provider-standard tools,
+returned context, tool charge-basis state, separate CNCF Operation/MCP call
+counts, rate-schedule snapshot, sanitized failure classification, and
+reference confinement. It also proves raw provider fields never enter the
+metric artifact.
 
-- [ ] Record accepted result, schema validity, evidence validity, elapsed time,
+- [x] Record accepted result, schema validity, evidence validity, elapsed time,
   provider calls, tool calls, reported usage, local/commercial allocation, and
   failure classification.
-- [ ] Record provider-standard tool requirements, admitted tools, actual calls,
+- [x] Record provider-standard tool requirements, admitted tools, actual calls,
   returned-context usage, and tool-specific charge basis separately from CNCF
   Operation and MCP evidence calls.
-- [ ] Retain prompt-contract and strategy version, execution-plan reference,
+- [x] Retain prompt-contract and strategy version, execution-plan reference,
   rate-schedule snapshot, and sanitized execution/acceptance metrics as
   evidence references.
-- [ ] Preserve reported, estimated, unavailable, and not-applicable as distinct
+- [x] Preserve reported, estimated, unavailable, and not-applicable as distinct
   measurement states; an absent value is never recorded as zero.
-- [ ] Calculate API cost only from observed usage and a versioned operator rate
+- [x] Calculate API cost only from observed usage and a versioned operator rate
   schedule. Keep the rate-schedule identity and basis with the metric artifact.
-- [ ] Record subscription-backed CLI plan/quota facts without fabricating a
+- [x] Record subscription-backed CLI plan/quota facts without fabricating a
   per-call monetary amount; record API-key-backed CLI use as API billing when
   the provider reports enough usage.
 
