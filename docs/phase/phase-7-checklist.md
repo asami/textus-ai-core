@@ -117,6 +117,17 @@ Stage Status:
   assembled CNCF component SPI operations without Textus AI implementation
   dependencies on either CAR.
 
+Implementation progress (2026-07-23): `textus-sanpomap` now exposes the
+`Evaluation.recordAiExecutionObservation` command. It accepts only the
+runtime-owned `ai.observation.*` facts published through the generic
+`AiRunner` response, validates artifact-only references and application-owned
+assessment fields, confirms the corpus-case revision through `CorpusRegistry`,
+and invokes `ExperimentManagement.recordObservation` through the assembled
+component path. Its executable specification proves that raw model output is
+rejected before either assembled component is contacted. The remaining SP-02
+evidence is one assembled run with a published Corpus revision and active
+Experiment arm; the command must not be treated as proof until that run exists.
+
 ## Stage SP-03 - Detailed Purpose Catalog
 
 Stage Status:

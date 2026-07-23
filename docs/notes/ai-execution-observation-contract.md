@@ -88,11 +88,15 @@ than silently treating provider-standard tool use as free.
 ## Ownership And Use
 
 Sanpomap owns the application assessment and the lifecycle/retention of the
-three evidence artifacts. It stores the `safeFacts` projection in its
-sanitized metric artifact, then passes the three artifact identifiers to
-`ExperimentManagement.recordObservation`. Textus AI does not import Corpus or
-Experiment implementation classes and does not persist observations itself.
+three evidence artifacts. Its `recordAiExecutionObservation` command accepts
+the runtime-owned `ai.observation.*` projection, adds only application-owned
+assessment and artifact-reference facts, then passes the three artifact
+identifiers to `ExperimentManagement.recordObservation`. It first confirms the
+corpus-case revision through `CorpusRegistry`. Textus AI does not import Corpus
+or Experiment implementation classes and does not persist observations itself.
 
-SP-02 will connect one selected Sanpomap execution to this contract through
-the assembled Corpus and Experiment SPI path. This contract does not perform
-provider fan-out or create additional paid AI requests.
+The command and its boundary specification are implemented. SP-02 remains open
+until one selected Sanpomap execution traverses the assembled Corpus and
+Experiment SPI path with a published immutable revision and active experiment
+arm. This contract does not perform provider fan-out or create additional paid
+AI requests.
