@@ -408,6 +408,11 @@ Non-goals:
 - provider execution, provider/model/tool selection, automatic fan-out,
   broad provider measurement, and cost optimization.
 
+Closure artifacts: [Phase 8 dashboard](../phase/phase-8.md),
+[Phase 8 closure](../phase/phase-8-closure.md),
+[scheduler specification](../spec/phase-8-comparison-replay-scheduler.md), and
+[accumulated-evidence policy](../spec/phase-8-accumulated-evidence-comparison.md).
+
 ## Document Roles
 
 - `docs/strategy/` defines direction and phase ordering.

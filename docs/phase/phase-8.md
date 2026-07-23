@@ -1,7 +1,8 @@
 # Phase 8 - Persisted Comparison Replay Scheduling
 
-status=in-progress
+status=complete
 started_at=2026-07-23
+completed_at=2026-07-24
 scope=Textus AI operational evidence ecosystem
 
 ## Goal
@@ -59,6 +60,8 @@ before a comparison route runs and retain its terminal disposition afterward.
   verifies its immutable `summarizeExperimentRun` aggregate. The accepted
   policy defines that completed run as the comparison boundary without adding
   provider ranking, pricing, or cross-run normalization.
+- [Phase 8 closure](phase-8-closure.md) maps every closure criterion to its
+  current deterministic, assembled, and CAR-lint evidence.
 
 ## Closure Criteria
 
