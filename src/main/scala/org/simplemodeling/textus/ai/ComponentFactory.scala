@@ -24,7 +24,7 @@ import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConc
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -91,8 +91,9 @@ class ComponentFactory extends TextusAiComponent.Factory:
       )
     )
 
+  // This is the mounted CAR identity from project.yaml, not the CML domain name.
   private val _runtime_component_name = "textus-ai-runtime"
-  private val _runtime_component_id = "TextusAiRuntime"
+  private val _runtime_component_id = "textus_ai_runtime"
 
 object ComponentFactory:
   val profileParameterKey: ComponentParameterKey[String] =

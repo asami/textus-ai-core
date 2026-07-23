@@ -73,7 +73,7 @@ final class ComponentFactorySpec
           configuration = ResolvedConfiguration(Configuration.empty, ConfigurationTrace.empty)
         )
         val descriptor = ComponentDescriptor(
-          componentName = Some("TextusAiRuntime"),
+          componentName = Some("textus-ai-runtime"),
           config = Map("textus.ai.profile" -> "gemma")
         )
 
@@ -83,7 +83,7 @@ final class ComponentFactorySpec
           ComponentOrigin.Main,
           componentDescriptors = Vector(descriptor),
           instanceMetadata = Some(ComponentInstanceMetadata(
-            "TextusAiRuntime",
+            "textus-ai-runtime",
             "gemini-instance",
             Map("textus.ai.profile" -> "gemini")
           ))
@@ -110,7 +110,7 @@ final class ComponentFactorySpec
           configuration = ResolvedConfiguration(Configuration.empty, ConfigurationTrace.empty)
         )
         val descriptor = ComponentDescriptor(
-          componentName = Some("TextusAiRuntime"),
+          componentName = Some("textus-ai-runtime"),
           config = Map("textus.ai.profile" -> "gemma")
         )
 
@@ -120,7 +120,7 @@ final class ComponentFactorySpec
           ComponentOrigin.Main,
           componentDescriptors = Vector(descriptor),
           instanceMetadata = Some(ComponentInstanceMetadata(
-            "TextusAiRuntime",
+            "textus-ai-runtime",
             "invalid-instance",
             Map("textus.ai.profile" -> "not-a-textus-ai-profile")
           ))
@@ -143,7 +143,7 @@ final class ComponentFactorySpec
             subsystem,
             ComponentOrigin.Main,
             instanceMetadata = Some(ComponentInstanceMetadata(
-              "TextusAiRuntime",
+              "textus-ai-runtime",
               instance,
               Map("textus.ai.profile" -> profile)
             ))

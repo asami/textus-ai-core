@@ -95,8 +95,10 @@ identifiers to `ExperimentManagement.recordObservation`. It first confirms the
 corpus-case revision through `CorpusRegistry`. Textus AI does not import Corpus
 or Experiment implementation classes and does not persist observations itself.
 
-The command and its boundary specification are implemented. SP-02 remains open
-until one selected Sanpomap execution traverses the assembled Corpus and
-Experiment SPI path with a published immutable revision and active experiment
-arm. This contract does not perform provider fan-out or create additional paid
-AI requests.
+The command and its boundary specification are implemented. On 2026-07-23, the
+opt-in Sanpomap Phase 7 assembled specification published a fresh immutable
+Corpus revision, activated an Experiment arm, recorded one sanitized Gemini
+fixture observation, and re-read the accepted observation through
+`ExperimentManagement`. The verification also rejects fixture credentials and
+raw provider candidate payloads from the metric artifact. This contract does
+not perform provider fan-out or create additional paid AI requests.

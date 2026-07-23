@@ -100,33 +100,41 @@ implementation classes.
 ## Stage SP-02 - Corpus and Experiment SPI Integration
 
 Stage Status:
-- Current status: OPEN
+- Current status: DONE
 - Owner: Textus AI, Textus Corpus, Textus Experiment, and Sanpomap maintainers
 - Update rule: Mark DONE when one selected Sanpomap execution can traverse the
   assembled SPI path and leave immutable referenced evidence.
 
-- [ ] Publish one immutable Textus Corpus revision through `CorpusRegistry`
+- [x] Publish one immutable Textus Corpus revision through `CorpusRegistry`
   for the initial Phase 7 Sanpomap population.
-- [ ] Select at least one useful Sanpomap flow with deterministic application
+- [x] Select at least one useful Sanpomap flow with deterministic application
   acceptance and final assembly.
-- [ ] Register sanitized fixture and expected-evidence references without raw
+- [x] Register sanitized fixture and expected-evidence references without raw
   prompts, credentials, or provider payloads.
-- [ ] Define one Textus Experiment and only the execution-plan arms selected
+- [x] Define one Textus Experiment and only the execution-plan arms selected
   for current operational trials.
-- [ ] Verify `CorpusRegistry` and `ExperimentManagement` are consumed through
+- [x] Verify `CorpusRegistry` and `ExperimentManagement` are consumed through
   assembled CNCF component SPI operations without Textus AI implementation
   dependencies on either CAR.
 
-Implementation progress (2026-07-23): `textus-sanpomap` now exposes the
+Implementation evidence (2026-07-23): `textus-sanpomap` now exposes the
 `Evaluation.recordAiExecutionObservation` command. It accepts only the
 runtime-owned `ai.observation.*` facts published through the generic
 `AiRunner` response, validates artifact-only references and application-owned
 assessment fields, confirms the corpus-case revision through `CorpusRegistry`,
 and invokes `ExperimentManagement.recordObservation` through the assembled
 component path. Its executable specification proves that raw model output is
-rejected before either assembled component is contacted. The remaining SP-02
-evidence is one assembled run with a published Corpus revision and active
-Experiment arm; the command must not be treated as proof until that run exists.
+rejected before either assembled component is contacted.
+
+`textus-sanpomap/scripts/check-phase7-ai-observation-assembly.sh` is the
+opt-in heavy specification. It runs against a descriptor-backed CNCF server
+with Sanpomap as the primary CAR and Corpus, Experiment, Textus AI Runtime,
+GeoResolver, and Toolchain Runner resolved from the configured repository. The
+check publishes a fresh immutable Corpus revision, selects `scenario-simple`,
+defines and activates a single Experiment arm, receives one deterministic
+Gemini fixture response, records the sanitized AI observation, re-reads it
+through `ExperimentManagement.listExperimentObservations`, and rejects a
+fixture API key or raw provider candidate payload in the metric artifact.
 
 ## Stage SP-03 - Detailed Purpose Catalog
 

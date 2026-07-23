@@ -122,7 +122,7 @@ slice. A Textus AI release does not include sibling repository changes.
 | --- | --- | --- | --- |
 | SP-00 | CNCF evidence-execution boundary | A Phase 7 flow composes admitted CNCF Operation/MCP evidence outside Textus AI and passes only evidence to the runner. | done |
 | SP-01 | Observation framework | Safe capability, usage, latency, acceptance, and schedule-relative cost evidence has a stable referenced contract. Initial Textus AI projection implemented; application SPI integration remains open. | open |
-| SP-02 | Corpus and experiment SPI integration | Selected Sanpomap executions can consume immutable cases and record observations through assembled component SPI operations. | open |
+| SP-02 | Corpus and experiment SPI integration | Selected Sanpomap executions can consume immutable cases and record observations through assembled component SPI operations. | done |
 | SP-03 | Detailed purpose catalog | Sanpomap AI steps map to reusable provider-neutral purposes with behavior, output, grounding, and standard-tool profiles. | open |
 | SP-04 | Cost-conscious operational collection | Normal operation records evidence without automatic provider fan-out; replay is explicit and budgeted. | open |
 | SP-05 | Strategy-shape evidence | One-shot, staged-prompt, local-first, and managed-only strategies can be distinguished and compared when exercised. | open |
