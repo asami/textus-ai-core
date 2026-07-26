@@ -27,7 +27,7 @@ import org.simplemodeling.textus.ai.ai.GenerateResponse
  * the common CNCF MCP invocation boundary.
  *
  * @since   Jul. 22, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CommercialToolOrchestrationSpec
@@ -246,17 +246,17 @@ final class CommercialToolOrchestrationSpec
       core = RuntimeContext.core(
         name = s"${provider.id}-commercial-tool-orchestration-spec",
         parent = None,
-        observabilityContext = base.observability,
-        httpDriverOption = Some(driver)
+        observabilitycontext = base.observability,
+        httpdriveroption = Some(driver)
       ),
-      unitOfWorkSupplier = () => uow,
-      unitOfWorkInterpreterFn = new (UnitOfWorkOp ~> Consequence) {
+      unitofworksupplier = () => uow,
+      unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
         def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] =
           new UnitOfWorkInterpreter(uow).interpret(fa)
       },
-      commitAction = _ => (),
-      abortAction = _ => (),
-      disposeAction = _ => (),
+      commitaction = _ => (),
+      abortaction = _ => (),
+      disposeaction = _ => (),
       token = s"${provider.id}-commercial-tool-orchestration-spec"
     )
     context

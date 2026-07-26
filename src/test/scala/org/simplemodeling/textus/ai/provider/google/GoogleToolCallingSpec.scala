@@ -22,7 +22,7 @@ import org.simplemodeling.textus.ai.ai.{ToolCall, ToolChatMessage, ToolChatReque
  * Executable specification for the Gemini Interactions function-call adapter.
  *
  * @since   Jul. 22, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final class GoogleToolCallingSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -172,17 +172,17 @@ final class GoogleToolCallingSpec extends AnyWordSpec with Matchers with GivenWh
       core = RuntimeContext.core(
         name = "google-tool-calling-spec",
         parent = None,
-        observabilityContext = base.observability,
-        httpDriverOption = Some(driver)
+        observabilitycontext = base.observability,
+        httpdriveroption = Some(driver)
       ),
-      unitOfWorkSupplier = () => uow,
-      unitOfWorkInterpreterFn = new (UnitOfWorkOp ~> Consequence) {
+      unitofworksupplier = () => uow,
+      unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
         def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] =
           new UnitOfWorkInterpreter(uow).interpret(fa)
       },
-      commitAction = _ => (),
-      abortAction = _ => (),
-      disposeAction = _ => (),
+      commitaction = _ => (),
+      abortaction = _ => (),
+      disposeaction = _ => (),
       token = "google-tool-calling-spec"
     )
     context

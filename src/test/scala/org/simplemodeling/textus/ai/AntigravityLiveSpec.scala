@@ -22,7 +22,7 @@ import org.simplemodeling.textus.ai.runtime.TextusAiRunnerProvider
  * Normal test runs cancel this suite before contacting the remote service.
  *
  * @since   Jul. 22, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AntigravityLiveSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -101,16 +101,16 @@ final class AntigravityLiveSpec extends AnyWordSpec with Matchers with GivenWhen
       core = RuntimeContext.core(
         name = "textus-ai-live-antigravity",
         parent = Some(scope),
-        observabilityContext = base.observability
+        observabilitycontext = base.observability
       ),
-      unitOfWorkSupplier = () => uow,
-      unitOfWorkInterpreterFn = new (UnitOfWorkOp ~> Consequence) {
+      unitofworksupplier = () => uow,
+      unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
         def apply[A](operation: UnitOfWorkOp[A]): Consequence[A] =
           new UnitOfWorkInterpreter(uow).interpret(operation)
       },
-      commitAction = _ => (),
-      abortAction = _ => (),
-      disposeAction = _ => (),
+      commitaction = _ => (),
+      abortaction = _ => (),
+      disposeaction = _ => (),
       token = "textus-ai-live-antigravity"
     )
     context

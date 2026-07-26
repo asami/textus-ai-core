@@ -22,7 +22,7 @@ import org.simplemodeling.textus.ai.ai.{ToolCall, ToolChatMessage, ToolChatReque
  * Executable specification for the Ollama function-call wire adapter.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final class GemmaToolCallingSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -99,17 +99,17 @@ final class GemmaToolCallingSpec extends AnyWordSpec with Matchers with GivenWhe
       core = RuntimeContext.core(
         name = "gemma-tool-calling-spec",
         parent = None,
-        observabilityContext = base.observability,
-        httpDriverOption = Some(driver)
+        observabilitycontext = base.observability,
+        httpdriveroption = Some(driver)
       ),
-      unitOfWorkSupplier = () => uow,
-      unitOfWorkInterpreterFn = new (UnitOfWorkOp ~> Consequence) {
+      unitofworksupplier = () => uow,
+      unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
         def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] =
           new UnitOfWorkInterpreter(uow).interpret(fa)
       },
-      commitAction = _ => (),
-      abortAction = _ => (),
-      disposeAction = _ => (),
+      commitaction = _ => (),
+      abortaction = _ => (),
+      disposeaction = _ => (),
       token = "gemma-tool-calling-spec"
     )
     context

@@ -24,7 +24,7 @@ import org.simplemodeling.textus.ai.provider.codex.{CodexCliVersion, CodexConfig
  * profile proves adapter intent without a Codex binary, account, or network.
  *
  * @since   Jul. 17, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -419,19 +419,19 @@ final class CodexRuntimeProviderSpec extends AnyWordSpec with Matchers with Give
       core = RuntimeContext.core(
         name = "codex-runtime-provider-spec",
         parent = None,
-        observabilityContext = base.observability
+        observabilitycontext = base.observability
       ).copy(
         processExecutionDriverOption = Some(fixture.profile.driver),
         processExecutionAdmissionOption = Some(fixture.admission)
       ),
-      unitOfWorkSupplier = () => uow,
-      unitOfWorkInterpreterFn = new (UnitOfWorkOp ~> Consequence) {
+      unitofworksupplier = () => uow,
+      unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
         def apply[A](operation: UnitOfWorkOp[A]): Consequence[A] =
           new UnitOfWorkInterpreter(uow).interpret(operation)
       },
-      commitAction = _ => (),
-      abortAction = _ => (),
-      disposeAction = _ => (),
+      commitaction = _ => (),
+      abortaction = _ => (),
+      disposeaction = _ => (),
       token = "codex-runtime-provider-spec"
     )
     context

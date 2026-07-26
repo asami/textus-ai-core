@@ -24,7 +24,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * Normal test runs cancel this suite before contacting Docker or Ollama.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final class GemmaOllamaLiveSpec
@@ -250,17 +250,17 @@ final class GemmaOllamaLiveSpec
       core = RuntimeContext.core(
         name = "textus-ai-live-gemma",
         parent = None,
-        observabilityContext = base.observability,
-        httpDriverOption = Some(new UrlConnectionHttpDriver("http://127.0.0.1"))
+        observabilitycontext = base.observability,
+        httpdriveroption = Some(new UrlConnectionHttpDriver("http://127.0.0.1"))
       ),
-      unitOfWorkSupplier = () => uow,
-      unitOfWorkInterpreterFn = new (UnitOfWorkOp ~> Consequence) {
+      unitofworksupplier = () => uow,
+      unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
         def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] =
           new UnitOfWorkInterpreter(uow).interpret(fa)
       },
-      commitAction = _ => (),
-      abortAction = _ => (),
-      disposeAction = _ => (),
+      commitaction = _ => (),
+      abortaction = _ => (),
+      disposeaction = _ => (),
       token = "textus-ai-live-gemma"
     )
     context

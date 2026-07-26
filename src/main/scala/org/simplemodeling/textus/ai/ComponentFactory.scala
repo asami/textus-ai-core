@@ -24,7 +24,7 @@ import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConc
 
 /*
  * @since   Apr.  9, 2026
- * @version Jul. 23, 2026
+ * @version Jul. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -383,14 +383,14 @@ private[ai] final class TextusAiRuntimeComponent() extends TextusAiComponent {
           kind = ScopeKind.Component,
           name = runtimename,
           parent = Some(parent),
-          observabilityContext = parent.observabilityContext.createChild(
+          observabilitycontext = parent.observabilityContext.createChild(
             parent,
             ScopeKind.Component,
             runtimename
           ),
-          processExecutionDriverOption = runtime.map(_._2),
-          processExecutionAdmissionOption = runtime.map(_._1),
-          scopedConcurrencyAdmissionOption = admission.map(_._1)
+          processexecutiondriveroption = runtime.map(_._2),
+          processexecutionadmissionoption = runtime.map(_._1),
+          scopedconcurrencyadmissionoption = admission.map(_._1)
         )
     }
     _concurrency_state.registerBootstrap(_concurrency.map(_._2).getOrElse(Set.empty))

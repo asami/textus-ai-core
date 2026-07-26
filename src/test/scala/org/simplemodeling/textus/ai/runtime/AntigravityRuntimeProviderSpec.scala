@@ -26,7 +26,7 @@ import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, Ant
  * proves adapter behavior without a Google account or network connection.
  *
  * @since   Jul. 22, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AntigravityRuntimeProviderSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -310,19 +310,19 @@ final class AntigravityRuntimeProviderSpec extends AnyWordSpec with Matchers wit
       core = RuntimeContext.core(
         name = "antigravity-runtime-provider-spec",
         parent = None,
-        observabilityContext = base.observability
+        observabilitycontext = base.observability
       ).copy(
         processExecutionDriverOption = Some(fixture.profile.driver),
         processExecutionAdmissionOption = Some(fixture.admission)
       ),
-      unitOfWorkSupplier = () => uow,
-      unitOfWorkInterpreterFn = new (UnitOfWorkOp ~> Consequence) {
+      unitofworksupplier = () => uow,
+      unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
         def apply[A](operation: UnitOfWorkOp[A]): Consequence[A] =
           new UnitOfWorkInterpreter(uow).interpret(operation)
       },
-      commitAction = _ => (),
-      abortAction = _ => (),
-      disposeAction = _ => (),
+      commitaction = _ => (),
+      abortaction = _ => (),
+      disposeaction = _ => (),
       token = "antigravity-runtime-provider-spec"
     )
     context
