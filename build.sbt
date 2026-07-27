@@ -21,7 +21,6 @@ lazy val root = project
     cozyDelegateProjectDir := None,
     cozyDelegateCommand := Seq("cozy"),
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
-    dependencyOverrides += "org.simplemodeling" %% "simplemodeling-model" % "0.2.0-SNAPSHOT",
     Test / fork := false,
     cozyManifestMetadata ++=
       cozyProjectMetadata.value.mapUnder("packaging.car.manifest_metadata") ++

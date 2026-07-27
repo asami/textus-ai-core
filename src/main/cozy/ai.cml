@@ -287,7 +287,7 @@ Provider identifier used by an LLM session.
   type: MessageRole
   multiplicity: "1"
 - name: content
-  type: String
+  type: AiMessageContent
   multiplicity: "1"
 
 ### DESCRIPTION
@@ -303,3 +303,17 @@ Conversation participant role.
 ### REMARKS
 
 - supported roles are system, user, and assistant
+
+# DATATYPE
+
+## AiMessageContent
+
+### DESCRIPTION
+
+Single-locale provider-neutral message content exchanged with an AI runtime.
+
+### ATTRIBUTE
+
+| name  | type   | multiplicity | min-length | max-length |
+|-------+--------+--------------+------------+------------|
+| value | string | 1            | 0          | 1048576    |

@@ -2,9 +2,11 @@ schemaVersion: 1
 kind: car
 artifactId: textus-ai-runtime
 recommended: 0.1.1
-latestStable: 0.2.0
+latestStable: 0.2.1
 status: active
 aliases: []
+tags: []
+terms: []
 versions:
   - version: 0.1.1
     channel: stable
@@ -34,3 +36,17 @@ versions:
           - 0.5.0
     checksum:
       sha256: dce03e00505aded6e307ce8bee0a7725d107f50633106782c8d0caeb30f25222
+  - version: 0.2.1
+    channel: stable
+    status: active
+    component: textus-ai-runtime
+    publishedAt: 2026-07-27T10:52:36.950046+09:00
+    file: repository/car/textus-ai-runtime/0.2.1/textus-ai-runtime-0.2.1.car
+    runtime:
+      cncf:
+        minimum: 0.5.1
+        excluded: []
+        tested:
+          - 0.5.1
+    checksum:
+      sha256: caf8cda3a35e9810c735b65385c2ac7ae8284125ab62729f77bd9a3530749dc6
