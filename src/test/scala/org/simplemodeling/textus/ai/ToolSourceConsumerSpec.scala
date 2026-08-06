@@ -5,7 +5,7 @@ import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentOrigi
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.mcp.client.*
 import org.goldenport.cncf.operationtool.*
-import org.goldenport.cncf.subsystem.DefaultSubsystemFactory
+import org.goldenport.cncf.testutil.RuntimeBindingAdmissionFixture
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
@@ -15,7 +15,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * Executable specification for the Textus AI admitted tool-source consumer boundary.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 21, 2026
+ * @version Aug.  6, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ToolSourceConsumerSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -33,7 +33,7 @@ final class ToolSourceConsumerSpec extends AnyWordSpec with Matchers with GivenW
         )),
         ConfigurationTrace.empty
       )
-      val subsystem = DefaultSubsystemFactory.default(configuration = configuration)
+      val subsystem = RuntimeBindingAdmissionFixture.default(configuration = configuration)
       val component = new ComponentFactory().create(
         ComponentCreate(subsystem, ComponentOrigin.Main)
       ).primary
