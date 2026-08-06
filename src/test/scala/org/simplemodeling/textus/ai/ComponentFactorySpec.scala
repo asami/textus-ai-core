@@ -2,6 +2,7 @@ package org.simplemodeling.textus.ai
 
 import cats.~>
 import org.goldenport.Consequence
+import org.goldenport.observation.{Cause, Descriptor, Taxonomy}
 import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentDescriptor, ComponentInstanceMetadata, ComponentOrigin}
 import org.goldenport.cncf.admission.ConcurrencyScopeId
 import org.goldenport.cncf.config.{ComponentParameterProvenance, RuntimeConfig}
@@ -9,10 +10,10 @@ import org.goldenport.cncf.context.{ExecutionContext, GlobalContext, RuntimeCont
 import org.goldenport.cncf.mcp.client.McpClientSocket
 import org.goldenport.cncf.processexecution.{LocalProcessExecutionDriver, ProcessArtifactName, ProcessCapabilityId, ProcessExecutionAdmission, ProcessExecutionInputFile, ProcessExecutionRequest, WorkAreaRelativePath}
 import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
-import org.goldenport.cncf.subsystem.Subsystem
+import org.goldenport.cncf.subsystem.{GenericSubsystemDescriptor, Subsystem}
 import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.cncf.workarea.WorkAreaSpace
-import org.goldenport.configuration.{Configuration, ConfigurationTrace, ResolvedConfiguration}
+import org.goldenport.configuration.{Configuration, ConfigurationOrigin, ConfigurationResolution, ConfigurationTrace, ResolvedConfiguration}
 import org.goldenport.configuration.ConfigurationValue
 import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement}
 import org.goldenport.record.Record
@@ -25,7 +26,8 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Jul. 16, 2026
- * @version Jul. 26, 2026
+ *  version Jul. 26, 2026
+ * @version Aug.  5, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ComponentFactorySpec
@@ -52,7 +54,7 @@ final class ComponentFactorySpec
         )
 
         Then("the resolved typed profile is used to construct the runtime provider")
-        val component = result.toOption.value.asInstanceOf[TextusAiRuntimeComponent]
+        val component = result.toOption.value
         val resolution = component.initializationParameters
           .resolve(ComponentFactory.profileParameterKey)
           .toOption
@@ -90,7 +92,7 @@ final class ComponentFactorySpec
         ))
 
         Then("provider construction uses the instance-selected profile")
-        val component = result.toOption.value.asInstanceOf[TextusAiRuntimeComponent]
+        val component = result.toOption.value
         val resolution = component.initializationParameters
           .resolve(ComponentFactory.profileParameterKey)
           .toOption
@@ -139,21 +141,18 @@ final class ComponentFactorySpec
         )
         val factory = new ComponentFactory()
         def _create_(instance: String, profile: String) =
-          factory.createPrimaryC(ComponentCreate(
-            subsystem,
-            ComponentOrigin.Main,
-            instanceMetadata = Some(ComponentInstanceMetadata(
+          factory.createPrimaryC(
+            ComponentCreate(subsystem, ComponentOrigin.Main)
+              .withInstanceMetadata(ComponentInstanceMetadata(
               "textus-ai-runtime",
               instance,
               Map("textus.ai.profile" -> profile)
-            ))
-          ))
+              ))
+          )
 
         When("both instances are initialized independently")
         val gemma = _create_("gemma-instance", "gemma").toOption.value
-          .asInstanceOf[TextusAiRuntimeComponent]
         val gemini = _create_("gemini-instance", "gemini").toOption.value
-          .asInstanceOf[TextusAiRuntimeComponent]
 
         Then("each provider runtime retains only its resolved initialization profile")
         val contract = SpiContract("ai-runner", classOf[AiRunner])
@@ -170,6 +169,349 @@ final class ComponentFactorySpec
       }
     }
 
+    "resolve execution-class initialization paths" which {
+      "project normal component initialization values from the typed route" in {
+        Given("a runtime execution-class value using the canonical public key")
+        given ExecutionContext = ExecutionContext.create()
+        val configuration = ResolvedConfiguration(
+          Configuration(Map(
+            "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+            "textus.ai.execution-classes.standard-work.mcp-server-set" ->
+              ConfigurationValue.StringValue("research")
+          )),
+          ConfigurationTrace.empty
+        )
+        val subsystem = new Subsystem(
+          "textus-ai-execution-class-typed-route",
+          configuration = configuration
+        )
+
+        When("the CNCF initialization boundary creates the Textus AI component")
+        val component = new ComponentFactory().createPrimaryC(
+          ComponentCreate(subsystem, ComponentOrigin.Main)
+        ).toOption.value
+        val route = ComponentFactory.executionClassParameterPathRoute
+        val snapshot = component.initializationParameters.resolvePath(route).toOption.value
+        val segment = snapshot.segments.find(_.value == "standard-work").value
+        val leaf = ComponentFactory._execution_class_parameter_path_leaves
+          .find(_.name == "mcp-server-set").value
+        val resolution = snapshot.resolve(segment, leaf).toOption.value
+
+        Then("the declared path snapshot and unchanged parser receive its canonical value")
+        resolution.value shouldBe Some("research")
+        resolution.provenance shouldBe ComponentParameterProvenance.RuntimeConfiguration
+        component.port.get[McpClientSocket].map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("research"))
+      }
+
+      "prefer a runtime compatibility spelling over a lower named-instance canonical spelling" in {
+        Given("a runtime compatibility key and a lower named-instance canonical key")
+        given ExecutionContext = ExecutionContext.create()
+        val configuration = ResolvedConfiguration(
+          Configuration(Map(
+            "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+            "textus.ai.executionClasses.standard-work.mcpServerSet" ->
+              ConfigurationValue.StringValue("runtime-research")
+          )),
+          ConfigurationTrace.empty
+        )
+        val subsystem = new Subsystem(
+          "textus-ai-execution-class-runtime-compatibility",
+          configuration = configuration
+        )
+
+        When("the named component instance is initialized")
+        val component = new ComponentFactory().createPrimaryC(
+          ComponentCreate(subsystem, ComponentOrigin.Main).withInstanceMetadata(
+            ComponentInstanceMetadata(
+              "textus-ai-runtime",
+              "runtime-compatibility",
+              Map(
+                "textus.ai.execution-classes.standard-work.mcp-server-set" -> "instance-research"
+              )
+            )
+          )
+        ).toOption.value
+        val route = ComponentFactory.executionClassParameterPathRoute
+        val snapshot = component.initializationParameters.resolvePath(route).toOption.value
+        val segment = snapshot.segments.find(_.value == "standard-work").value
+        val leaf = ComponentFactory._execution_class_parameter_path_leaves
+          .find(_.name == "mcp-server-set").value
+        val resolution = snapshot.resolve(segment, leaf).toOption.value
+
+        Then("CNCF precedence selects the runtime alias and the parser sees canonical behavior")
+        resolution.value shouldBe Some("runtime-research")
+        resolution.provenance shouldBe ComponentParameterProvenance.RuntimeConfiguration
+        component.port.get[McpClientSocket].map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("runtime-research"))
+      }
+
+      "prefer a named instance over assembly and packaged execution-class defaults" in {
+        Given("packaged and assembly defaults plus a named component-instance value")
+        given ExecutionContext = ExecutionContext.create()
+        val subsystem = new Subsystem(
+          "textus-ai-execution-class-instance-precedence",
+          configuration = ResolvedConfiguration(
+            Configuration(Map("textus.ai.profile" -> ConfigurationValue.StringValue("gemini"))),
+            ConfigurationTrace.empty
+          )
+        ).withDescriptor(GenericSubsystemDescriptor(
+          java.nio.file.Paths.get("/textus-ai-execution-class-instance-precedence.yaml"),
+          "textus-ai-execution-class-instance-precedence",
+          config = Map(
+            "textus.ai.execution-classes.standard-work.mcp-server-set" -> "assembly-research"
+          )
+        ))
+        val descriptor = ComponentDescriptor(
+          componentName = Some("textus-ai-runtime"),
+          config = Map(
+            "textus.ai.execution-classes.standard-work.mcp-server-set" -> "packaged-research"
+          )
+        )
+
+        When("the named component instance is initialized without a higher overlay")
+        val component = new ComponentFactory().createPrimaryC(ComponentCreate(
+          subsystem,
+          ComponentOrigin.Main,
+          componentDescriptors = Vector(descriptor),
+          instanceMetadata = Some(ComponentInstanceMetadata(
+            "textus-ai-runtime",
+            "instance-precedence",
+            Map(
+              "textus.ai.execution-classes.standard-work.mcp-server-set" -> "instance-research"
+            )
+          ))
+        )).toOption.value
+        val route = ComponentFactory.executionClassParameterPathRoute
+        val snapshot = component.initializationParameters.resolvePath(route).toOption.value
+        val segment = snapshot.segments.find(_.value == "standard-work").value
+        val leaf = ComponentFactory._execution_class_parameter_path_leaves
+          .find(_.name == "mcp-server-set").value
+        val resolution = snapshot.resolve(segment, leaf).toOption.value
+
+        Then("the named-instance value is the immutable typed value consumed by the parser")
+        resolution.value shouldBe Some("instance-research")
+        resolution.provenance shouldBe ComponentParameterProvenance.SubsystemInstance
+        component.port.get[McpClientSocket].map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("instance-research"))
+      }
+
+      "prevent raw nested execution-class values from bypassing the typed projection" in {
+        Given("nested and direct raw execution-class values for the same declared leaf")
+        given ExecutionContext = ExecutionContext.create()
+        val rawtrace = ConfigurationTrace(Map(
+          "textus.ai.execution-classes.standard-work.mcp-server-set" -> ConfigurationResolution(
+            "textus.ai.execution-classes.standard-work.mcp-server-set",
+            ConfigurationValue.StringValue("direct-research"),
+            ConfigurationOrigin.Environment,
+            Nil,
+            sourceType = Some("fixture"),
+            sourceId = Some("raw-route-fixture")
+          )
+        ))
+        val configuration = ResolvedConfiguration(
+          Configuration(Map(
+            "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+            "textus.ai.execution-classes.standard-work.mcp-server-set" ->
+              ConfigurationValue.StringValue("direct-research"),
+            "textus" -> ConfigurationValue.ObjectValue(Map(
+              "ai" -> ConfigurationValue.ObjectValue(Map(
+                "execution-classes" -> ConfigurationValue.ObjectValue(Map(
+                  "standard-work" -> ConfigurationValue.ObjectValue(Map(
+                    "mcp-server-set" -> ConfigurationValue.StringValue("nested-research")
+                  ))
+                ))
+              ))
+            ))
+          )),
+          rawtrace
+        )
+        val subsystem = new Subsystem(
+          "textus-ai-execution-class-raw-projection",
+          configuration = configuration
+        )
+
+        When("component initialization resolves the declared route and projects it for the parser")
+        val component = new ComponentFactory().createPrimaryC(
+          ComponentCreate(subsystem, ComponentOrigin.Main)
+        ).toOption.value
+        val route = ComponentFactory.executionClassParameterPathRoute
+        val snapshot = component.initializationParameters.resolvePath(route).toOption.value
+        val projected = ComponentFactory._execution_class_configuration_c(Some(configuration), snapshot)
+          .toOption.flatten.value
+
+        Then("the direct typed value is canonical, no nested raw route value survives, and the parser projection has no raw provenance")
+        projected.configuration.values.get(
+          "textus.ai.execution-classes.standard-work.mcp-server-set"
+        ) shouldBe Some(ConfigurationValue.StringValue("direct-research"))
+        projected.trace shouldBe ConfigurationTrace.empty
+        configuration.trace shouldBe rawtrace
+        component.port.get[McpClientSocket].map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("direct-research"))
+      }
+
+      "ignore ambient execution-class properties outside the typed projection" in {
+        Given("a unique ambient execution-class JVM property and one real projected class key")
+        given ExecutionContext = ExecutionContext.create()
+        val ambientkey = "textus.ai.execution-classes.deep-thinking.model"
+        val original = Option(System.getProperty(ambientkey))
+        val configuration = ResolvedConfiguration(
+          Configuration(Map(
+            "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+            "textus.ai.execution-classes.standard-work.model" ->
+              ConfigurationValue.StringValue("projected-standard-model")
+          )),
+          ConfigurationTrace.empty
+        )
+
+        try {
+          System.setProperty(ambientkey, "ambient-deep-thinking-model")
+
+          When("normal component initialization discovers and projects the declared route")
+          val component = new ComponentFactory().createPrimaryC(ComponentCreate(
+            new Subsystem("textus-ai-execution-class-ambient-isolation", configuration = configuration),
+            ComponentOrigin.Main
+          )).toOption.value
+          val snapshot = component.initializationParameters
+            .resolvePath(ComponentFactory.executionClassParameterPathRoute)
+            .toOption.value
+          val projected = ComponentFactory._execution_class_configuration_c(Some(configuration), snapshot)
+            .toOption.flatten.value
+          val profiles = AiProfileConfig.fromConfiguration(Some(projected), selectedprofile = Some("gemini"))
+          val standard = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("standard-work")))
+          val deep = profiles.resolveRequired(AiRunnerRequirement(purpose = Some("deep-thinking")))
+
+          Then("only the actual projected segment is discovered, its value applies, and the ambient class value is ignored")
+          snapshot.segments.map(_.value) shouldBe Vector("standard-work")
+          standard.toOption.flatMap(_.requirement.model) shouldBe Some("projected-standard-model")
+          deep.toOption.flatMap(_.requirement.model) shouldBe Some("gemini-2.5-pro")
+        } finally {
+          original match {
+            case Some(value) => System.setProperty(ambientkey, value)
+            case None => System.clearProperty(ambientkey)
+          }
+        }
+      }
+
+      "declare and resolve every execution-class vocabulary spelling through normal initialization" in {
+        Given("the frozen canonical leaves, leaf aliases, and five accepted route prefixes")
+        given ExecutionContext = ExecutionContext.create()
+        val route = ComponentFactory.executionClassParameterPathRoute
+        val canonicalvalues = Vector(
+          "provider" -> "google",
+          "mode" -> "remote",
+          "engine" -> "gemini",
+          "model" -> "gemini-route-model",
+          "reasoning-level" -> "medium",
+          "tools" -> "web_search",
+          "mcp-server-set" -> "route-research",
+          "operation-tool-set" -> "route-operations",
+          "max-input-tokens" -> "1",
+          "max-output-tokens" -> "1",
+          "max-reasoning-tokens" -> "1",
+          "max-cost-microunits" -> "1",
+          "rate-schedule" -> "route-rate",
+          "timeout-seconds" -> "1",
+          "record-retry-limit" -> "1",
+          "max-concurrent" -> "1",
+          "strategy-max-repairs" -> "1",
+          "strategy-max-provider-attempts" -> "1",
+          "fallback-provider" -> "openai",
+          "fallback-mode" -> "remote",
+          "fallback-engine" -> "gpt",
+          "fallback-model" -> "gpt-route-fallback",
+          "fallback-reasoning-level" -> "medium",
+          "fallback-rate-schedule" -> "route-fallback-rate"
+        )
+        val aliases = Vector(
+          "reasoningLevel" -> ("reasoning-level", "medium"),
+          "enabled-tools" -> ("tools", "web_search"),
+          "mcpServerSet" -> ("mcp-server-set", "route-research"),
+          "operationToolSet" -> ("operation-tool-set", "route-operations")
+        )
+        val prefixes = Vector(
+          "textus.ai.execution-classes",
+          "textus.ai.executionClasses",
+          "textus.runtime.ai.execution-classes",
+          "cncf.ai.execution-classes",
+          "cncf.runtime.ai.execution-classes"
+        )
+        val canonicalvaluebyname: Map[String, String] = canonicalvalues.toMap
+        val aliasbyname: Map[String, (String, String)] = aliases.toMap
+
+        When("each spelling is resolved by the declared CNCF route during normal factory initialization")
+        val canonical = canonicalvalues.map { case (leafname, value) =>
+          leafname -> _route_resolution(route, s"${route.prefix}.standard-work.$leafname", leafname, value)
+        }
+        val compatibleprefixes = prefixes.map { prefix =>
+          prefix -> _route_resolution(route, s"$prefix.standard-work.model", "model", prefix)
+        }
+        val compatibleleaves = aliases.map { case (alias, (canonicalname, value)) =>
+          alias -> _route_resolution(route, s"${route.prefix}.standard-work.$alias", canonicalname, value)
+        }
+
+        Then("the public declaration is complete and every canonical or compatibility spelling yields its canonical typed value")
+        route.prefix shouldBe prefixes.head
+        route.prefixAliases shouldBe prefixes.tail
+        route.leaves.map(_.name) shouldBe canonicalvalues.map(_._1)
+        route.leaves.map(leaf => leaf.name -> leaf.aliases).toMap shouldBe Map(
+          "reasoning-level" -> Vector("reasoningLevel"),
+          "tools" -> Vector("enabled-tools"),
+          "mcp-server-set" -> Vector("mcpServerSet"),
+          "operation-tool-set" -> Vector("operationToolSet")
+        ) ++ canonicalvalues.map(_._1).filterNot(Set(
+          "reasoning-level", "tools", "mcp-server-set", "operation-tool-set"
+        )).map(_ -> Vector.empty).toMap
+        canonical.foreach { case (leafname, resolution) =>
+          val expected: Option[String] = canonicalvaluebyname.get(leafname)
+          resolution.value shouldBe expected
+        }
+        compatibleprefixes.foreach { case (prefix, resolution) =>
+          resolution.value shouldBe Some(prefix)
+        }
+        compatibleleaves.foreach { case (alias, resolution) =>
+          val expected: Option[String] = aliasbyname.get(alias).map(_._2)
+          resolution.value shouldBe expected
+        }
+      }
+
+      "reject unknown leaves and invalid route shapes before constructing providers" in {
+        Given("one unknown execution-class leaf and one path with an extra segment")
+        val unknown = ResolvedConfiguration(
+          Configuration(Map(
+            "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+            "textus.ai.execution-classes.standard-work.unknown-leaf" ->
+              ConfigurationValue.StringValue("unexpected")
+          )),
+          ConfigurationTrace.empty
+        )
+        val invalidshape = ResolvedConfiguration(
+          Configuration(Map(
+            "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+            "textus.ai.execution-classes.standard-work.mcp-server-set.extra" ->
+              ConfigurationValue.StringValue("unexpected")
+          )),
+          ConfigurationTrace.empty
+        )
+
+        When("the component factory admits each configuration")
+        val unknownresult = new ComponentFactory().createPrimaryC(ComponentCreate(
+          new Subsystem("textus-ai-execution-class-unknown-leaf", configuration = unknown),
+          ComponentOrigin.Main
+        ))
+        val invalidshaperesult = new ComponentFactory().createPrimaryC(ComponentCreate(
+          new Subsystem("textus-ai-execution-class-invalid-shape", configuration = invalidshape),
+          ComponentOrigin.Main
+        ))
+
+        Then("CNCF rejects both paths before Textus AI can construct a provider")
+        _assert_route_rejection(
+          unknownresult,
+          "textus.ai.execution-classes.standard-work.unknown-leaf"
+        )
+        _assert_route_rejection(
+          invalidshaperesult,
+          "textus.ai.execution-classes.standard-work.mcp-server-set.extra"
+        )
+      }
+    }
+
     "publish runtime ports and providers" which {
       "publish only a normalized MCP client input socket for runtime-owned server sets" in {
         Given("a Textus AI execution class configured with one logical MCP server set")
@@ -182,7 +524,7 @@ final class ComponentFactorySpec
         )
 
         When("the component factory constructs its CNCF Port")
-        val component = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(configuration))
+        val component = _component(configuration)
         val socket = component.port.get[McpClientSocket]
 
         Then("the consumer exposes only the logical requirement and no installed provider details")
@@ -259,7 +601,7 @@ final class ComponentFactorySpec
           )),
           ConfigurationTrace.empty
         )
-        val component = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(configuration))
+        val component = _component(configuration)
 
         When("the component publishes its AI runner SPI provider")
         val provider = component.port.get[TextusAiRunnerProvider]
@@ -275,27 +617,27 @@ final class ComponentFactorySpec
       "bind commercial providers only from merged CNCF configuration" in {
         Given("an empty runtime configuration and explicitly configured commercial runtimes")
         given ExecutionContext = ExecutionContext.create()
-        val empty = ComponentFactory.configureRuntimeSpi(new Component() {}, None)
-        val openaiconfigured = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(ResolvedConfiguration(
+        val empty = _component()
+        val openaiconfigured = _component(ResolvedConfiguration(
           Configuration(Map(
             "textus.ai.openai.api-key" -> ConfigurationValue.StringValue("test-openai-key"),
             "textus.ai.openai.model" -> ConfigurationValue.StringValue("gpt-test")
           )),
           ConfigurationTrace.empty
-        )))
-        val googleconfigured = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(ResolvedConfiguration(
+        ))
+        val googleconfigured = _component(ResolvedConfiguration(
           Configuration(Map(
             "textus.ai.google.api-key" -> ConfigurationValue.StringValue("test-google-key"),
             "textus.ai.google.model" -> ConfigurationValue.StringValue("gemini-test")
           )),
           ConfigurationTrace.empty
-        )))
-        val anthropicconfigured = ComponentFactory.configureRuntimeSpi(new Component() {}, Some(ResolvedConfiguration(
+        ))
+        val anthropicconfigured = _component(ResolvedConfiguration(
           Configuration(Map(
             "textus.ai.anthropic.api-key" -> ConfigurationValue.StringValue("test-anthropic-key")
           )),
           ConfigurationTrace.empty
-        )))
+        ))
         val contract = SpiContract("ai-runner", classOf[AiRunner])
         val openaiselection = SpiSelection(provider = Some("openai"))
         val googleselection = SpiSelection(provider = Some("google"))
@@ -391,7 +733,7 @@ final class ComponentFactorySpec
           ConfigurationTrace.empty
         )
         val profiles = AiProfileConfig.fromConfiguration(Some(configuration), AiApplicationPurposeCatalog.empty)
-        val managed = ComponentFactory.ollamaManagedServiceConfig(Some(configuration), profiles)
+        val managed = ComponentFactory._ollama_managed_service_config(Some(configuration), profiles)
         val subsystem = new Subsystem(
           name = "textus-ai-ollama-scope-spec",
           configuration = configuration
@@ -444,8 +786,8 @@ final class ComponentFactorySpec
         val profiles = AiProfileConfig.fromConfiguration(Some(configuration), AiApplicationPurposeCatalog.empty)
 
         When("the managed service configuration and component scope are inspected")
-        val managed = ComponentFactory.ollamaManagedServiceConfig(Some(configuration), profiles)
-        val gemma = ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem))
+        val managed = ComponentFactory._ollama_managed_service_config(Some(configuration), profiles)
+        val gemma = ComponentFactory._gemma_runtime_config(Some(configuration), profiles, Some(subsystem))
 
         Then("native Ollama remains selected and managed lifecycle is not installed")
         managed shouldBe empty
@@ -471,8 +813,8 @@ final class ComponentFactorySpec
         )
 
         When("the Gemma runtime configuration is resolved")
-        val managed = ComponentFactory.ollamaManagedServiceConfig(Some(configuration), profiles)
-        val gemma = ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem))
+        val managed = ComponentFactory._ollama_managed_service_config(Some(configuration), profiles)
+        val gemma = ComponentFactory._gemma_runtime_config(Some(configuration), profiles, Some(subsystem))
 
         Then("the managed runtime records a structural configuration error and never bootstraps Docker")
         managed shouldBe empty
@@ -710,6 +1052,50 @@ final class ComponentFactorySpec
       }
     }
   }
+
+  private def _component(
+    configuration: ResolvedConfiguration = ResolvedConfiguration(Configuration.empty, ConfigurationTrace.empty)
+  ): Component =
+    new ComponentFactory().createPrimaryC(ComponentCreate(
+      new Subsystem("textus-ai-normal-factory-spec", configuration = configuration),
+      ComponentOrigin.Main
+    )).toOption.value
+
+  private def _route_resolution(
+    route: org.goldenport.cncf.config.ComponentParameterPathRoute,
+    path: String,
+    leafname: String,
+    value: String
+  ) = {
+    val component = _component(ResolvedConfiguration(
+      Configuration(Map(
+        "textus.ai.profile" -> ConfigurationValue.StringValue("gemini"),
+        path -> ConfigurationValue.StringValue(value)
+      )),
+      ConfigurationTrace.empty
+    ))
+    val snapshot = component.initializationParameters.resolvePath(route).toOption.value
+    val segment = snapshot.segments.find(_.value == "standard-work").value
+    val leaf = ComponentFactory._execution_class_parameter_path_leaves.find(_.name == leafname).value
+    snapshot.resolve(segment, leaf).toOption.value
+  }
+
+  private def _assert_route_rejection(
+    result: Consequence[Component],
+    path: String
+  ): Unit =
+    result match {
+      case Consequence.Failure(conclusion) =>
+        val facets = conclusion.observation.cause.descriptor.facets
+        conclusion.observation.taxonomy.category shouldBe Taxonomy.Category.Configuration
+        conclusion.observation.cause.kind shouldBe Some(Cause.Kind.Policy)
+        facets should contain (Descriptor.Facet.Policy("component-initialization-parameter"))
+        facets should contain (Descriptor.Facet.Reason("rejected"))
+        facets should contain (Descriptor.Facet.Parameter.argument(path))
+        result.toOption shouldBe empty
+      case Consequence.Success(component) =>
+        fail(s"route rejection unexpectedly constructed component: ${component.core.name}")
+    }
 
   private def _runtime_context(scope: ScopeContext): ExecutionContext = {
     GlobalContext.set(GlobalContext(WorkAreaSpace.create(RuntimeConfig.default)))

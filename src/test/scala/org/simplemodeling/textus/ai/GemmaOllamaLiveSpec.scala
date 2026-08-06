@@ -62,8 +62,8 @@ final class GemmaOllamaLiveSpec
         withClue(s"Native Gemma/Ollama live response: $response") {
           response.isSuccess shouldBe true
         }
-        ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem)).runtime shouldBe "native"
-        ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem)).bootstrap shouldBe empty
+        ComponentFactory._gemma_runtime_config(Some(configuration), profiles, Some(subsystem)).runtime shouldBe "native"
+        ComponentFactory._gemma_runtime_config(Some(configuration), profiles, Some(subsystem)).bootstrap shouldBe empty
         response.toOption.map(_.text.trim) should not be empty
         response.toOption.flatMap(_.model) shouldBe Some(model)
         response.toOption.flatMap(_.metadata.get("gemma.finish_reason")) should not be empty
@@ -100,7 +100,7 @@ final class GemmaOllamaLiveSpec
         withClue(s"Gemma-work live response: $response") {
           response.isSuccess shouldBe true
         }
-        ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem)).runtime shouldBe "native"
+        ComponentFactory._gemma_runtime_config(Some(configuration), profiles, Some(subsystem)).runtime shouldBe "native"
         response.toOption.map(_.text.trim) should not be empty
         response.toOption.flatMap(_.model) shouldBe Some(model)
         response.toOption.flatMap(_.metadata.get("gemma.finish_reason")) should not be empty
@@ -117,7 +117,7 @@ final class GemmaOllamaLiveSpec
       val configuration = _configuration
       val subsystem = new Subsystem("textus-ai-live-gemma", configuration = configuration)
       val profiles = AiProfileConfig.fromConfiguration(Some(configuration))
-      val gemma = ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem))
+      val gemma = ComponentFactory._gemma_runtime_config(Some(configuration), profiles, Some(subsystem))
       given context: ExecutionContext = _context()
       val component = new Component() {}
         .withBinding("generate", AiRuntimeGenerateBinding.create(Some(gemma), None, None, None))
@@ -155,7 +155,7 @@ final class GemmaOllamaLiveSpec
       val configuration = _tool_configuration
       val subsystem = new Subsystem("textus-ai-live-gemma-tools", configuration = configuration)
       val profiles = AiProfileConfig.fromConfiguration(Some(configuration))
-      val gemma = ComponentFactory.gemmaRuntimeConfig(Some(configuration), profiles, Some(subsystem))
+      val gemma = ComponentFactory._gemma_runtime_config(Some(configuration), profiles, Some(subsystem))
       given context: ExecutionContext = _context()
       val service = new GemmaOllamaChatService(gemma.copy(model = "functiongemma"), context)
 

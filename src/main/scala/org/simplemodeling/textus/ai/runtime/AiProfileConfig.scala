@@ -1,6 +1,5 @@
 package org.simplemodeling.textus.ai.runtime
 
-import scala.util.Try
 import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
 import org.goldenport.cncf.config.RuntimeConfig
@@ -1093,14 +1092,14 @@ private[textus] final class AiProfileConfig(
           executionclass,
           Vector("enabled-tools")
         ).map(_runtime_tools_c).getOrElse(Consequence.success(default.tools))
-        val mcpserversetc = _config_string(
+        val mcpserversetc = _execution_class_string(
           _execution_class_keys(executionclass.id, "mcp-server-set") ++
             _execution_class_keys(executionclass.id, "mcpServerSet")
         ) match {
           case Some(value) => McpServerSetId.parseC(value).map(Some(_))
           case None => Consequence.success(default.mcpServerSet)
         }
-        val operationtoolsetc = _config_string(
+        val operationtoolsetc = _execution_class_string(
           _execution_class_keys(executionclass.id, "operation-tool-set") ++
             _execution_class_keys(executionclass.id, "operationToolSet")
         ) match {
@@ -1138,7 +1137,7 @@ private[textus] final class AiProfileConfig(
       leaves.flatMap(_purpose_binding_keys(purpose, _))
     }
     val classkeys = leaves.flatMap(_execution_class_keys(executionclass.id, _))
-    _config_string(purposekeys ++ classkeys)
+    _config_string(purposekeys).orElse(_execution_class_string(classkeys))
   }
 
   private def _runtime_tools_c(value: String): Consequence[Vector[AiTool]] = {
@@ -1176,7 +1175,7 @@ private[textus] final class AiProfileConfig(
                 s"AI operational strategy requires a Gemma primary execution: ${profile.name}"
               )
             maxrepairs <- _bounded_int(
-              _config_string(_execution_class_keys(identity.executionClass.id, "strategy-max-repairs"))
+              _execution_class_string(_execution_class_keys(identity.executionClass.id, "strategy-max-repairs"))
                 .orElse(Some(profile.maxRepairs.toString)),
               "strategy-max-repairs",
               identity.applicationPurpose,
@@ -1184,7 +1183,7 @@ private[textus] final class AiProfileConfig(
               3
             ).map(_.getOrElse(0))
             maxattempts <- _bounded_int(
-              _config_string(_execution_class_keys(identity.executionClass.id, "strategy-max-provider-attempts"))
+              _execution_class_string(_execution_class_keys(identity.executionClass.id, "strategy-max-provider-attempts"))
                 .orElse(Some(profile.maxProviderAttempts.toString)),
               "strategy-max-provider-attempts",
               identity.applicationPurpose,
@@ -1193,7 +1192,7 @@ private[textus] final class AiProfileConfig(
             ).map(_.getOrElse(1))
             fallback <- _runtime_fallback_execution_c(profile, identity.executionClass)
             fallbackratescheduleid <- _policy_id(
-              _config_string(_execution_class_keys(
+              _execution_class_string(_execution_class_keys(
                 identity.executionClass.id,
                 "fallback-rate-schedule"
               )),
@@ -1245,19 +1244,19 @@ private[textus] final class AiProfileConfig(
     profile.fallbackExecution(executionclass) match {
       case None => Consequence.success(None)
       case Some(default) =>
-        val provider = _config_string(
+        val provider = _execution_class_string(
           _execution_class_keys(executionclass.id, "fallback-provider")
         ).getOrElse(default.provider)
-        val mode = _config_string(
+        val mode = _execution_class_string(
           _execution_class_keys(executionclass.id, "fallback-mode")
         ).getOrElse(default.mode)
-        val engine = _config_string(
+        val engine = _execution_class_string(
           _execution_class_keys(executionclass.id, "fallback-engine")
         ).getOrElse(default.engine)
-        val model = _config_string(
+        val model = _execution_class_string(
           _execution_class_keys(executionclass.id, "fallback-model")
         ).getOrElse(default.model)
-        val reasoning = _config_string(
+        val reasoning = _execution_class_string(
           _execution_class_keys(executionclass.id, "fallback-reasoning-level")
         ).orElse(default.reasoningLevel)
         Consequence.success(Some(default.copy(
@@ -1281,14 +1280,14 @@ private[textus] final class AiProfileConfig(
       engine = Some(execution.engine),
       model = Some(execution.model),
       tools = (execution.tools ++ AiRuntimeProfileCatalog.requiredTools(identity.standardPurpose)).distinct,
-      maxInputTokens = _config_string(_execution_class_keys(identity.executionClass.id, "max-input-tokens")),
-      maxOutputTokens = _config_string(_execution_class_keys(identity.executionClass.id, "max-output-tokens")),
-      maxReasoningTokens = _config_string(_execution_class_keys(identity.executionClass.id, "max-reasoning-tokens")),
-      maxCostMicrounits = _config_string(_execution_class_keys(identity.executionClass.id, "max-cost-microunits")),
-      rateSchedule = _config_string(_execution_class_keys(identity.executionClass.id, "rate-schedule")),
-      timeoutSeconds = _config_string(_execution_class_keys(identity.executionClass.id, "timeout-seconds")),
-      recordRetryLimit = _config_string(_execution_class_keys(identity.executionClass.id, "record-retry-limit")),
-      maxConcurrent = _config_string(_execution_class_keys(identity.executionClass.id, "max-concurrent"))
+      maxInputTokens = _execution_class_string(_execution_class_keys(identity.executionClass.id, "max-input-tokens")),
+      maxOutputTokens = _execution_class_string(_execution_class_keys(identity.executionClass.id, "max-output-tokens")),
+      maxReasoningTokens = _execution_class_string(_execution_class_keys(identity.executionClass.id, "max-reasoning-tokens")),
+      maxCostMicrounits = _execution_class_string(_execution_class_keys(identity.executionClass.id, "max-cost-microunits")),
+      rateSchedule = _execution_class_string(_execution_class_keys(identity.executionClass.id, "rate-schedule")),
+      timeoutSeconds = _execution_class_string(_execution_class_keys(identity.executionClass.id, "timeout-seconds")),
+      recordRetryLimit = _execution_class_string(_execution_class_keys(identity.executionClass.id, "record-retry-limit")),
+      maxConcurrent = _execution_class_string(_execution_class_keys(identity.executionClass.id, "max-concurrent"))
     )
 
   private def _application_purpose_profile_c(
@@ -1744,7 +1743,21 @@ private[textus] final class AiProfileConfig(
   ): Option[String] =
     configuration.flatMap { resolved =>
       keys.iterator
-        .flatMap(key => Try(RuntimeConfig.getString(resolved, key)).toOption.flatten)
+        .flatMap(key => scala.util.Try(RuntimeConfig.getString(resolved, key)).toOption.flatten)
+        .find(_.trim.nonEmpty)
+        .map(_.trim)
+    }
+
+  /*
+   * Execution-class values are already resolved by the typed CNCF route. This
+   * parser-only projection must never reopen ambient RuntimeConfig sources.
+   */
+  private def _execution_class_string(
+    keys: Vector[String]
+  ): Option[String] =
+    configuration.flatMap { resolved =>
+      keys.iterator
+        .flatMap(key => resolved.configuration.string(key))
         .find(_.trim.nonEmpty)
         .map(_.trim)
     }

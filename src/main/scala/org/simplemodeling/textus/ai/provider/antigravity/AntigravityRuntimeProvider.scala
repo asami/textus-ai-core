@@ -175,8 +175,8 @@ final class AntigravityGenerateService(config: AntigravityRuntimeConfig, context
 
   private def _execute_c(request: ProcessExecutionRequest): Consequence[ProcessExecutionResult] =
     given ExecutionContext = context
-    ProcessExecutionAdmission.resolveC(context.cncfCore.scope, request).flatMap { execution =>
-      context.runtime.unitOfWorkInterpreter(UnitOfWorkOp.ProcessExec(execution))
+    ProcessExecutionAdmission.resolveC(context.scope, request).flatMap { execution =>
+      context.unitOfWorkInterpreter(UnitOfWorkOp.ProcessExec(execution))
     }
 
   private def _response_c(

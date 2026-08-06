@@ -186,7 +186,7 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
     prompt: String,
     schema: Option[org.goldenport.record.Record],
     properties: Vector[org.goldenport.protocol.Property],
-    executionprofile: _ExecutionProfile
+    executionprofile: ExecutionProfile
   ): Consequence[ProcessExecutionRequest] =
     for {
       capability <- ProcessCapabilityId.parseC(executionprofile.capability)
@@ -198,7 +198,7 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
 
   private def _execution_profile_c(
     properties: Vector[org.goldenport.protocol.Property]
-  ): Consequence[_ExecutionProfile] =
+  ): Consequence[ExecutionProfile] =
     for {
       tools <- AiRequestProperties.validateTools(properties)
       profile <- _configured_profile_c(properties, tools.toSet)
@@ -207,13 +207,13 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
   private def _configured_profile_c(
     properties: Vector[org.goldenport.protocol.Property],
     tools: Set[AiTool]
-  ): Consequence[_ExecutionProfile] =
+  ): Consequence[ExecutionProfile] =
     AiRequestProperties.codexExecutionProfile(properties) match {
       case Some(name) =>
         config.executionProfiles.get(name) match {
           case Some(profile) if profile.supports(tools) =>
             val capability = if (tools.nonEmpty) profile.webCapability else profile.plainCapability
-            Consequence.success(_ExecutionProfile(capability, Some(profile), tools))
+            Consequence.success(ExecutionProfile(capability, Some(profile), tools))
           case Some(_) =>
             Consequence.configurationInvalid(
               s"Codex execution profile '$name' does not support requested tools: ${tools.toVector.map(_.id).sorted.mkString(",")}"
@@ -226,7 +226,7 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
           s"Codex tools require an admitted runtime-profile binding: ${tools.toVector.map(_.id).sorted.mkString(",")}"
         )
       case None =>
-        Consequence.success(_ExecutionProfile("codex-cli", None, Set.empty))
+        Consequence.success(ExecutionProfile("codex-cli", None, Set.empty))
     }
 
   private def _plain_request(
@@ -282,7 +282,7 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
         Consequence.unit
 
   private def _validate_cli_version_c(
-    executionprofile: _ExecutionProfile
+    executionprofile: ExecutionProfile
   ): Consequence[Unit] =
     executionprofile.profile match {
       case Some(profile) =>
@@ -321,13 +321,13 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
 
   private def _execute_c(request: ProcessExecutionRequest): Consequence[ProcessExecutionResult] =
     given ExecutionContext = context
-    ProcessExecutionAdmission.resolveC(context.cncfCore.scope, request).flatMap { execution =>
-      context.runtime.unitOfWorkInterpreter(UnitOfWorkOp.ProcessExec(execution))
+    ProcessExecutionAdmission.resolveC(context.scope, request).flatMap { execution =>
+      context.unitOfWorkInterpreter(UnitOfWorkOp.ProcessExec(execution))
     }
 
   private def _response_c(
     result: ProcessExecutionResult,
-    executionprofile: _ExecutionProfile
+    executionprofile: ExecutionProfile
   ): Consequence[GenerateResponse] =
     result.termination match {
       case ProcessExecutionTermination.Exited(0) =>
@@ -354,7 +354,7 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
         Consequence.operationIllegal("codex", "Codex CLI artifacts exceeded the configured limit")
     }
 
-  private final case class _ExecutionProfile(
+  private final case class ExecutionProfile(
     capability: String,
     profile: Option[CodexExecutionProfile],
     tools: Set[AiTool]

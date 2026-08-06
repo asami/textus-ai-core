@@ -282,7 +282,7 @@ private[textus] object HttpSupport:
     val effectiveheaders = headers.toMap + ("Content-Type" -> "application/json")
     val effectiveproperties =
       properties :+ Property("http.timeout-seconds", timeoutseconds.toString, None)
-    ctx.runtime.unitOfWorkInterpreter(UnitOfWorkOp.HttpPost(url, Some(body.noSpaces), effectiveheaders, effectiveproperties)).flatMap { response =>
+    ctx.unitOfWorkInterpreter(UnitOfWorkOp.HttpPost(url, Some(body.noSpaces), effectiveheaders, effectiveproperties)).flatMap { response =>
       if response.code / 100 != 2 then
         Consequence.serviceUnavailable(
           _failure_message(response.code, response.getString.getOrElse(""))

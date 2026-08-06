@@ -15,6 +15,7 @@ import org.goldenport.configuration.{Configuration, ConfigurationTrace, Resolved
 import org.goldenport.datatype.{ContentType, MimeType}
 import org.goldenport.http.{HttpResponse, HttpStatus}
 import org.goldenport.protocol.Property
+import org.goldenport.cncf.testutil.RuntimeBindingAdmissionFixture
 import org.simplemodeling.textus.ai.ai.GenerateRequest
 import org.scalatest.GivenWhenThen
 import org.scalatest.OptionValues
@@ -26,7 +27,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * managed service-container runtime.
  *
  * @since   Jul. 20, 2026
- * @version Jul. 26, 2026
+ *  version Jul. 26, 2026
+ * @version Aug.  5, 2026
  * @author  ASAMI, Tomoharu
  */
 final class OllamaManagedServiceRuntimeSpec
@@ -49,8 +51,8 @@ final class OllamaManagedServiceRuntimeSpec
       val endpoint = ServiceContainerEndpoint.parseC("http://127.0.0.1:12434").toOption.value
       val gateway = FakeServiceContainerGateway.create(Map(definition.registryKey -> endpoint))
       val runtime = ServiceContainerRuntime.create(ServiceContainerRegistry.inMemory(), gateway)
-      subsystem.installServiceContainerRuntimeC(runtime).isSuccess shouldBe true
-      val driver = new _RecordingHttpDriver
+      RuntimeBindingAdmissionFixture.withServiceContainerRuntime(subsystem, runtime)
+      val driver = new RecordingHttpDriver
       given context: ExecutionContext = _context(driver)
       val bootstrap = new OllamaManagedServiceBootstrap(subsystem, config)
 
@@ -78,7 +80,7 @@ final class OllamaManagedServiceRuntimeSpec
         30000L,
         60L
       )
-      val driver = new _RecordingHttpDriver
+      val driver = new RecordingHttpDriver
       given context: ExecutionContext = _context(driver)
 
       When("bootstrap requests the owned endpoint")
@@ -92,7 +94,7 @@ final class OllamaManagedServiceRuntimeSpec
 
     "fail before HTTP execution when Gemma runtime configuration is invalid" in {
       Given("a Gemma service with a configuration conflict")
-      val driver = new _RecordingHttpDriver
+      val driver = new RecordingHttpDriver
       given context: ExecutionContext = _context(driver)
       val service = new GemmaOllamaGenerateService(
         GemmaRuntimeConfig(
@@ -111,7 +113,7 @@ final class OllamaManagedServiceRuntimeSpec
     }
   }
 
-  private final class _RecordingHttpDriver extends HttpDriver {
+  private final class RecordingHttpDriver extends HttpDriver {
     private var _calls = Vector.empty[String]
     private var _bodies = Vector.empty[String]
 
