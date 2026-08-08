@@ -1,12 +1,9 @@
 project:
-  name: "textus-ai-runtime"
+  namespace: "org.simplemodeling.textus"
+  id: "AiRuntime"
   title: "Textus AI Runtime"
   kind: car
-  organization: "org.textus"
-  scalaPackage: "org.simplemodeling.textus.ai"
   component:
-    name: "textus-ai-runtime"
-    className: "TextusAi"
     displayName: "Textus AI Runtime"
     version: "0.2.1-SNAPSHOT"
     config:
@@ -14,7 +11,7 @@ project:
 
 build:
   scalaVersion: "3.3.8"
-  cozyVersion: "0.3.1-SNAPSHOT"
+  cozyVersion: "0.3.4-SNAPSHOT"
   dependencies:
     compile:
       - "org.goldenport::goldenport-cncf:0.5.2-SNAPSHOT"

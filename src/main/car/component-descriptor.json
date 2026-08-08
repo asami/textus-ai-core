@@ -1,7 +1,10 @@
 {
-  "name": "textus-ai-runtime",
-  "version": "0.2.1-SNAPSHOT",
-  "component": "textus-ai-runtime",
+  "schemaVersion": 3,
+  "component": {
+    "namespace": "org.simplemodeling.textus",
+    "id": "AiRuntime",
+    "version": "0.2.1-SNAPSHOT"
+  },
   "config": {
     "textus.server.default-port": "18002"
   }

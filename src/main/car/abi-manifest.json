@@ -1,7 +1,8 @@
 {
-  "format": "cozy.car.abi-manifest.v1",
-  "car": {
-    "name": "textus-ai-runtime",
+  "format": "cozy.car.abi-manifest.v2",
+  "component": {
+    "namespace": "org.simplemodeling.textus",
+    "id": "AiRuntime",
     "version": "0.2.1-SNAPSHOT"
   },
   "abi": {
@@ -9,7 +10,8 @@
     "exports": {
       "components": [
         {
-          "name": "textus-ai-runtime"
+          "namespace": "org.simplemodeling.textus",
+          "id": "AiRuntime"
         }
       ],
       "operations": [],

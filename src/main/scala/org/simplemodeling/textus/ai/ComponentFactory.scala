@@ -2,7 +2,7 @@ package org.simplemodeling.textus.ai
 
 import scala.util.Try
 import org.goldenport.Consequence
-import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentId, ComponentInit, ComponentOrigin}
+import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentInit, ComponentOrigin}
 import org.goldenport.cncf.admission.ScopedConcurrencyAdmission
 import org.goldenport.cncf.config.{ComponentParameterDecoder, ComponentParameterKey, ComponentParameterPathLeaf, ComponentParameterPathParameters, ComponentParameterPathRoute}
 import org.goldenport.cncf.context.{ScopeContext, ScopeKind}
@@ -25,7 +25,7 @@ import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConc
 /*
  * @since   Apr.  9, 2026
  *  version Jul. 26, 2026
- * @version Aug.  5, 2026
+ * @version Aug.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends TextusAiComponent.Factory:
@@ -104,18 +104,14 @@ class ComponentFactory extends TextusAiComponent.Factory:
     comp: Component
   ): Component.Core =
     spec_create(
-      _runtime_component_name,
-      ComponentId(_runtime_component_id),
+      TextusAiComponent.name,
+      TextusAiComponent.componentId,
       Vector(
         TextusAiComponent.AggregateService,
         TextusAiComponent.ViewService,
         TextusAiComponent.EntityService
       )
     )
-
-  // This is the mounted CAR identity from project.yaml, not the CML domain name.
-  private val _runtime_component_name = "textus-ai-runtime"
-  private val _runtime_component_id = "textus_ai_runtime"
 
 object ComponentFactory:
   private def _required_declaration[A](

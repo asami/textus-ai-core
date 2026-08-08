@@ -3,7 +3,8 @@ package org.simplemodeling.textus.ai
 import cats.~>
 import org.goldenport.Consequence
 import org.goldenport.observation.{Cause, Descriptor, Taxonomy}
-import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentDescriptor, ComponentInstanceMetadata, ComponentOrigin}
+import org.goldenport.protocol.Protocol
+import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentDescriptor, ComponentId, ComponentInit, ComponentInstanceId, ComponentInstanceMetadata, ComponentOrigin}
 import org.goldenport.cncf.admission.ConcurrencyScopeId
 import org.goldenport.cncf.config.{ComponentParameterProvenance, RuntimeConfig}
 import org.goldenport.cncf.context.{ExecutionContext, GlobalContext, RuntimeContext, ScopeContext, ScopeKind}
@@ -27,7 +28,7 @@ import org.scalatest.wordspec.AnyWordSpec
 /*
  * @since   Jul. 16, 2026
  *  version Jul. 26, 2026
- * @version Aug.  5, 2026
+ * @version Aug.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ComponentFactorySpec
@@ -35,9 +36,18 @@ final class ComponentFactorySpec
   with Matchers
   with GivenWhenThen
   with OptionValues {
+  private def _metadata(example: String) = afterWord(
+    s"in spec:phase-56-component-identity-project-contract, example:$example, rules:CID07-R1, phase:56, slice:CID-07C"
+  )
+
+  private def _example(example: String, title: String)(body: => Any): Unit =
+    s"$example $title" must _metadata(example) {
+      title in body
+    }
+
   "ComponentFactory" should {
     "resolve initialization profiles" which {
-      "resolve the runtime-wide profile before constructing provider ports" in {
+      _example("E1", "resolve the runtime-wide profile before constructing provider ports") {
         Given("a runtime-wide Textus AI profile and no component-instance setting")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -67,7 +77,7 @@ final class ComponentFactorySpec
         provider.provide(contract, SpiSelection(provider = Some("gemma"))).isSuccess shouldBe true
       }
 
-      "apply a component-instance profile over its packaged default" in {
+      _example("E2", "apply a component-instance profile over its packaged default") {
         Given("a packaged profile default and a named component-instance override")
         given ExecutionContext = ExecutionContext.create()
         val subsystem = new Subsystem(
@@ -75,7 +85,7 @@ final class ComponentFactorySpec
           configuration = ResolvedConfiguration(Configuration.empty, ConfigurationTrace.empty)
         )
         val descriptor = ComponentDescriptor(
-          componentName = Some("textus-ai-runtime"),
+          componentName = Some("org.simplemodeling.textus.AiRuntime"),
           config = Map("textus.ai.profile" -> "gemma")
         )
 
@@ -85,7 +95,7 @@ final class ComponentFactorySpec
           ComponentOrigin.Main,
           componentDescriptors = Vector(descriptor),
           instanceMetadata = Some(ComponentInstanceMetadata(
-            "textus-ai-runtime",
+            "org.simplemodeling.textus.AiRuntime",
             "gemini-instance",
             Map("textus.ai.profile" -> "gemini")
           ))
@@ -105,14 +115,14 @@ final class ComponentFactorySpec
         provider.provide(contract, SpiSelection(provider = Some("gemma"))).isSuccess shouldBe true
       }
 
-      "reject an invalid higher-precedence profile without falling back" in {
+      _example("E3", "reject an invalid higher-precedence profile without falling back") {
         Given("a valid packaged default and an invalid named component-instance override")
         val subsystem = new Subsystem(
           "textus-ai-initialization-invalid-override",
           configuration = ResolvedConfiguration(Configuration.empty, ConfigurationTrace.empty)
         )
         val descriptor = ComponentDescriptor(
-          componentName = Some("textus-ai-runtime"),
+          componentName = Some("org.simplemodeling.textus.AiRuntime"),
           config = Map("textus.ai.profile" -> "gemma")
         )
 
@@ -122,7 +132,7 @@ final class ComponentFactorySpec
           ComponentOrigin.Main,
           componentDescriptors = Vector(descriptor),
           instanceMetadata = Some(ComponentInstanceMetadata(
-            "textus-ai-runtime",
+            "org.simplemodeling.textus.AiRuntime",
             "invalid-instance",
             Map("textus.ai.profile" -> "not-a-textus-ai-profile")
           ))
@@ -132,7 +142,7 @@ final class ComponentFactorySpec
         result.isFaillure shouldBe true
       }
 
-      "isolate profile resolution between named component instances" in {
+      _example("E4", "isolate profile resolution between named component instances") {
         Given("one Textus AI factory and two component instances with different profiles")
         given ExecutionContext = ExecutionContext.create()
         val subsystem = new Subsystem(
@@ -144,7 +154,7 @@ final class ComponentFactorySpec
           factory.createPrimaryC(
             ComponentCreate(subsystem, ComponentOrigin.Main)
               .withInstanceMetadata(ComponentInstanceMetadata(
-              "textus-ai-runtime",
+              "org.simplemodeling.textus.AiRuntime",
               instance,
               Map("textus.ai.profile" -> profile)
               ))
@@ -170,7 +180,7 @@ final class ComponentFactorySpec
     }
 
     "resolve execution-class initialization paths" which {
-      "project normal component initialization values from the typed route" in {
+      _example("E5", "project normal component initialization values from the typed route") {
         Given("a runtime execution-class value using the canonical public key")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -203,7 +213,7 @@ final class ComponentFactorySpec
         component.port.get[McpClientSocket].map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("research"))
       }
 
-      "prefer a runtime compatibility spelling over a lower named-instance canonical spelling" in {
+      _example("E6", "prefer a runtime compatibility spelling over a lower named-instance canonical spelling") {
         Given("a runtime compatibility key and a lower named-instance canonical key")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -223,7 +233,7 @@ final class ComponentFactorySpec
         val component = new ComponentFactory().createPrimaryC(
           ComponentCreate(subsystem, ComponentOrigin.Main).withInstanceMetadata(
             ComponentInstanceMetadata(
-              "textus-ai-runtime",
+              "org.simplemodeling.textus.AiRuntime",
               "runtime-compatibility",
               Map(
                 "textus.ai.execution-classes.standard-work.mcp-server-set" -> "instance-research"
@@ -244,7 +254,7 @@ final class ComponentFactorySpec
         component.port.get[McpClientSocket].map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("runtime-research"))
       }
 
-      "prefer a named instance over assembly and packaged execution-class defaults" in {
+      _example("E7", "prefer a named instance over assembly and packaged execution-class defaults") {
         Given("packaged and assembly defaults plus a named component-instance value")
         given ExecutionContext = ExecutionContext.create()
         val subsystem = new Subsystem(
@@ -261,7 +271,7 @@ final class ComponentFactorySpec
           )
         ))
         val descriptor = ComponentDescriptor(
-          componentName = Some("textus-ai-runtime"),
+          componentName = Some("org.simplemodeling.textus.AiRuntime"),
           config = Map(
             "textus.ai.execution-classes.standard-work.mcp-server-set" -> "packaged-research"
           )
@@ -273,7 +283,7 @@ final class ComponentFactorySpec
           ComponentOrigin.Main,
           componentDescriptors = Vector(descriptor),
           instanceMetadata = Some(ComponentInstanceMetadata(
-            "textus-ai-runtime",
+            "org.simplemodeling.textus.AiRuntime",
             "instance-precedence",
             Map(
               "textus.ai.execution-classes.standard-work.mcp-server-set" -> "instance-research"
@@ -293,7 +303,7 @@ final class ComponentFactorySpec
         component.port.get[McpClientSocket].map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("instance-research"))
       }
 
-      "prevent raw nested execution-class values from bypassing the typed projection" in {
+      _example("E8", "prevent raw nested execution-class values from bypassing the typed projection") {
         Given("nested and direct raw execution-class values for the same declared leaf")
         given ExecutionContext = ExecutionContext.create()
         val rawtrace = ConfigurationTrace(Map(
@@ -346,7 +356,7 @@ final class ComponentFactorySpec
         component.port.get[McpClientSocket].map(_.serverSetIds.map(_.print)) shouldBe Some(Vector("direct-research"))
       }
 
-      "ignore ambient execution-class properties outside the typed projection" in {
+      _example("E9", "ignore ambient execution-class properties outside the typed projection") {
         Given("a unique ambient execution-class JVM property and one real projected class key")
         given ExecutionContext = ExecutionContext.create()
         val ambientkey = "textus.ai.execution-classes.deep-thinking.model"
@@ -389,7 +399,7 @@ final class ComponentFactorySpec
         }
       }
 
-      "declare and resolve every execution-class vocabulary spelling through normal initialization" in {
+      _example("E10", "declare and resolve every execution-class vocabulary spelling through normal initialization") {
         Given("the frozen canonical leaves, leaf aliases, and five accepted route prefixes")
         given ExecutionContext = ExecutionContext.create()
         val route = ComponentFactory.executionClassParameterPathRoute
@@ -471,7 +481,7 @@ final class ComponentFactorySpec
         }
       }
 
-      "reject unknown leaves and invalid route shapes before constructing providers" in {
+      _example("E11", "reject unknown leaves and invalid route shapes before constructing providers") {
         Given("one unknown execution-class leaf and one path with an extra segment")
         val unknown = ResolvedConfiguration(
           Configuration(Map(
@@ -513,7 +523,7 @@ final class ComponentFactorySpec
     }
 
     "publish runtime ports and providers" which {
-      "publish only a normalized MCP client input socket for runtime-owned server sets" in {
+      _example("E12", "publish only a normalized MCP client input socket for runtime-owned server sets") {
         Given("a Textus AI execution class configured with one logical MCP server set")
         val configuration = ResolvedConfiguration(
           Configuration(Map(
@@ -533,7 +543,7 @@ final class ComponentFactorySpec
         component.port.inputEntries.collect { case value: McpClientSocket => value }.size shouldBe 1
       }
 
-      "install configured purpose concurrency admission in the provider component scope" in {
+      _example("E13", "install configured purpose concurrency admission in the provider component scope") {
         Given("a Textus AI runtime with one bootstrap-registered bounded ArtScene purpose")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -547,12 +557,23 @@ final class ComponentFactorySpec
           configuration = configuration
         )
         val component = new ComponentFactory().create(ComponentCreate(subsystem, ComponentOrigin.Main)).primary
+        val applicationid = ComponentId("org.simplemodeling.textus.ArtScene")
         val application = new Component() {}.withPort(Component.Port.of(
           AiRunnerApplicationPurposeRegistration(Vector(AiRunnerApplicationPurpose(
             "artscene-exhibition-web-research",
             "web-analysis",
             AiRunnerApplicationPurposePolicy(maxConcurrent = Some(1))
           )))
+        ))
+        application.initialize(ComponentInit(
+          subsystem = subsystem,
+          core = Component.Core.create(
+            name = applicationid.name,
+            componentid = applicationid,
+            instanceid = ComponentInstanceId.default(applicationid),
+            protocol = Protocol.empty
+          ),
+          origin = ComponentOrigin.Main
         ))
         SpiResolver.resolve(Vector(application, component)) shouldBe a[Consequence.Success[_]]
         val parent = ScopeContext(
@@ -575,7 +596,7 @@ final class ComponentFactorySpec
         saturated.exists(_.isFaillure) shouldBe true
       }
 
-      "publish the artifact component name required by an assembly descriptor" in {
+      _example("E14", "publish the artifact component name required by an assembly descriptor") {
         Given("a Textus AI Runtime component factory")
         val factory = new ComponentFactory()
         val subsystem = new Subsystem(
@@ -587,10 +608,10 @@ final class ComponentFactorySpec
         val bundle = factory.create(ComponentCreate(subsystem, ComponentOrigin.Main))
 
         Then("the component core matches the CAR descriptor component name")
-        bundle.primary.core.name shouldBe "textus-ai-runtime"
+        bundle.primary.core.name shouldBe "org.simplemodeling.textus.AiRuntime"
       }
 
-      "canonicalize the codex-cli provider alias before deriving defaults" in {
+      _example("E15", "canonicalize the codex-cli provider alias before deriving defaults") {
         Given("a configured and enabled Codex CLI provider alias")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -614,7 +635,7 @@ final class ComponentFactorySpec
         ) shouldBe true
       }
 
-      "bind commercial providers only from merged CNCF configuration" in {
+      _example("E16", "bind commercial providers only from merged CNCF configuration") {
         Given("an empty runtime configuration and explicitly configured commercial runtimes")
         given ExecutionContext = ExecutionContext.create()
         val empty = _component()
@@ -662,7 +683,7 @@ final class ComponentFactorySpec
     }
 
     "construct managed runtime capabilities" which {
-      "install the enabled Codex capability into the component execution scope" in {
+      _example("E17", "install the enabled Codex capability into the component execution scope") {
         Given("an explicitly enabled Codex runtime with a trusted executable location")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -720,7 +741,7 @@ final class ComponentFactorySpec
         component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
       }
 
-      "declare a managed Ollama service only when the Docker runtime is explicit" in {
+      _example("E18", "declare a managed Ollama service only when the Docker runtime is explicit") {
         Given("a Gemma runtime profile with an explicit managed Docker selection")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -762,7 +783,7 @@ final class ComponentFactorySpec
         component.scopeContext.processExecutionDriverOption shouldBe empty
       }
 
-      "use native Ollama by default without declaring a managed Docker service" in {
+      _example("E19", "use native Ollama by default without declaring a managed Docker service") {
         Given("a Gemma profile with no Docker or endpoint configuration")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -796,7 +817,7 @@ final class ComponentFactorySpec
         component.scopeContext.processExecutionDriverOption shouldBe empty
       }
 
-      "reject a managed Docker selection that also supplies a native endpoint" in {
+      _example("E20", "reject a managed Docker selection that also supplies a native endpoint") {
         Given("a conflicting managed Docker and native endpoint configuration")
         val configuration = ResolvedConfiguration(
           Configuration(Map(
@@ -823,7 +844,7 @@ final class ComponentFactorySpec
         subsystem.shutdown()
       }
 
-      "combine managed Gemma lifecycle with the Codex CLI one-shot capability" in {
+      _example("E21", "combine managed Gemma lifecycle with the Codex CLI one-shot capability") {
         Given("a Gemma-simple Codex profile with an enabled Codex CLI runtime")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -857,7 +878,7 @@ final class ComponentFactorySpec
         ))
       }
 
-      "install the enabled Claude Code capability from its runtime profile" in {
+      _example("E22", "install the enabled Claude Code capability from its runtime profile") {
         Given("an enabled Claude Code runtime with a trusted executable location")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -895,7 +916,7 @@ final class ComponentFactorySpec
         component.scopeContext.processExecutionDriverOption.exists(_.isInstanceOf[LocalProcessExecutionDriver]) shouldBe true
       }
 
-      "compile a Codex runtime-profile binding into fixed model, reasoning, and Web arguments" in {
+      _example("E23", "compile a Codex runtime-profile binding into fixed model, reasoning, and Web arguments") {
         Given("an enabled Codex runtime and a deep-thinking Web binding")
         given ExecutionContext = ExecutionContext.create()
         val configuration = ResolvedConfiguration(
@@ -940,7 +961,7 @@ final class ComponentFactorySpec
         version.toOption.map(_.effectiveArguments) shouldBe Some(Vector("--version"))
       }
 
-      "leave Codex process execution unavailable when the provider is disabled" in {
+      _example("E24", "leave Codex process execution unavailable when the provider is disabled") {
         Given("a Textus AI runtime without enabled Codex configuration")
         given ExecutionContext = ExecutionContext.create()
         val subsystem = new Subsystem(
@@ -969,7 +990,7 @@ final class ComponentFactorySpec
     }
 
     "execute through the provider-owned component scope" which {
-      "execute Codex requests through the provider component scope from a sibling caller scope" in {
+      _example("E25", "execute Codex requests through the provider component scope from a sibling caller scope") {
         Given("an enabled component-local Codex driver, a sibling caller scope, and a controlled executable")
         val executable = java.nio.file.Files.createTempFile("textus-ai-codex-spec", ".sh")
         java.nio.file.Files.writeString(executable,

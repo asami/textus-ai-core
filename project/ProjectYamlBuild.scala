@@ -1,9 +1,31 @@
-import org.goldenport.cozy.CozyProjectConfig
+import org.goldenport.cozy.{CozyProjectConfig, CozyProjectIdentityContract, CozyProjectIdentityEvidence}
 import sbt.*
 
+/*
+ * @since   Aug.  8, 2026
+ * @version Aug.  8, 2026
+ * @author  ASAMI, Tomoharu
+ */
 object TextusAiProjectYamlBuild {
   def requiredValue(config: CozyProjectConfig, path: String): String =
     config.value(path).getOrElse(sys.error(s"$path is required in project.yaml"))
+
+  def admitted(config: CozyProjectConfig, scalaBinaryVersion: String): CozyProjectIdentityEvidence =
+    CozyProjectIdentityContract.requireAdmitted(config, scalaBinaryVersion)
+
+  def organization(evidence: CozyProjectIdentityEvidence): String =
+    evidence.organization.getOrElse(sys.error("project.namespace must project an organization"))
+
+  def moduleName(evidence: CozyProjectIdentityEvidence): String =
+    evidence.moduleName.getOrElse(sys.error("project identity must project a module name"))
+
+  def version(evidence: CozyProjectIdentityEvidence): String = evidence.effectiveVersion
+
+  def carBaseName(evidence: CozyProjectIdentityEvidence): String =
+    evidence.carBaseName.getOrElse(sys.error("project identity must project a CAR base name"))
+
+  def manifestMetadata(evidence: CozyProjectIdentityEvidence): Map[String, String] =
+    evidence.manifestMetadata
 
   def dependencies(config: CozyProjectConfig): Seq[ModuleID] =
     _dependencies(config, "compile", None) ++
