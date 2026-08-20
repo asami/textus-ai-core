@@ -2,6 +2,7 @@ package org.simplemodeling.textus.ai
 
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentOrigin, ExtensionPoint, Port, ServiceContract, VariationSelection}
+import org.goldenport.cncf.component.builtin.BuiltinComponentIdentity
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.mcp.client.*
 import org.goldenport.cncf.operationtool.*
@@ -15,7 +16,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * Executable specification for the Textus AI admitted tool-source consumer boundary.
  *
  * @since   Jul. 21, 2026
- * @version Aug.  6, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ToolSourceConsumerSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -54,7 +55,7 @@ final class ToolSourceConsumerSpec extends AnyWordSpec with Matchers with GivenW
         _transport_binding(transport)
       ).toOption.get
       val operationtoolsetid = OperationToolSetId.parseC("builtin-tools").toOption.get
-      val operationidentity = OperationToolIdentity.parseC("admin.system.ping").toOption.get
+      val operationidentity = OperationToolIdentity.createC(BuiltinComponentIdentity.ADMIN.name, "system", "ping").toOption.get
       val operationlimits = OperationToolLimits.createC(4, 4096, 4096, 1).toOption.get
       val operationadmission = OperationToolAdmission.createC(
         operationtoolsetid,
@@ -99,7 +100,7 @@ final class ToolSourceConsumerSpec extends AnyWordSpec with Matchers with GivenW
       evidence._4.map(_.toolSetIds) shouldBe Some(Vector(operationtoolsetid))
       evidence._5.map(_.tools.map(_.identity.print)) shouldBe Some(Vector("catalog/paper.search"))
       evidence._5.toVector.flatMap(_.tools).map(_.identity) should not contain deniedtool.identity
-      evidence._6.map(_.definitions.map(_.identity.print)) shouldBe Some(Vector("admin.system.ping"))
+      evidence._6.map(_.definitions.map(_.identity.print)) shouldBe Some(Vector("org.goldenport.cncf.Admin.system.ping"))
       evidence._7 should not be empty
     }
   }

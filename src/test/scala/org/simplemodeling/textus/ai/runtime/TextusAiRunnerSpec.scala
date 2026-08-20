@@ -8,7 +8,7 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.DurationInt
 import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
-import org.goldenport.cncf.component.{Component, ExtensionPoint, Port}
+import org.goldenport.cncf.component.{Component, ComponentId, ComponentInit, ComponentInstanceId, ComponentOrigin, ExtensionPoint, Port}
 import org.goldenport.cncf.context.{ExecutionContext, RuntimeContext, ScopeContext, ScopeKind}
 import org.goldenport.cncf.http.HttpDriver
 import org.goldenport.cncf.mcp.client.McpServerSetId
@@ -22,7 +22,7 @@ import org.goldenport.configuration.{Configuration, ConfigurationTrace, Configur
 import org.goldenport.bag.Bag
 import org.goldenport.datatype.{ContentType, MimeType}
 import org.goldenport.http.{HttpResponse, HttpStatus}
-import org.goldenport.protocol.Property
+import org.goldenport.protocol.{Property, Protocol}
 import org.goldenport.record.Record
 import org.goldenport.schema.DataConfidentiality
 import org.scalatest.GivenWhenThen
@@ -31,7 +31,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.ai.ComponentFactory
-import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
+import org.simplemodeling.textus.airuntime.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
 import org.simplemodeling.textus.ai.provider.anthropic.{AnthropicConfig, AnthropicGenerateService, AnthropicRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeGenerateService, ClaudeCodeRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaOllamaGenerateService, GemmaRuntimeConfig}
@@ -41,7 +41,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Jul. 26, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -1043,6 +1043,10 @@ final class TextusAiRunnerSpec
         )),
         ConfigurationTrace.empty
       )
+      val subsystem = new Subsystem(
+        name = "textus-ai-late-concurrency-port-spec",
+        configuration = configuration
+      )
       val registrations = new AiRunnerApplicationPurposeRegistrationSocketSet {}
       val profiles = AiProfileConfig.fromConfiguration(
         Some(configuration),
@@ -1050,6 +1054,17 @@ final class TextusAiRunnerSpec
       )
       val state = new AiConcurrencyAdmissionState()
       val component = _component()
+      val runtimeid = ComponentId("org.simplemodeling.textus.TextusAiRunnerLateRegistrationRuntimeSpec")
+      component.initialize(ComponentInit(
+        subsystem = subsystem,
+        core = Component.Core.create(
+          name = runtimeid.name,
+          componentid = runtimeid,
+          instanceid = ComponentInstanceId.default(runtimeid),
+          protocol = Protocol.empty
+        ),
+        origin = ComponentOrigin.Main
+      ))
       component.withScopeContext(ScopeContext(
         ScopeKind.Component,
         "textus-ai-late-concurrency-port-spec",
@@ -1075,6 +1090,17 @@ final class TextusAiRunnerSpec
           "software-implementation",
           AiRunnerApplicationPurposePolicy(maxConcurrent = Some(1))
         )))
+      ))
+      val applicationid = ComponentId("org.simplemodeling.textus.TextusAiRunnerLateRegistrationApplicationSpec")
+      application.initialize(ComponentInit(
+        subsystem = subsystem,
+        core = Component.Core.create(
+          name = applicationid.name,
+          componentid = applicationid,
+          instanceid = ComponentInstanceId.default(applicationid),
+          protocol = Protocol.empty
+        ),
+        origin = ComponentOrigin.Main
       ))
 
       When("the application registration is bound through its Port after the runtime scope exists")

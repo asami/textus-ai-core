@@ -10,8 +10,14 @@ import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
-import org.simplemodeling.textus.ai.ai.*
+import org.simplemodeling.textus.airuntime.ai.*
 import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport, ToolCallingChatService}
+
+/*
+ * @since   Jul. 20, 2026
+ * @version Aug. 21, 2026
+ * @author  ASAMI, Tomoharu
+ */
 
 /** Direct Anthropic Messages API provider. Claude Code is a separate local provider. */
 final case class AnthropicRuntimeConfig(

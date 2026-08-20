@@ -14,11 +14,13 @@ operation surface.
 
 ## Component
 
-Component name: `textus-ai-runtime`
+Artifact: `textus-ai-runtime`
 
-Component class: `TextusAi`
+Qualified component id: `org.simplemodeling.textus.AiRuntime`
 
-Scala package: `org.simplemodeling.textus.ai`
+Generated component class: `AiRuntimeComponent`
+
+Generated Scala package: `org.simplemodeling.textus.airuntime`
 
 The component is loaded as a CAR through CNCF metadata. The generated
 `component-descriptor.json` declares the component identity, version, and

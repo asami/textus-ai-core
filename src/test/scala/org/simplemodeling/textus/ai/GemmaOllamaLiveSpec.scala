@@ -14,7 +14,7 @@ import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOf
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
 import org.simplemodeling.textus.ai.runtime.{AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, TextusAiRunnerProvider}
 import org.simplemodeling.textus.ai.provider.gemma.GemmaOllamaChatService
-import org.simplemodeling.textus.ai.ai.{ToolChatMessage, ToolChatRequest, ToolDefinition}
+import org.simplemodeling.textus.airuntime.ai.{ToolChatMessage, ToolChatRequest, ToolDefinition}
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -24,7 +24,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * Normal test runs cancel this suite before contacting Docker or Ollama.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 26, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class GemmaOllamaLiveSpec

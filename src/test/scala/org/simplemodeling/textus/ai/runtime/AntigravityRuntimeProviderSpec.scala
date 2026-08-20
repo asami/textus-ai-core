@@ -18,7 +18,7 @@ import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.simplemodeling.textus.ai.ComponentFactory
-import org.simplemodeling.textus.ai.ai.GenerateRequest
+import org.simplemodeling.textus.airuntime.ai.GenerateRequest
 import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, AntigravityExecutionBinding, AntigravityExecutionProfile, AntigravityGenerateService, AntigravityRuntimeConfig}
 
 /*
@@ -26,7 +26,7 @@ import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, Ant
  * proves adapter behavior without a Google account or network connection.
  *
  * @since   Jul. 22, 2026
- * @version Jul. 26, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AntigravityRuntimeProviderSpec extends AnyWordSpec with Matchers with GivenWhenThen {

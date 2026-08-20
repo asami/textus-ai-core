@@ -1,14 +1,14 @@
-TextusAi
+AiRuntime
 ============
 
-This document is a literate model for the TextusAi runtime component in
+This document is a literate model for the AiRuntime component in
 `textus-ai-runtime`.
 It is designed to remain executable as CML input while also acting as
 human-readable specification text.
 
 The model keeps domain structure and operational intent in a single source:
 
-- `# COMPONENT` defines the TextusAi runtime component boundary.
+- `# COMPONENT` defines the AiRuntime component boundary.
 - `# SERVICE` and nested `# OPERATION` definitions explain behavior.
 - `# ENTITY`, `# COMMAND`, and `# QUERY` define the executable domain model.
 - `# OPERATION` binds service operations to command/query inputs and outputs.
@@ -23,31 +23,31 @@ It is resolved through adapter and runtime configuration outside the DSL.
 
 ### SUMMARY
 
-Provide a provider-agnostic TextusAi runtime capability for Textus.
+Provide a provider-agnostic AiRuntime capability for Textus.
 
 ### GOAL
 
-Establish a coherent TextusAi runtime boundary that can generate text and continue conversations while remaining provider-neutral.
+Establish a coherent AiRuntime boundary that can generate text and continue conversations while remaining provider-neutral.
 
 ### PRECONDITION
 
-Textus treats TextusAi behavior as a first-class component concern rather than a library detail.
+Textus treats AiRuntime behavior as a first-class component concern rather than a library detail.
 
 ### POSTCONDITION
 
-The domain has a clear strategic direction for TextusAi runtime and service design.
+The domain has a clear strategic direction for AiRuntime runtime and service design.
 
 # COMPONENT
 
-## TextusAi
+## AiRuntime
 
 ### PACKAGE
 
-org.simplemodeling.textus.ai
+org.simplemodeling.textus.airuntime
 
 ### DESCRIPTION
 
-TextusAi runtime component for language-model generation and chat.
+AiRuntime component for language-model generation and chat.
 
 ### SPECIFICATION
 

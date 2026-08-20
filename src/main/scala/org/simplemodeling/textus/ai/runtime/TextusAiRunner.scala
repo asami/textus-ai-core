@@ -17,7 +17,7 @@ import org.goldenport.protocol.operation.OperationResponse
 import org.goldenport.record.Record
 import org.slf4j.LoggerFactory
 import org.simplemodeling.model.value.MessageRole
-import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
+import org.simplemodeling.textus.airuntime.ai.{ChatRequest, ChatResponse, GenerateRequest, GenerateResponse, Message}
 
 /*
  * CNCF AI runner SPI adapter for the Textus AI runtime bindings.
@@ -27,7 +27,7 @@ import org.simplemodeling.textus.ai.ai.{ChatRequest, ChatResponse, GenerateReque
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Jul. 23, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(

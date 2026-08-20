@@ -4,6 +4,7 @@ import io.circe.Json
 import java.nio.charset.StandardCharsets
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{Component, ExtensionPoint, Port, ServiceContract, VariationSelection}
+import org.goldenport.cncf.component.builtin.BuiltinComponentIdentity
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.mcp.client.*
 import org.goldenport.cncf.operationtool.*
@@ -15,14 +16,14 @@ import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.simplemodeling.model.value.MessageRole
-import org.simplemodeling.textus.ai.ai.*
+import org.simplemodeling.textus.airuntime.ai.*
 
 /*
  * Executable specification for provider-neutral internal and remote tool
  * function orchestration.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 22, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhenThen {
@@ -109,7 +110,7 @@ final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhe
         given ExecutionContext = ExecutionContext.create()
         val mcpfixture = _fixture()
         val subsystem = DefaultSubsystemFactory.default(Some("textus-ai-operation-tool-composition"))
-        val identity = OperationToolIdentity.parseC("admin.system.ping").toOption.get
+        val identity = OperationToolIdentity.createC(BuiltinComponentIdentity.ADMIN.name, "system", "ping").toOption.get
         val setid = OperationToolSetId.parseC("builtin-tools").toOption.get
         val limits = OperationToolLimits.createC(4, 4096, 4096, 1).toOption.get
         val admission = OperationToolAdmission.createC(setid, Vector(identity), limits).toOption.get
@@ -134,7 +135,7 @@ final class ToolOrchestratorSpec extends AnyWordSpec with Matchers with GivenWhe
         service.tooldefinitions.map(_.name).exists(_.startsWith("mcp_")) shouldBe true
         service.tooldefinitions.map(_.name).exists(_.startsWith("operation_")) shouldBe true
         service.tooldefinitions.map(_.name).distinct.size shouldBe service.tooldefinitions.size
-        operationinvocation.calls.map(_.identity.print) shouldBe Vector("admin.system.ping")
+        operationinvocation.calls.map(_.identity.print) shouldBe Vector("org.goldenport.cncf.Admin.system.ping")
         mcpfixture.calls.map(_.toolIdentity.print) shouldBe Vector("research/places.lookup")
         result.toOption.flatMap(_.metadata.get("anthropic.tool_catalog_digest")) should not be empty
         result.toOption.flatMap(_.metadata.get("anthropic.tool_calls")) shouldBe Some("2")

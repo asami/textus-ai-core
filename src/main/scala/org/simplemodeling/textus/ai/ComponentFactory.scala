@@ -21,14 +21,15 @@ import org.simplemodeling.textus.ai.provider.anthropic.AnthropicConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, AiRuntimeProfileCatalog, TextusAiRunnerProvider}
+import org.simplemodeling.textus.airuntime.AiRuntimeComponent
 
 /*
  * @since   Apr.  9, 2026
  *  version Jul. 26, 2026
- * @version Aug.  8, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
-class ComponentFactory extends TextusAiComponent.Factory:
+class ComponentFactory extends AiRuntimeComponent.Factory:
   override def initializationParameterDeclarations: Vector[ComponentParameterKey[?]] =
     Vector(ComponentFactory.profileParameterKey)
 
@@ -104,12 +105,12 @@ class ComponentFactory extends TextusAiComponent.Factory:
     comp: Component
   ): Component.Core =
     spec_create(
-      TextusAiComponent.name,
-      TextusAiComponent.componentId,
+      AiRuntimeComponent.name,
+      AiRuntimeComponent.componentId,
       Vector(
-        TextusAiComponent.AggregateService,
-        TextusAiComponent.ViewService,
-        TextusAiComponent.EntityService
+        AiRuntimeComponent.AggregateService,
+        AiRuntimeComponent.ViewService,
+        AiRuntimeComponent.EntityService
       )
     )
 
@@ -426,7 +427,7 @@ object ComponentFactory:
       }
     }
 
-private[ai] final class TextusAiRuntimeComponent() extends TextusAiComponent {
+private[ai] final class TextusAiRuntimeComponent() extends AiRuntimeComponent {
   private var _codex: Option[CodexRuntimeConfig] = None
   private var _antigravity: Option[AntigravityRuntimeConfig] = None
   private var _claude: Option[ClaudeCodeRuntimeConfig] = None

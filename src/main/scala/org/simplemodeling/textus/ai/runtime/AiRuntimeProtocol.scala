@@ -3,7 +3,13 @@ package org.simplemodeling.textus.ai.runtime
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{PortApi, ServiceContract, VariationPoint, VariationSelection}
 import org.goldenport.cncf.context.ExecutionContext
-import org.simplemodeling.textus.ai.ai.*
+import org.simplemodeling.textus.airuntime.ai.*
+
+/*
+ * @since   Jul.  2, 2026
+ * @version Aug. 21, 2026
+ * @author  ASAMI, Tomoharu
+ */
 
 final case class GenerateRequirement(
   provider: Option[String] = Some("gemma"),

@@ -9,14 +9,14 @@ import org.goldenport.cncf.mcp.client.*
 import org.goldenport.cncf.operationtool.*
 import org.goldenport.protocol.Property
 import org.goldenport.record.Record
-import org.simplemodeling.textus.ai.ai.*
+import org.simplemodeling.textus.airuntime.ai.*
 
 /*
  * Bounded bridge from admitted internal Operation and remote MCP catalogs to
  * a tool-capable model. Source identities and invocation paths stay separate.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 22, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] object ToolOrchestrator {

@@ -16,13 +16,13 @@ import org.goldenport.protocol.Property
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import org.simplemodeling.textus.ai.ai.{ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition}
+import org.simplemodeling.textus.airuntime.ai.{ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition}
 
 /*
  * Executable specification for the OpenAI Responses function-call adapter.
  *
  * @since   Jul. 22, 2026
- * @version Jul. 26, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class OpenAiToolCallingSpec extends AnyWordSpec with Matchers with GivenWhenThen {

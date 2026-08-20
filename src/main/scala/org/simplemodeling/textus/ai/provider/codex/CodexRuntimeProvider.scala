@@ -13,8 +13,14 @@ import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.cncf.unitofwork.UnitOfWorkOp
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
-import org.simplemodeling.textus.ai.ai.*
+import org.simplemodeling.textus.airuntime.ai.*
 import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService}
+
+/*
+ * @since   Jul. 17, 2026
+ * @version Aug. 21, 2026
+ * @author  ASAMI, Tomoharu
+ */
 
 final case class CodexExecutionProfile(
   name: String,

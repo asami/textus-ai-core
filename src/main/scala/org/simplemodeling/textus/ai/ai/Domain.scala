@@ -1,10 +1,15 @@
-package org.simplemodeling.textus.ai.ai
+package org.simplemodeling.textus.airuntime.ai
 
 import org.goldenport.protocol.Property
 import org.goldenport.record.Record
 import io.circe.Json
 import org.simplemodeling.model.value.MessageRole
 
+/**
+ * @since Jul. 22, 2026
+ * @version Aug. 21, 2026
+ * @author ASAMI, Tomoharu
+ */
 final case class Message(
   role: MessageRole,
   content: String

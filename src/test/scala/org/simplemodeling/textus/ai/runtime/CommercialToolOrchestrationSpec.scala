@@ -20,14 +20,14 @@ import org.scalatest.wordspec.AnyWordSpec
 import org.simplemodeling.textus.ai.provider.anthropic.{AnthropicChatService, AnthropicRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.google.{GoogleChatService, GoogleRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.{OpenAiChatService, OpenAiRuntimeConfig}
-import org.simplemodeling.textus.ai.ai.GenerateResponse
+import org.simplemodeling.textus.airuntime.ai.GenerateResponse
 
 /*
  * Executable specification for commercial native function continuations over
  * the common CNCF MCP invocation boundary.
  *
  * @since   Jul. 22, 2026
- * @version Jul. 26, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CommercialToolOrchestrationSpec

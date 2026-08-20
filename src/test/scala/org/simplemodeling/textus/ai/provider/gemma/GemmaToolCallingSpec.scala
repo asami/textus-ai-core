@@ -16,13 +16,13 @@ import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOf
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import org.simplemodeling.textus.ai.ai.{ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition}
+import org.simplemodeling.textus.airuntime.ai.{ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition}
 
 /*
  * Executable specification for the Ollama function-call wire adapter.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 26, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class GemmaToolCallingSpec extends AnyWordSpec with Matchers with GivenWhenThen {

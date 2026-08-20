@@ -16,7 +16,7 @@ import org.goldenport.datatype.{ContentType, MimeType}
 import org.goldenport.http.{HttpResponse, HttpStatus}
 import org.goldenport.protocol.Property
 import org.goldenport.cncf.testutil.RuntimeBindingAdmissionFixture
-import org.simplemodeling.textus.ai.ai.GenerateRequest
+import org.simplemodeling.textus.airuntime.ai.GenerateRequest
 import org.scalatest.GivenWhenThen
 import org.scalatest.OptionValues
 import org.scalatest.matchers.should.Matchers
@@ -28,7 +28,7 @@ import org.scalatest.wordspec.AnyWordSpec
  *
  * @since   Jul. 20, 2026
  *  version Jul. 26, 2026
- * @version Aug.  5, 2026
+ * @version Aug. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class OllamaManagedServiceRuntimeSpec

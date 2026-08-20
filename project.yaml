@@ -1,9 +1,13 @@
 project:
   namespace: "org.simplemodeling.textus"
   id: "AiRuntime"
+  name: "textus-ai-runtime"
+  scalaPackage: "org.simplemodeling.textus.airuntime"
   title: "Textus AI Runtime"
   kind: car
   component:
+    name: "AiRuntime"
+    className: "AiRuntimeComponent"
     displayName: "Textus AI Runtime"
     version: "0.2.1-SNAPSHOT"
     config:
