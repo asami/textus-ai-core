@@ -83,14 +83,14 @@ final class AiRuntimeIdentitySpec
         Some("org.simplemodeling.textus.airuntime"),
         Some("AiRuntime"),
         Some("AiRuntimeComponent"),
-        Some("0.2.1-SNAPSHOT")
+        Some("0.2.2")
       )
       _value(descriptor, "component", "namespace") shouldBe Some("org.simplemodeling.textus")
       _value(descriptor, "component", "id") shouldBe Some("AiRuntime")
-      _value(descriptor, "component", "version") shouldBe Some("0.2.1-SNAPSHOT")
+      _value(descriptor, "component", "version") shouldBe Some("0.2.2")
       _value(abi, "component", "namespace") shouldBe Some("org.simplemodeling.textus")
       _value(abi, "component", "id") shouldBe Some("AiRuntime")
-      _value(abi, "component", "version") shouldBe Some("0.2.1-SNAPSHOT")
+      _value(abi, "component", "version") shouldBe Some("0.2.2")
     }
   }
 

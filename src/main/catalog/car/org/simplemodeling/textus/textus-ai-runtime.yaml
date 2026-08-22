@@ -1,0 +1,27 @@
+schemaVersion: 2
+kind: car
+namespace: org.simplemodeling.textus
+id: AiRuntime
+artifactId: textus-ai-runtime
+recommended: 0.2.2
+latestStable: 0.2.2
+status: active
+aliases: []
+tags: []
+terms: []
+versions:
+  - version: 0.2.2
+    channel: stable
+    status: active
+    component: org.simplemodeling.textus.AiRuntime
+    publishedAt: 2026-08-22T18:50:44.640703+09:00
+    file: repository/car/org/simplemodeling/textus/textus-ai-runtime/0.2.2/textus-ai-runtime-0.2.2.car
+    runtime:
+      cncf:
+        minimum: 0.5.2
+        excluded: []
+        tested:
+          - 0.5.2
+    checksum:
+      sha256: 2bad8d1934a9743257bf97b873d9ffa0f831e231e1344b5f0ac80b06081d2a84
+    integrityKey: org.simplemodeling.textus:textus-ai-runtime:0.2.2@sha256:2bad8d1934a9743257bf97b873d9ffa0f831e231e1344b5f0ac80b06081d2a84

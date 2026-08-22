@@ -1,0 +1,20 @@
+{
+  "format": "cozy.car.abi-manifest.v1",
+  "car": {
+    "name": "textus-ai-runtime",
+    "version": "0.2.1"
+  },
+  "abi": {
+    "version": 1,
+    "exports": {
+      "components": [
+        {
+          "name": "textus-ai-runtime"
+        }
+      ],
+      "operations": [],
+      "entities": []
+    },
+    "dependencies": []
+  }
+}
