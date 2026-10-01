@@ -18,6 +18,8 @@ Later correction, retry/escalation, Admission/review and downstream outcomes can
 
 The evidence is intended for operational audit and for engineering feedback: deviation/runaway detection, prompt/context/guard tuning, provider/routing improvement, and identification of stable AI work that can be converted into deterministic Workflow/rules/programs.
 
+For quality feedback, agent identity must be separable from provider/model identity. A Dot, OpenClaw, Codex or future agent may invoke or embody different model execution paths; evaluation should therefore support Agent x Provider/Model x Work Type analysis rather than collapsing everything into a provider name. Runtime facts such as latency, usage and cost combine with later Workflow facts such as deterministic validation, Admission, human correction and downstream outcome through the shared AIInteraction/evidence correlation.
+
 Raw payload persistence must follow CNCF classification, redaction/reference, authorization and retention policy.
 
 ## Experiment transparency
