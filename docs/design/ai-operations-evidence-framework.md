@@ -80,3 +80,11 @@ This design does not claim that one provider/profile allocation is globally
 optimal. Broad cross-provider measurement, statistical confidence, persisted
 replay reservation, and long-running cost optimization consume accumulated
 observations in a later phase.
+
+## AI Audit and Experiment correlation
+
+When an Experiment arm executes an AI-backed plan, two records are produced for different purposes: Textus Experiment records the experiment/run/arm observation and CNCF AI Audit records the AI Interaction. The AI runtime is not required to know that it is participating in an Experiment.
+
+Experiment correlation is inherited from CNCF ExecutionContext. AI Audit records the inherited experiment/run/arm identities together with its normal execution correlation. The Experiment Observation may retain AIInteractionId/evidenceRef for drill-down and later evidence use; it does not duplicate prompt, context, request or response payloads.
+
+A non-AI Experiment arm produces no AI Audit interaction merely because it belongs to an Experiment. Conversely, an AI execution is audited whether it occurs in ordinary production work or an Experiment.
