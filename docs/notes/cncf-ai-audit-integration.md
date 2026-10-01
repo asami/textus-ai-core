@@ -33,3 +33,7 @@ Experiment-specific recording remains owned by Textus Experiment. When an Experi
 CNCF Phase 98 may route a logical Operation through an online Experiment Arm before textus-ai-runtime is invoked. This does not add an Experiment responsibility to Textus AI. The runtime receives the effective admitted AI execution request through the normal path.
 
 When the selected Arm is AI-backed, Phase 97 AI Audit captures Experiment/Run/Arm correlation inherited from ExecutionContext. No online-assignment or Arm-selection logic belongs in textus-ai-runtime.
+
+## Multi-arm assignment transparency
+
+Textus AI does not assume binary A/B experiments. If CNCF Phase 98 selects any Arm from an N-arm Experiment, AI Audit inherits the resulting Experiment/Run/Arm correlation exactly as for the two-arm case. Allocation algorithms such as fixed weights, Thompson Sampling or UCB remain outside textus-ai-runtime.
