@@ -25,3 +25,9 @@ Raw payload persistence must follow CNCF classification, redaction/reference, au
 textus-ai-runtime is not Experiment-aware. If execution occurs under a Textus Experiment run/arm, CNCF ExecutionContext carries the Experiment correlation and CNCF AI Audit captures it automatically. No experimentId/runId/armId is added as a special AI request parameter and provider execution behavior does not change merely because the call belongs to an Experiment.
 
 Experiment-specific recording remains owned by Textus Experiment. When an Experiment Observation represents an AI-backed execution, it may reference the resulting AIInteractionId/evidenceRef. Detailed AI context/request/response remains in AI Audit. Additional safe execution facts useful to comparisons may be added to the ordinary AI Audit/observation contract when generally useful; they are not an Experiment-only execution path.
+
+## CNCF Phase 98 online Experiment routing
+
+CNCF Phase 98 may route a logical Operation through an online Experiment Arm before textus-ai-runtime is invoked. This does not add an Experiment responsibility to Textus AI. The runtime receives the effective admitted AI execution request through the normal path.
+
+When the selected Arm is AI-backed, Phase 97 AI Audit captures Experiment/Run/Arm correlation inherited from ExecutionContext. No online-assignment or Arm-selection logic belongs in textus-ai-runtime.
