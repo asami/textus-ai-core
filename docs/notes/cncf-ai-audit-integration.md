@@ -19,3 +19,9 @@ Later correction, retry/escalation, Admission/review and downstream outcomes can
 The evidence is intended for operational audit and for engineering feedback: deviation/runaway detection, prompt/context/guard tuning, provider/routing improvement, and identification of stable AI work that can be converted into deterministic Workflow/rules/programs.
 
 Raw payload persistence must follow CNCF classification, redaction/reference, authorization and retention policy.
+
+## Experiment transparency
+
+textus-ai-runtime is not Experiment-aware. If execution occurs under a Textus Experiment run/arm, CNCF ExecutionContext carries the Experiment correlation and CNCF AI Audit captures it automatically. No experimentId/runId/armId is added as a special AI request parameter and provider execution behavior does not change merely because the call belongs to an Experiment.
+
+Experiment-specific recording remains owned by Textus Experiment. When an Experiment Observation represents an AI-backed execution, it may reference the resulting AIInteractionId/evidenceRef. Detailed AI context/request/response remains in AI Audit. Additional safe execution facts useful to comparisons may be added to the ordinary AI Audit/observation contract when generally useful; they are not an Experiment-only execution path.
