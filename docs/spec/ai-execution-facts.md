@@ -69,12 +69,18 @@ acceptance. Independent integrated Phase 5 review remains open.
 
 ## R9 — Provider control context and completed message
 
-Status: authored 2026-10-09; not yet compiled, tested or independently reviewed.
+Status: authored 2026-10-09; compiled, tested and independently reviewed 2026-10-11.
 Reconciled 2026-10-11 for standalone Textus AI Phase 9, Step P9-JL / Slice
-P9-JL-01. The paired examples remain authored and unverified until their actual
-focused validation and independent review. Earlier R8 verification retains its
+P9-JL-01. Focused acceptance passed 42 tests and normalization/profile regressions
+passed 100 tests, followed by independent Step and comprehensive Phase review.
+Final full validation passed 195 tests in 25 suites; five opt-in live tests were
+canceled, not claimed as executed. The version-identity repair passed 3 focused
+tests and independent focused re-review. Earlier R8 verification retains its
 2026-10-08 scope and does not certify this addition. Phase 9 does not require an
 sm-workflow connection or acceptance.
+
+See [Phase 9 completion evidence](../journal/2026/10/2026-10-11-phase-9-completion.md)
+for the exact local acceptance/release boundary and evidence limitations.
 
 Named Codex managed capabilities use fixed `exec --json`; the original
 unprofiled plain-output capability keeps its existing wire behavior. Consume

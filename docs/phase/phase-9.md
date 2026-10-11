@@ -1,11 +1,12 @@
 # Phase 9 - Codex JSONL Response and Execution Observations
 
-status=open
+status=closed
 created_at=2026-10-11
+closed_at=2026-10-11
 scope=standalone Textus AI Codex provider enhancement
 checklist=[Phase 9 Checklist](phase-9-checklist.md)
-current_step=P9-JL
-current_slice=P9-JL-01
+current_step=none
+current_slice=none
 
 ## Goal
 
@@ -50,13 +51,13 @@ also present. Phase 9 explicitly adopts `project.yaml`, `abi-manifest.json` and
 CNCF `0.5.3-SNAPSHOT`. Their coordinates and metadata schemas are retained.
 
 [AI execution facts](../spec/ai-execution-facts.md) records R8 focused validation
-on 2026-10-08 and identifies R9 as authored but unverified. R8 evidence does not
+on 2026-10-08 and initially identified R9 as authored but unverified. R8 evidence does not
 establish R9 acceptance. No tests or independent review were run when creating
-this Phase, and no implementation is marked complete.
+this Phase; the completion evidence below was obtained afterwards.
 
 Slice P9-JL-01 reconciles R9's current purpose to the standalone provider and
-authors the E10-E16/E25 paired examples while preserving that history. Authored
-examples do not establish verified behavior; JL-02/JL-03 remain pending.
+authored the E10-E16/E25 paired examples while preserving that history. Their
+subsequent validation and acceptance are recorded below, not inferred from authorship.
 
 ## Generation Prerequisite
 
@@ -67,8 +68,8 @@ The project now selects the already locally published Cozy `0.3.3-SNAPSHOT`,
 whose catalog reader uses `schemaVersion`, `resource`, `encoding` and `bytes`.
 This is a project-owned generator selection correction, not a Cozy or CNCF
 source change or publication. The failed attempt remains recorded; the new
-selection and Phase 9 behavior still require fresh focused validation and
-independent review.
+selection and Phase 9 behavior subsequently passed fresh focused validation and
+independent review as recorded below.
 
 The second P9-JL-ACCEPTANCE attempt admitted that Cozy/CNCF pair, then stopped
 at `GENERATION_PROVENANCE_OUTPUT_TAMPERED` before compilation or tests.
@@ -77,8 +78,8 @@ sbt-cozy `0.1.16` installed 24 generated Scala files under
 The project now selects the already locally published sbt-cozy
 `0.1.18-SNAPSHOT`, whose installer preserves the canonical Scala-root layout.
 Both failed attempts remain recorded. No provenance check is disabled and no
-generated file is moved by hand; fresh focused validation and independent
-review are still required.
+generated file was moved by hand; fresh focused validation and independent
+review subsequently accepted the canonical 24-file Scala-root generation.
 
 ## Work Order
 
@@ -107,3 +108,37 @@ review are still required.
 - Independent Step review/acceptance commit, one comprehensive Phase review,
   final full tests, applicable CAR lint and the exact final local phase-release
   commit are recorded before closing Phase 9.
+
+## Completion Evidence
+
+Step P9-JL / Slice P9-JL-01 is accepted in local commit
+`42c14dcb3bb53532f7b75e9f426078d4cbcca05e`, retaining original base
+`1409bddb0448d831d0b5a85ab20deb6ac3e87cc3`. P9-JL-ACCEPTANCE passed 42 tests
+in two suites; P9-JL-ACCUMULATOR passed 100 tests in four suites. Independent
+Step review and the one comprehensive Phase review both returned PASS.
+
+The first executable full-suite run exposed a stale runtime-identity expectation
+for `0.2.2` after the admitted development metadata selected `0.2.3-SNAPSHOT`.
+Repair P9-FINAL-001 changed only the three version expectations and latest spec
+header. Its focused identity suite passed 3/3; independent focused re-review
+returned PASS, retaining the original full-review lineage and repair cycle 1.
+
+Final full validation on 2026-10-11 passed 195 tests in 25 suites, with zero
+failures or aborted suites. Five opt-in live-provider tests were canceled;
+paid/live execution was not required or claimed. SBT and wrapper exited 0 and
+the shared serial lock was released. CAR lint has no FAIL; its missing released
+ABI baseline and intentionally selected sbt-cozy version remain disclosed warnings.
+
+Six accepted nonblocking Hygiene records remain once in their canonical
+[journal](../journal/2026/10/2026-10-11-phase-9-hygiene-follow-up.md). There are
+no open Current Phase Blockers, Development Candidate records or unpersisted
+accepted findings. Runtime help execution remains unverified; static CAR
+documentation/help navigation was inspected without claiming runtime evidence.
+
+The [completion journal](../journal/2026/10/2026-10-11-phase-9-completion.md)
+records exact commands, logs, review identities, retained failures and the
+shared-runner prerequisite recovery. This closed projection becomes effective
+only in the verified final local phase-release commit carrying
+`Phase-Closure-Binding: textus-ai-phase9-closure-20261011@1`.
+No successor, sm-workflow integration, product deployment, publication or push
+is included. Development coordinates remain unchanged.

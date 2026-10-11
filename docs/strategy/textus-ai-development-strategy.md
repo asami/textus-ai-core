@@ -432,23 +432,27 @@ Non-goals:
 - parent conversation/context transfer, attached-context execution, or semantic source-action dispatch;
 - real-time streaming delivery, broader process permissions, or mandatory paid AI validation.
 
-Status: open. Existing code is an inherited implementation draft, not Phase 9
-acceptance evidence. Earlier R8 verification remains historical evidence at its
-original scope; R9 completion requires its own results. Phases 1-8 are not reopened.
+Status: closed 2026-10-11, effective in the verified final local phase-release
+commit bound by `textus-ai-phase9-closure-20261011@1`. Step P9-JL / Slice
+P9-JL-01 is accepted in `42c14dc`. Focused acceptance passed 42 tests, the
+accumulator 100, and the identity repair 3; the final full suite passed 195
+tests in 25 suites with five opt-in live tests canceled. Independent Step,
+the one comprehensive Phase, and focused repair reviews returned PASS. CAR
+lint has no FAIL, with two disclosed warnings. Six nonblocking Hygiene records
+are persisted with no unpersisted findings or Development Candidate records.
 
-Current Step: P9-JL; current Slice: P9-JL-01. Reconcile the standalone paired
-specification and retain inherited development inputs at `0.2.3-SNAPSHOT` with
-CNCF `0.5.3-SNAPSHOT`. Authored documentation and examples do not mark adapter
-behavior or closure as verified. The local Phase workflow requires focused
-P9-JL-ACCEPTANCE/P9-JL-ACCUMULATOR validation, independent Step review and its
-exact acceptance commit, one comprehensive Phase review, final full tests and
-applicable CAR lint, then a final local phase-release commit with closure,
-checklist and journal evidence. Publication, deployment and push are excluded.
+Development inputs remain `0.2.3-SNAPSHOT` with CNCF `0.5.3-SNAPSHOT`.
+Earlier R8 verification retains its historical scope; Phases 1-8 are not
+reopened. Controlled fixtures establish managed process/response behavior,
+not actual model computation, parent-context transfer or sm-workflow acceptance.
+Runtime help execution remains unverified. No successor starts; publication,
+product deployment and push are excluded.
 
 Artifacts:
 
 - [Phase 9 Dashboard](../phase/phase-9.md)
 - [Phase 9 Checklist](../phase/phase-9-checklist.md)
+- [Phase 9 Completion Journal](../journal/2026/10/2026-10-11-phase-9-completion.md)
 
 ## Document Roles
 
