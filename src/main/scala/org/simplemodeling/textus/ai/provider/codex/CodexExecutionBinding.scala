@@ -7,6 +7,8 @@ import org.goldenport.cncf.processexecution.*
  * Trusted runtime assembly for fixed local Codex CLI capabilities. A purpose
  * resolves a named profile before this binding is selected; callers supply
  * only the bounded stdin/schema suffix.
+ * @since   Jul. 18, 2026
+ * @version Oct. 11, 2026
  */
 object CodexExecutionBinding {
   private val _default_capability = "codex-cli"
@@ -136,7 +138,7 @@ object CodexExecutionBinding {
     val reasoning = profile.reasoningLevel.toVector.flatMap { level =>
       Vector("--config", s"model_reasoning_effort=\"${level.id}\"")
     }
-    search ++ Vector("exec") ++ model ++ reasoning ++ _base_arguments.drop(1)
+    search ++ Vector("exec", "--json") ++ model ++ reasoning ++ _base_arguments.drop(1)
   }
 
   private val _permitted_arguments = Set(

@@ -2,7 +2,7 @@
 
 status=draft
 scope=internal development strategy
-updated_at=2026-07-23
+updated_at=2026-10-11
 
 ## Purpose
 
@@ -412,6 +412,43 @@ Closure artifacts: [Phase 8 dashboard](../phase/phase-8.md),
 [Phase 8 closure](../phase/phase-8-closure.md),
 [scheduler specification](../spec/phase-8-comparison-replay-scheduler.md), and
 [accumulated-evidence policy](../spec/phase-8-accumulated-evidence-comparison.md).
+
+### Phase 9: Codex JSONL Response and Execution Observations
+
+Goal: complete the existing Codex JSONL adapter draft as a standalone Textus AI
+feature, independently of sm-workflow integration.
+
+Scope:
+
+- consume completed agent messages from the managed Codex JSONL response;
+- distinguish useful completion from tool output and failed or unfinished turns;
+- preserve generate, generateRecord, chat and the existing unprofiled plain-output route;
+- publish optional runtime-owned execution observations without inventing absent facts; and
+- verify the adapter through deterministic and controlled managed-process executable specifications.
+
+Non-goals:
+
+- sm-workflow execution, skill integration, or an sm-workflow completion prerequisite;
+- parent conversation/context transfer, attached-context execution, or semantic source-action dispatch;
+- real-time streaming delivery, broader process permissions, or mandatory paid AI validation.
+
+Status: open. Existing code is an inherited implementation draft, not Phase 9
+acceptance evidence. Earlier R8 verification remains historical evidence at its
+original scope; R9 completion requires its own results. Phases 1-8 are not reopened.
+
+Current Step: P9-JL; current Slice: P9-JL-01. Reconcile the standalone paired
+specification and retain inherited development inputs at `0.2.3-SNAPSHOT` with
+CNCF `0.5.3-SNAPSHOT`. Authored documentation and examples do not mark adapter
+behavior or closure as verified. The local Phase workflow requires focused
+P9-JL-ACCEPTANCE/P9-JL-ACCUMULATOR validation, independent Step review and its
+exact acceptance commit, one comprehensive Phase review, final full tests and
+applicable CAR lint, then a final local phase-release commit with closure,
+checklist and journal evidence. Publication, deployment and push are excluded.
+
+Artifacts:
+
+- [Phase 9 Dashboard](../phase/phase-9.md)
+- [Phase 9 Checklist](../phase/phase-9-checklist.md)
 
 ## Document Roles
 

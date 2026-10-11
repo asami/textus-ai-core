@@ -9,7 +9,7 @@ import org.goldenport.cncf.component.{Component, ExtensionPoint, ServiceContract
 import org.goldenport.cncf.config.RuntimeConfig
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.processexecution.*
-import org.goldenport.cncf.spi.ai.runner.AiTool
+import org.goldenport.cncf.spi.ai.runner.{AiManagedExecutionMetadata, AiTool}
 import org.goldenport.cncf.unitofwork.UnitOfWorkOp
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
@@ -18,7 +18,8 @@ import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, G
 
 /*
  * @since   Jul. 17, 2026
- * @version Aug. 21, 2026
+ *  version Aug. 21, 2026
+ * @version Oct. 11, 2026
  * @author  ASAMI, Tomoharu
  */
 
@@ -337,15 +338,23 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
   ): Consequence[GenerateResponse] =
     result.termination match {
       case ProcessExecutionTermination.Exited(0) =>
-        val text = new String(result.stdout.content.toArray, StandardCharsets.UTF_8).trim
-        if (text.nonEmpty)
-          Consequence.success(GenerateResponse(
-            text,
+        val raw = new String(result.stdout.content.toArray, StandardCharsets.UTF_8).trim
+        // Named capabilities are fixed to --json by the owning assembly.
+        // The original unprofiled plain-output capability remains unchanged.
+        val reply = executionprofile.profile match {
+          case Some(_) => CodexExecutionEvents.decodeC(raw)
+          case None if raw.nonEmpty => Consequence.success(CodexExecutionEvents.Reply(raw, None))
+          case None => Consequence.valueInvalid("Codex CLI returned empty output")
+        }
+        reply.map { observed => GenerateResponse(
+            observed.text,
             executionprofile.profile.map(_.model),
-            Map("codex.finish_reason" -> "exited") ++ executionprofile.metadata
-          ))
-        else
-          Consequence.valueInvalid("Codex CLI returned empty output")
+            Map("codex.finish_reason" -> "exited",
+              AiManagedExecutionMetadata.programIdentity -> result.safeProgramIdentity,
+              AiManagedExecutionMetadata.durationMillis -> result.elapsedMillis.toString) ++ executionprofile.metadata ++
+              observed.contextidentity.map(AiManagedExecutionMetadata.contextIdentity -> _).toMap
+          )
+        }
       case ProcessExecutionTermination.Exited(_) =>
         Consequence.serviceUnavailable("Codex CLI exited unsuccessfully")
       case ProcessExecutionTermination.LaunchFailed =>
@@ -370,6 +379,8 @@ final class CodexGenerateService(config: CodexRuntimeConfig, context: ExecutionC
         Map(
           "codex.profile" -> value.name,
           "codex.reasoning_level" -> value.reasoningLevel.map(_.id).getOrElse(""),
+          AiManagedExecutionMetadata.providerProfile -> value.name,
+          AiManagedExecutionMetadata.reasoningEffort -> value.reasoningLevel.map(_.id).getOrElse(""),
           "codex.enabled_tools" -> tools.toVector.map(_.id).sorted.mkString(",")
         ).filter(_._2.nonEmpty)
       }.getOrElse(Map.empty)

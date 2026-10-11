@@ -16,7 +16,7 @@ import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOf
 import org.goldenport.cncf.workarea.WorkAreaSpace
 import org.goldenport.configuration.{Configuration, ConfigurationOrigin, ConfigurationResolution, ConfigurationTrace, ResolvedConfiguration}
 import org.goldenport.configuration.ConfigurationValue
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiGenerateRequest, AiManagedExecutionMetadata, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerRequirement}
 import org.goldenport.record.Record
 import org.simplemodeling.textus.ai.provider.codex.CodexRuntimeConfig
 import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiProfileConfig, TextusAiRunnerProvider}
@@ -28,7 +28,8 @@ import org.scalatest.wordspec.AnyWordSpec
 /*
  * @since   Jul. 16, 2026
  *  version Jul. 26, 2026
- * @version Aug.  8, 2026
+ *  version Aug.  8, 2026
+ * @version Oct. 11, 2026
  * @author  ASAMI, Tomoharu
  */
 final class ComponentFactorySpec
@@ -954,7 +955,7 @@ final class ComponentFactorySpec
 
         Then("only the fixed approved model, reasoning, and global Web option are admitted")
         result.toOption.map(_.effectiveArguments) shouldBe Some(Vector(
-          "--search", "exec", "--model", "gpt-5.6-sol",
+          "--search", "exec", "--json", "--model", "gpt-5.6-sol",
           "--config", "model_reasoning_effort=\"high\"",
           "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "-"
         ))
@@ -991,15 +992,21 @@ final class ComponentFactorySpec
 
     "execute through the provider-owned component scope" which {
       _example("E25", "execute Codex requests through the provider component scope from a sibling caller scope") {
-        Given("an enabled component-local Codex driver, a sibling caller scope, and a controlled executable")
+        Given("Spec: docs/spec/ai-execution-facts.md; Rules: R8/R9; Examples: E9/E25; an enabled provider-owned local driver and controlled JSONL executable, not an AI model or sm-workflow acceptance")
         val executable = java.nio.file.Files.createTempFile("textus-ai-codex-spec", ".sh")
         java.nio.file.Files.writeString(executable,
-          "#!/bin/sh\n" +
-            "if [ \"$1\" = \"--version\" ]; then printf 'codex-cli 0.144.0'; exit 0; fi\n" +
-            "if [ -f schema.json ]; then marker=record; else marker=plain; fi\n" +
-            "if [ -z \"$HOME\" ]; then home=empty; else home=set; fi\n" +
-            "args=$(printf '%s' \"$*\" | tr -d '\"')\n" +
-            "printf '{\"title\":\"%s:%s:%s\"}' \"$marker\" \"$home\" \"$args\"\n"
+          """#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'codex-cli 0.144.0'; exit 0; fi
+if [ -f schema.json ]; then marker=record; else marker=plain; fi
+if [ -z "$HOME" ]; then observedhome=empty; else observedhome=set; fi
+args=$(printf '%s' "$*" | tr -d '"')
+printf '%s\n' '{"type":"thread.started","thread_id":"controlled-provider-context"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"title\":\"'
+printf '%s:%s:%s' "$marker" "$observedhome" "$args"
+printf '%s\n' '\"}"}}'
+printf '%s\n' '{"type":"turn.completed"}'
+"""
         )
         executable.toFile.setExecutable(true)
         val configuration = ResolvedConfiguration(
@@ -1064,12 +1071,21 @@ final class ComponentFactorySpec
 
         Then("the fixed command, empty environment, and bounded schema file are executed in provider-owned managed WorkAreas")
         withClue(generated.toString) {
-          generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+          generated.toOption.map(_.text) shouldBe Some("{\"title\":\"plain:empty:exec --json --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
         }
-        recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
-        chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
+        recorded.toOption.flatMap(_.record.getAny("title")) shouldBe Some("record:empty:exec --json --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check --output-schema schema.json -")
+        chatted.toOption.map(_.message.content) shouldBe Some("{\"title\":\"plain:empty:exec --json --model gpt-5.6-terra --config model_reasoning_effort=high --sandbox read-only --ephemeral --skip-git-repo-check -\"}")
         callerscope.processExecutionDriverOption shouldBe None
         callerscope.processExecutionAdmissionOption shouldBe None
+        val observations = Vector(generated.toOption.value.metadata,
+          recorded.toOption.value.metadata, chatted.toOption.value.metadata)
+        observations.foreach { metadata =>
+          metadata.get(AiManagedExecutionMetadata.programIdentity) shouldBe Some("codex-cli-profile-runtime-standard-work")
+          metadata.get(AiManagedExecutionMetadata.providerProfile) shouldBe Some("runtime-standard-work")
+          metadata.get(AiManagedExecutionMetadata.reasoningEffort) shouldBe Some("high")
+          metadata.get(AiManagedExecutionMetadata.durationMillis).flatMap(_.toLongOption).exists(_ >= 0L) shouldBe true
+          metadata.get(AiManagedExecutionMetadata.contextIdentity) shouldBe Some("controlled-provider-context")
+        }
       }
     }
   }

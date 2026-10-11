@@ -9,7 +9,7 @@ project:
     name: "AiRuntime"
     className: "AiRuntimeComponent"
     displayName: "Textus AI Runtime"
-    version: "0.2.2"
+    version: "0.2.3-SNAPSHOT"
     config:
       textus.server.default-port: "18002"
 
@@ -18,10 +18,10 @@ cml:
 
 build:
   scalaVersion: "3.3.8"
-  cozyVersion: "0.3.2.2"
+  cozyVersion: "0.3.3-SNAPSHOT"
   dependencies:
     compile:
-      - "org.goldenport::goldenport-cncf:0.5.2"
+      - "org.goldenport::goldenport-cncf:0.5.3-SNAPSHOT"
       - "org.simplemodeling::simplemodeling-model:0.2.0"
     test:
       - "org.scalatest::scalatest:3.2.19"
@@ -38,10 +38,10 @@ packaging:
       domain: "ai-runtime"
     runtime:
       cncf:
-        minimum: "0.5.2"
+        minimum: "0.5.3-SNAPSHOT"
         excluded: []
         tested:
-          - "0.5.2"
+          - "0.5.3-SNAPSHOT"
 
 warehouse:
   repository_artifacts:

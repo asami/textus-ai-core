@@ -32,3 +32,98 @@ updated_at=2026-07-18
 accounting identity fixtures. `TextusAiRunnerSpec` covers extraction from plain
 Google, OpenAI, and Gemma provider responses and response-to-CallTree
 normalization.
+
+## R8 — Managed provider execution observations (Phase 5 connection)
+
+Status of this addition: focused verification passed 2026-10-08 (49 tests, three suites).
+It does not change the accepted earlier accounting/usage scope above.
+
+The CNCF AI runner SPI declares `AiManagedExecutionMetadata` keys for managed
+program identity, provider profile, reasoning effort and elapsed milliseconds.
+After successful Codex process termination, TextusAI publishes the actual
+`ProcessExecutionResult.safeProgramIdentity` and `elapsedMillis`, together with
+the profile/effort selected by its admitted fixed-argument provider binding.
+These facts survive generate, structured-record and chat response normalization.
+Caller metadata is not the source of these observations. With no selected
+provider profile/effort, those facts remain absent rather than fabricated.
+
+Observations are not execution permission, source/provenance integrity, a new
+resume gate or a certificate of unchanged content. Program/profile facts alone
+do not establish independent executor context, actual model computation, cost
+or Workflow continuation. Those require their real runtime connections.
+
+E8 in `CodexRuntimeProviderSpec` consumes a controlled managed-driver result,
+rejects no legacy input solely for lacking optional observations, and confirms
+that forged request metadata is not returned as actual program/time. It also
+covers normalization through generateRecord and chat. This fixture is not an
+actual AI model invocation.
+
+E9 extends the existing provider-owned execution example in
+`ComponentFactorySpec` (E25): an ordinary Component.Factory-created TextusAI
+provider runs a real controlled local executable via managed WorkAreas and
+its fixed standard-work profile from a sibling caller scope. Actual fixed argv,
+model/effort, program and elapsed-result observations are exercised without
+giving the caller process grants. The executable echoes its input; this is
+real managed process execution, not paid/provider model execution or sm-workflow
+acceptance. Independent integrated Phase 5 review remains open.
+
+## R9 — Provider control context and completed message
+
+Status: authored 2026-10-09; not yet compiled, tested or independently reviewed.
+Reconciled 2026-10-11 for standalone Textus AI Phase 9, Step P9-JL / Slice
+P9-JL-01. The paired examples remain authored and unverified until their actual
+focused validation and independent review. Earlier R8 verification retains its
+2026-10-08 scope and does not certify this addition. Phase 9 does not require an
+sm-workflow connection or acceptance.
+
+Named Codex managed capabilities use fixed `exec --json`; the original
+unprofiled plain-output capability keeps its existing wire behavior. Consume
+the latest completed agent message in the latest turn from the public JSONL
+control stream, not tool stdout or the whole event stream. Multiple completed
+agent messages in one turn select the last one; a newly started turn discards
+the previous turn's answer and completion. A previous completed turn cannot
+certify an unfinished latest turn. A distinct newly started turn may recover
+with its own completed answer. Later command/tool events and annotations do
+not replace the answer. Successful process exit without a completed agent
+turn, without an agent message, or with only whitespace does not produce
+successful generation. `turn.failed` and a top-level `error` produce structured
+failures without exposing private provider errors, tool bodies or discarded
+answers. Unknown events and unrelated annotation/tool/error payload metadata
+are not forwarded as execution facts because they are not consumed completion
+data.
+A `thread.started.thread_id` is optional provider-reported context, published
+under CNCF `AiManagedExecutionMetadata.contextIdentity`. Semantic text and caller
+metadata never supply it or managed program/profile/effort/duration facts.
+Missing, empty, control-character or conflicting control context stays absent;
+a useful completed response is not rejected only for missing optional facts.
+This value does not grant authority, attest model computation or by itself prove
+placement, independence, inline reuse or Workflow completion. Any application's
+origin/executor/continuation requirements belong to that application's actual
+runtime integration and are outside this standalone Phase.
+
+The paired `CodexRuntimeProviderSpec` JSONL group uses the normal named-profile
+AiRunner path and controlled driver fixtures:
+
+- E10: generate, generateRecord and chat return completed text/control context,
+  reject caller/semantic-text forgery as execution facts, and omit unrelated
+  annotation/tool/error metadata.
+- E11: missing/conflicting context remains absent; failed/unfinished streams
+  fail without exposing private detail.
+- E12: the latest completed answer wins within one turn and across successive
+  completed turns; late non-answer events cannot replace it.
+- E13: a prior completed answer cannot certify the latest unfinished turn;
+  a distinct newly started completed turn recovers with its own answer.
+- E14: a top-level terminal error fails without exposing private provider detail.
+- E15: completed message-less and whitespace-only turns fail.
+- E16: empty/control-character optional context is omitted while a useful
+  completed answer succeeds.
+
+ComponentFactorySpec E25 retains R8 E9 provenance and pairs with R9: its real
+controlled executable emits JSONL for generate, generateRecord and chat through
+the provider-owned scope. It exercises fixed model/effort arguments, bounded
+schema, empty environment and actual execution observations while the sibling
+caller has no process grants. These fixtures do not certify actual AI model
+computation or sm-workflow acceptance and introduce no increased AI sandbox
+permissions, process grants, cache scope or caller-owned process access.
+
+Protocol source: [OpenAI non-interactive mode](https://developers.openai.com/codex/noninteractive/).

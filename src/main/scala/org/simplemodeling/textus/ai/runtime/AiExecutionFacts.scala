@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 import org.goldenport.cncf.spi.SpiSelection
-import org.goldenport.cncf.spi.ai.runner.AiRunnerRequirement
+import org.goldenport.cncf.spi.ai.runner.{AiManagedExecutionMetadata, AiRunnerRequirement}
 
 private[textus] enum AiUsageSource(val id: String) {
   case Reported extends AiUsageSource("reported")
@@ -84,7 +84,8 @@ private[textus] object AiAccountingFacts {
  * Provider-neutral execution metadata normalization for Textus AI responses.
  *
  * @since   Jul. 16, 2026
- * @version Jul. 22, 2026
+ *  version Jul. 22, 2026
+ * @version Oct. 11, 2026
  * @author  ASAMI, Tomoharu
  */
 private[textus] object AiExecutionFacts {
@@ -107,7 +108,7 @@ private[textus] object AiExecutionFacts {
   val REPAIR_COUNT = "ai.execution.repair_count"
   val ESCALATION_REASON = "ai.execution.escalation_reason"
   val FINAL_PROVIDER = "ai.execution.final_provider"
-  val DURATION_MILLIS = "ai.execution.duration_millis"
+  val DURATION_MILLIS = AiManagedExecutionMetadata.durationMillis
   val STRATEGY_MAX_REPAIRS = "ai.policy.strategy_max_repairs"
   val STRATEGY_MAX_PROVIDER_ATTEMPTS = "ai.policy.strategy_max_provider_attempts"
   val INPUT_TOKENS = "ai.usage.input_tokens"
@@ -289,6 +290,9 @@ private[textus] object AiExecutionFacts {
 
   private def _is_safe_provider_key(key: String): Boolean =
     key match {
+      case AiManagedExecutionMetadata.programIdentity | AiManagedExecutionMetadata.providerProfile |
+          AiManagedExecutionMetadata.reasoningEffort | AiManagedExecutionMetadata.durationMillis |
+          AiManagedExecutionMetadata.contextIdentity => true
       case "google.response_id" | "google.finish_reason" |
           "google.usage.input_tokens" | "google.usage.output_tokens" | "google.usage.total_tokens" |
           "google.usage.cached_input_tokens" | "google.usage.reasoning_tokens" |
