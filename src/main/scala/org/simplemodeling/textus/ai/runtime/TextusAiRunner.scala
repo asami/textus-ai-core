@@ -27,7 +27,8 @@ import org.simplemodeling.textus.airuntime.ai.{ChatRequest, ChatResponse, Genera
  * operations.
  *
  * @since   Jul.  2, 2026
- * @version Aug. 21, 2026
+ *  version Aug. 21, 2026
+ * @version Oct. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -1181,8 +1182,8 @@ final class TextusAiRunner(
 
   private def _json_to_record(json: Json): Record =
     json.asObject
-      .map(obj => Record.dataAuto(obj.toVector.map { case (key, value) => key -> _json_to_value(value) }*))
-      .getOrElse(Record.dataAuto("value" -> _json_to_value(json)))
+      .map(obj => Record.createFull(obj.toVector.map { case (key, value) => key -> _json_to_value(value) }))
+      .getOrElse(Record.createFull(Vector("value" -> _json_to_value(json))))
 
   private def _json_to_value(json: Json): Any =
     json.fold(
@@ -1191,7 +1192,7 @@ final class TextusAiRunner(
       jsonNumber = n => n.toInt.getOrElse(n.toLong.getOrElse(n.toDouble)),
       jsonString = identity,
       jsonArray = _.map(_json_to_value).toVector,
-      jsonObject = obj => Record.dataAuto(obj.toVector.map { case (key, value) => key -> _json_to_value(value) }*)
+      jsonObject = obj => Record.createFull(obj.toVector.map { case (key, value) => key -> _json_to_value(value) })
     )
 
   private def _validate_schema(
@@ -1201,40 +1202,82 @@ final class TextusAiRunner(
     val missing = _schema_required(schema).filterNot(field => _has_field(record, field))
     if (missing.nonEmpty)
       Left(s"missing required fields: ${missing.mkString(",")}")
-    else
-      _schema_array_specs(schema).flatMap(spec => _array_schema_error(record, spec)).headOption match {
+    else {
+      val legacyerrors = _schema_array_specs(schema).flatMap { case (name, items) =>
+        _array_schema_error(record, name, Some(items), true)
+      }
+      val propertyerrors = schema.getAny("properties").toVector.collect {
+        case properties: Record => properties
+      }.flatMap(_.fields).flatMap { field =>
+        field.value.single match {
+          case spec: Record if _string(spec.getAny("type")).contains("array") =>
+            _array_schema_error(
+              record,
+              field.key,
+              spec.getAny("items").collect { case items: Record => items },
+              _schema_required(schema).contains(field.key)
+            )
+          case _ => None
+        }
+      }
+      (legacyerrors ++ propertyerrors).headOption match {
         case Some(message) => Left(message)
         case None => Right(())
       }
+    }
   }
 
-  private final case class _ArraySchema(
-    name: String,
-    required: Vector[String]
-  )
-
-  private def _schema_array_specs(schema: Record): Vector[_ArraySchema] =
+  private def _schema_array_specs(schema: Record): Vector[(String, Record)] =
     _records(schema.getAny("arrays"))
       .flatMap { record =>
         _string(record.getAny("name"))
           .orElse(_string(record.getAny("field")))
-          .map(name => _ArraySchema(name, _schema_required(record)))
+          .map(name => name -> record)
       }
 
   private def _array_schema_error(
     record: Record,
-    spec: _ArraySchema
+    name: String,
+    items: Option[Record],
+    required: Boolean
   ): Option[String] =
-    record.getAny(spec.name) match {
-      case Some(values) =>
-        _records(values).zipWithIndex.collectFirst {
-          case (item, index) if spec.required.exists(field => !_has_field(item, field)) =>
-            val missing = spec.required.filterNot(field => _has_field(item, field))
-            s"${spec.name}[$index] missing required fields: ${missing.mkString(",")}"
-        }
-      case None =>
-        Some(s"missing array field: ${spec.name}")
+    record.fields.find(_.key == name) match {
+      case Some(field) => _array_value_error(field.value.single, items, name)
+      case None if required => Some(s"missing array field: $name")
+      case None => None
     }
+
+  private def _array_value_error(
+    value: Any,
+    items: Option[Record],
+    path: String
+  ): Option[String] = {
+    val values = value match {
+      case xs: Seq[?] => Some(xs.toVector)
+      case xs: Array[?] => Some(xs.toVector)
+      case _ => None
+    }
+    values match {
+      case Some(xs) =>
+        xs.zipWithIndex.flatMap { case (item, index) =>
+          items.flatMap { schema =>
+            val itempath = s"$path[$index]"
+            _string(schema.getAny("type")) match {
+              case Some("array") =>
+                _array_value_error(item, schema.getAny("items").collect { case r: Record => r }, itempath)
+              case itemtype if itemtype.contains("object") || _schema_required(schema).nonEmpty =>
+                item match {
+                  case r: Record => _validate_schema(r, schema).left.toOption.map(message => s"$itempath $message")
+                  case _ => Some(s"$itempath must be an object")
+                }
+              case _ => None
+            }
+          }
+        }.headOption
+      case None =>
+        Some(s"$path must be an array")
+    }
+  }
 
   private def _schema_required(schema: Record): Vector[String] =
     _strings(schema.getAny("required"))
@@ -1246,7 +1289,6 @@ final class TextusAiRunner(
     record.getAny(field).exists {
       case null => false
       case s: String => s.trim.nonEmpty
-      case xs: Seq[?] => xs.nonEmpty
       case _ => true
     }
 
@@ -1264,6 +1306,7 @@ final class TextusAiRunner(
   private def _strings(value: Any): Vector[String] =
     value match {
       case null => Vector.empty
+      case None => Vector.empty
       case r: Record => r.getAny("value").toVector.flatMap(_strings)
       case Some(v) => _strings(v)
       case xs: Vector[?] => xs.flatMap(_strings)

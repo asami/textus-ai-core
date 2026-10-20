@@ -4,6 +4,8 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import cats.~>
+import io.circe.Json
+import io.circe.parser.parse
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.DurationInt
 import org.goldenport.Consequence
@@ -24,6 +26,7 @@ import org.goldenport.datatype.{ContentType, MimeType}
 import org.goldenport.http.{HttpResponse, HttpStatus}
 import org.goldenport.protocol.{Property, Protocol}
 import org.goldenport.record.Record
+import org.goldenport.record.io.RecordEncoder
 import org.goldenport.schema.DataConfidentiality
 import org.scalatest.GivenWhenThen
 import org.scalatest.OptionValues
@@ -41,7 +44,8 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
- * @version Aug. 21, 2026
+ *  version Aug. 21, 2026
+ * @version Oct. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -1797,6 +1801,189 @@ final class TextusAiRunnerSpec
 
     }
 
+    "explicit JSON values and declared arrays" which {
+      "preserve clean CBD review arrays through the registered Gemma binding and JSON encoding" in {
+        Given("the admitted CBD review schema and a deterministic Gemma response with empty findings and nested arrays")
+        val candidate = parse("""{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[{"checkId":"coverage","status":"covered","paths":["source.scala"],"modelSubjects":[],"limitations":[]}],"findings":[]}""").toOption.get
+        val driver = _record_http_driver(candidate)
+        given ExecutionContext = _context(driver)
+        val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+        When("the actual registered binding normalizes the structured review and its Record is JSON encoded")
+        val result = runner.generateRecord(AiRecordRequest("clean scoped review", _cbd_record_schema))
+        val record = result.toOption.value.record
+        val encoded = parse(RecordEncoder.json(record)).toOption.value
+
+        Then("explicit empty findings, modelSubjects and limitations survive the roundtrip")
+        record.getAny("findings") shouldBe Some(Vector.empty)
+        val check = record.getAny("checks").value.asInstanceOf[Vector[Record]].head
+        check.getAny("modelSubjects") shouldBe Some(Vector.empty)
+        check.getAny("limitations") shouldBe Some(Vector.empty)
+        encoded shouldBe candidate
+        result.toOption.value.metadata(AiExecutionFacts.PROVIDER) shouldBe "gemma"
+        driver.calls should have size 1
+      }
+
+      Vector(
+        "object fields" -> """{"empty":[],"nothing":null,"object":{},"nested":{"empty":[],"nothing":null,"object":{}},"values":[null,{},[]]}""",
+        "empty root object" -> "{}",
+        "empty root array" -> "[]",
+        "root null" -> "null"
+      ).foreach { case (label, text) =>
+        s"preserve explicit JSON values in $label" in {
+          Given(s"a deterministic Gemma response containing $label and no required fields")
+          val candidate = parse(text).toOption.get
+          val driver = _record_http_driver(candidate)
+          given ExecutionContext = _context(driver)
+          val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+          When("the registered binding normalizes the JSON and the resulting Record is encoded")
+          val result = runner.generateRecord(AiRecordRequest("explicit JSON values", Record.empty))
+          val encoded = parse(RecordEncoder.json(result.toOption.value.record)).toOption.value
+
+          Then("all explicit values are retained, with a value envelope for a non-object root")
+          encoded shouldBe candidate.asObject.map(_ => candidate).getOrElse(Json.obj("value" -> candidate))
+          driver.calls should have size 1
+        }
+      }
+
+      "accept an explicitly empty required legacy array" in {
+        Given("a legacy schema with required exhibition item fields and a Gemma response containing an empty array")
+        val driver = _record_http_driver(Json.obj("exhibitions" -> Json.arr()))
+        given ExecutionContext = _context(driver)
+        val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+        When("the registered binding normalizes and validates the empty required array")
+        val result = runner.generateRecord(AiRecordRequest("empty exhibitions", _artscene_record_schema))
+
+        Then("presence succeeds without requiring an item or fabricating content")
+        result.toOption.value.record.getAny("exhibitions") shouldBe Some(Vector.empty)
+        driver.calls should have size 1
+      }
+
+      Vector("name", "field").foreach { alias =>
+        Vector(
+          ("absent", "{}", "missing array field: exhibitions"),
+          ("null", """{"exhibitions":null}""", "must be an array"),
+          ("object", """{"exhibitions":{}}""", "must be an array"),
+          ("scalar", """{"exhibitions":"invalid"}""", "must be an array"),
+          ("scalar item", """{"exhibitions":[1]}""", "exhibitions[0] must be an object"),
+          ("null item", """{"exhibitions":[null]}""", "exhibitions[0] must be an object"),
+          ("missing item field", """{"exhibitions":[{}]}""", "exhibitions[0] missing required fields: title"),
+          ("null item field", """{"exhibitions":[{"title":null}]}""", "exhibitions[0] missing required fields: title"),
+          ("blank item field", """{"exhibitions":[{"title":"  "}]}""", "exhibitions[0] missing required fields: title")
+        ).foreach { case (label, text, expected) =>
+          s"reject $label in a legacy array declared by $alias without retry" in {
+            Given(s"a legacy $alias declaration requiring title on its items and a $label Gemma candidate")
+            val schema = Record.dataAuto("arrays" -> Vector(Record.dataAuto(alias -> "exhibitions", "required" -> Vector("title"))))
+            val driver = _record_http_driver(parse(text).toOption.get)
+            given ExecutionContext = _context(driver)
+            val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+            When("the registered binding validates the declared legacy array")
+            val result = runner.generateRecord(AiRecordRequest("invalid legacy array", schema))
+
+            Then("the schema mismatch preserves the missing-field diagnostic where applicable and is terminal")
+            result shouldBe a[Consequence.Failure[_]]
+            result.toString should include (expected)
+            driver.calls should have size 1
+          }
+        }
+      }
+
+      Vector(
+        ("absent root array", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[]}""", "missing required fields: findings"),
+        ("null root array", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[],"findings":null}""", "missing required fields: findings"),
+        ("non-array root field", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[],"findings":{}}""", "findings must be an array"),
+        ("scalar object item", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[],"findings":[1]}""", "findings[0] must be an object"),
+        ("null object item", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[],"findings":[null]}""", "findings[0] must be an object"),
+        ("absent nested array", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[{"checkId":"coverage","status":"covered","paths":["source.scala"],"limitations":[]}],"findings":[]}""", "checks[0] missing required fields: modelSubjects"),
+        ("null nested array", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[{"checkId":"coverage","status":"covered","paths":["source.scala"],"modelSubjects":null,"limitations":[]}],"findings":[]}""", "checks[0] missing required fields: modelSubjects"),
+        ("non-array nested field", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[{"checkId":"coverage","status":"covered","paths":["source.scala"],"modelSubjects":"invalid","limitations":[]}],"findings":[]}""", "checks[0] modelSubjects must be an array"),
+        ("blank required scalar", """{"subjectId":"fixture-subject","subjectRevision":"fixture-revision","checks":[{"checkId":"  ","status":"covered","paths":["source.scala"],"modelSubjects":[],"limitations":[]}],"findings":[]}""", "checks[0] missing required fields: checkId")
+      ).foreach { case (label, text, expected) =>
+        s"reject a CBD-shaped candidate with $label without retry" in {
+          Given(s"the admitted CBD review schema and a deterministic Gemma candidate with $label")
+          val driver = _record_http_driver(parse(text).toOption.get)
+          given ExecutionContext = _context(driver)
+          val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+          When("the registered binding validates root and object-item array requirements")
+          val result = runner.generateRecord(AiRecordRequest("invalid scoped review", _cbd_record_schema))
+
+          Then("the malformed declared array or required field is rejected without another provider request")
+          result shouldBe a[Consequence.Failure[_]]
+          result.toString should include (expected)
+          driver.calls should have size 1
+        }
+      }
+
+      Vector(
+        ("absent", "{}", true),
+        ("empty", """{"notes":[]}""", true),
+        ("null", """{"notes":null}""", false),
+        ("non-array", """{"notes":"invalid"}""", false)
+      ).foreach { case (label, text, accepted) =>
+        s"distinguish $label optional standard arrays from required presence" in {
+          Given(s"an optional properties-array declaration and a $label Gemma response")
+          val schema = Record.dataAuto("properties" -> Record.dataAuto("notes" -> Record.dataAuto("type" -> "array")))
+          val driver = _record_http_driver(parse(text).toOption.get)
+          given ExecutionContext = _context(driver)
+          val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+          When("the registered binding validates the optional declared array")
+          val result = runner.generateRecord(AiRecordRequest("optional notes", schema))
+
+          Then("absence or an empty array succeeds while an explicit null or scalar fails")
+          result.isSuccess shouldBe accepted
+          if (accepted)
+            parse(RecordEncoder.json(result.toOption.value.record)).toOption.value shouldBe parse(text).toOption.get
+          else
+            result.toString should include ("notes must be an array")
+          driver.calls should have size 1
+        }
+      }
+
+      Vector(
+        ("empty outer", "[]", true),
+        ("empty inner", "[[]]", true),
+        ("object inner item", "[[{\"name\":\"subject\"}]]", true),
+        ("null inner", "[null]", false),
+        ("non-array inner", "[{}]", false),
+        ("scalar inner item", "[[1]]", false),
+        ("missing inner item field", "[[{}]]", false)
+      ).foreach { case (label, text, accepted) =>
+        s"validate recursive array items for $label arrays" in {
+          Given(s"an array whose items are arrays of named objects and a $label Gemma candidate")
+          val schema = Record.dataAuto(
+            "required" -> Vector("matrix"),
+            "properties" -> Record.dataAuto("matrix" -> Record.dataAuto(
+              "type" -> "array",
+              "items" -> Record.dataAuto(
+                "type" -> "array",
+                "items" -> Record.dataAuto("type" -> "object", "required" -> Vector("name"))
+              )
+            ))
+          )
+          val candidate = Json.obj("matrix" -> parse(text).toOption.get)
+          val driver = _record_http_driver(candidate)
+          given ExecutionContext = _context(driver)
+          val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+          When("the registered binding validates the nested items declarations")
+          val result = runner.generateRecord(AiRecordRequest("nested arrays", schema))
+
+          Then("only arrays of arrays with valid object items are accepted, including empty arrays")
+          result.isSuccess shouldBe accepted
+          if (accepted)
+            parse(RecordEncoder.json(result.toOption.value.record)).toOption.value shouldBe candidate
+          else
+            result.toString should include ("AI record schema mismatch")
+          driver.calls should have size 1
+        }
+      }
+    }
+
     "observability and structured generation" which {
     "record direct SPI generate calls in the CNCF CallTree" in {
       Given("an AI runner invoked directly through the SPI surface")
@@ -2315,6 +2502,54 @@ final class TextusAiRunnerSpec
         "required" -> Vector("title", "period_start", "period_end", "confidence")
       ))
     )
+
+  private def _record_http_driver(candidate: Json): _FakeHttpDriver =
+    new _FakeHttpDriver(Json.obj(
+      "response" -> Json.fromString(candidate.noSpaces),
+      "done_reason" -> Json.fromString("stop")
+    ).noSpaces)
+
+  private def _cbd_record_schema: Record = {
+    val string = Record.dataAuto("type" -> "string")
+    val strings = Record.dataAuto("type" -> "array", "items" -> string)
+    Record.dataAuto(
+      "type" -> "object",
+      "required" -> Vector("subjectId", "subjectRevision", "checks", "findings"),
+      "properties" -> Record.dataAuto(
+        "subjectId" -> string,
+        "subjectRevision" -> string,
+        "checks" -> Record.dataAuto(
+          "type" -> "array",
+          "items" -> Record.dataAuto(
+            "type" -> "object",
+            "required" -> Vector("checkId", "status", "paths", "modelSubjects", "limitations"),
+            "properties" -> Record.dataAuto(
+              "checkId" -> string,
+              "status" -> Record.dataAuto("type" -> "string", "enum" -> Vector("covered", "failed", "unsupported")),
+              "paths" -> strings,
+              "modelSubjects" -> strings,
+              "limitations" -> strings
+            )
+          )
+        ),
+        "findings" -> Record.dataAuto(
+          "type" -> "array",
+          "items" -> Record.dataAuto(
+            "type" -> "object",
+            "required" -> Vector("identity", "checkId", "severity", "message"),
+            "properties" -> Record.dataAuto(
+              "identity" -> string,
+              "checkId" -> string,
+              "severity" -> Record.dataAuto("type" -> "string", "enum" -> Vector("blocker", "development-candidate", "hygiene")),
+              "path" -> string,
+              "modelSubject" -> string,
+              "message" -> string
+            )
+          )
+        )
+      )
+    )
+  }
 
   private def _generate_binding(): Component.Binding[GenerateRequirement, GenerateService] =
     Component.Binding(

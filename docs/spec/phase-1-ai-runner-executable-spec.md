@@ -102,3 +102,60 @@ sbt --batch test
 ```
 
 The suite must pass without live Gemini, OpenAI, Gemma, or Ollama access.
+
+## Structured JSON Array Contract Addendum (2026-10-18)
+
+This addendum records the narrow producer normalization and array-validation
+contract added under `P61-ADMISSION-AI-ARRAY-006`. The accepted Phase 1 status
+and historical evidence above remain unchanged. The scenarios below are authored
+executable specifications; this document does not claim their execution, full
+validation, or a successful live provider review.
+
+JSON normalization preserves explicit values at the root and in nested objects,
+including empty arrays, nulls, and empty objects. Arrays become vectors in the
+Record. A non-object JSON root is retained under the `value` field. Encoding the
+normalized Record with `RecordEncoder.json` retains those explicit values;
+missing fields are never fabricated.
+
+Required presence is separate from content. An explicitly present empty array
+satisfies a required field. A missing field or null fails required presence,
+and required strings must still be nonblank. Array declarations check shape
+separately: nulls, objects, and scalars are not arrays.
+
+The supported array-schema subset is:
+
+- Legacy `arrays` entries use `name` or `field`. Every declared legacy array
+  is required, even without a root `required` entry. When its item `required`
+  fields are declared, every item must be an object containing those fields.
+- Standard `properties` entries with `type: array` validate present array
+  fields. An optional array may be absent; explicit null and non-array values
+  fail. Arrays listed in `required` must be present, and may be empty.
+- Standard `items` with `type: object` requires object items and recursively
+  checks their required fields and declared array properties. `items` with
+  `type: array` recursively checks array shape and its items. Empty arrays
+  remain valid at every level.
+
+This subset adds no general JSON-schema engine, scalar item type enforcement,
+minimum-size checks, enums, or fallback. Existing required scalar/item checks
+and bounded retry policy remain in place; schema mismatches are terminal.
+Provider selection, application-purpose resolution, and the normal UnitOfWork
+route remain unchanged.
+
+All new scenarios are in the `TextusAiRunnerSpec` section
+`explicit JSON values and declared arrays`. They use the actual registered
+Gemma runtime binding with deterministic `_FakeHttpDriver` responses and make
+no live HTTP/provider requests.
+
+| Scenario name or family | Given / When / Then contract |
+| --- | --- |
+| `preserve clean CBD review arrays through the registered Gemma binding and JSON encoding` | Given CBD-shaped checks and empty findings/modelSubjects/limitations, when the binding normalizes and the Record is encoded, then the JSON roundtrip preserves every array. |
+| `preserve explicit JSON values in …` | Given explicit empty/null/object values or a non-object root, when normalized and encoded, then values remain present, using a value envelope where needed. |
+| `accept an explicitly empty required legacy array` | Given a required legacy array with required item fields, when the empty array is validated, then presence succeeds without invented items. |
+| `reject … in a legacy array declared by … without retry` | Given either legacy alias and absent/null/non-array values, malformed items, or missing/null/blank item fields, when validated, then a terminal schema mismatch retains applicable missing-field diagnostics. |
+| `reject a CBD-shaped candidate with … without retry` | Given standard properties/items declarations and malformed root/nested arrays, malformed object items, or blank required scalars, when validated, then the mismatch is terminal. |
+| `distinguish … optional standard arrays from required presence` | Given an optional array declaration, when absent/empty/null/non-array candidates are validated, then only absence and an actual array succeed. |
+| `validate recursive array items for … arrays` | Given array items declared as arrays of named objects, when validated recursively, then empty arrays and valid object items succeed while malformed shapes or missing required item fields fail. |
+
+Focused validation of `TextusAiRunnerSpec`, normal `cozyBuildCar`, independent
+review, and the separately admitted normal C4 execution remain caller-owned
+evidence. These deterministic scenarios do not establish live provider execution.
