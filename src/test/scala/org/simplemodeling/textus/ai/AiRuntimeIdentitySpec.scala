@@ -11,7 +11,7 @@ import org.simplemodeling.textus.airuntime.AiRuntimeComponent
 
 /*
  * @since   Aug. 21, 2026
- * @version Aug. 21, 2026
+ * @version Nov. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiRuntimeIdentitySpec
@@ -83,14 +83,14 @@ final class AiRuntimeIdentitySpec
         Some("org.simplemodeling.textus.airuntime"),
         Some("AiRuntime"),
         Some("AiRuntimeComponent"),
-        Some("0.2.2")
+        Some("0.2.3-SNAPSHOT")
       )
       _value(descriptor, "component", "namespace") shouldBe Some("org.simplemodeling.textus")
       _value(descriptor, "component", "id") shouldBe Some("AiRuntime")
-      _value(descriptor, "component", "version") shouldBe Some("0.2.2")
+      _value(descriptor, "component", "version") shouldBe Some("0.2.3-SNAPSHOT")
       _value(abi, "component", "namespace") shouldBe Some("org.simplemodeling.textus")
       _value(abi, "component", "id") shouldBe Some("AiRuntime")
-      _value(abi, "component", "version") shouldBe Some("0.2.2")
+      _value(abi, "component", "version") shouldBe Some("0.2.3-SNAPSHOT")
     }
   }
 
