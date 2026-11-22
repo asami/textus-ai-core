@@ -45,7 +45,8 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 /*
  * @since   Jul.  2, 2026
  *  version Aug. 21, 2026
- * @version Oct. 18, 2026
+ *  version Oct. 18, 2026
+ * @version Nov. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -1739,6 +1740,77 @@ final class TextusAiRunnerSpec
         case _ => fail("Gemma provider failure was expected")
     }
 
+    "retain opted-in OpenAI HTTP evidence across the record SPI" in {
+      val endpoint = URI.create("https://provider.example")
+      val credential = "private-fixture-key"
+      val schema = Record.dataAuto("required" -> Vector("answer"))
+      val settings = Vector(
+        Property(ProviderHttpEvidence.captureProperty, "true", None),
+        Property("ai.record.retry-limit", "0", None)
+      )
+      def execute(
+        body: String,
+        status: HttpStatus = HttpStatus.Ok,
+        properties: Vector[Property] = settings,
+        headers: Record = Record.dataAuto("X-Request-Id" -> "req_transport_fixture")
+      ): Consequence[org.goldenport.cncf.spi.ai.runner.AiRecordResponse] = {
+        val driver = new _FakeHttpDriver(body, status, headers)
+        given ExecutionContext = _context(driver)
+        val config = OpenAiRuntimeConfig(endpoint = endpoint, apiKey = credential, model = "gpt-test")
+        val component = new Component() {}
+          .withBinding("generate", AiRuntimeGenerateBinding.create(None, Some(config), None, None))
+          .withBinding("chat", AiRuntimeChatBinding.create(None, Some(config), None, None))
+        val binding = new TextusAiRunnerProvider(component, SpiSelection(
+          provider = Some("openai"), mode = Some("remote"), engine = Some("gpt")
+        )).provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection())
+        val runner = binding match {
+          case Consequence.Success(value) => value
+          case Consequence.Failure(conclusion) => fail(conclusion.display)
+        }
+        val result = runner.generateRecord(AiRecordRequest("structured review", schema, properties = properties))
+        driver.calls shouldBe Vector("POST https://provider.example/v1/chat/completions")
+        result
+      }
+      def reply(text: String): String =
+        s" ${Json.obj("choices" -> Json.arr(Json.obj("message" -> Json.obj("content" -> Json.fromString(text))))).noSpaces}\n"
+
+      val bodyKey = "ai.provider.http.body"
+      val statusKey = "ai.provider.http.status"
+      val idKey = "ai.provider.http.request-id"
+      val validBody = reply("""{"answer":"complete"}""")
+      val result = execute(validBody) match {
+        case Consequence.Success(value) => value
+        case Consequence.Failure(conclusion) => fail(conclusion.display)
+      }
+      result.record.getString("answer") shouldBe Some("complete")
+      result.metadata(bodyKey) shouldBe validBody
+      result.metadata(statusKey) shouldBe "200"
+      result.metadata(idKey) shouldBe "req_transport_fixture"
+      AiExecutionFacts.calltreeMetadata(result.metadata).values should not contain validBody
+
+      val invalidSchemaBody = reply("""{"other":"received"}""")
+      val failures = Vector(
+        (s"rejected: $credential", HttpStatus.BadRequest, "rejected: [REDACTED]"),
+        ("not a provider JSON response", HttpStatus.Ok, "not a provider JSON response"),
+        (reply("not a model record"), HttpStatus.Ok, reply("not a model record")),
+        (invalidSchemaBody, HttpStatus.Ok, invalidSchemaBody)
+      )
+      failures.foreach { case (body, status, expected) =>
+        execute(body, status) match
+          case Consequence.Failure(conclusion) =>
+            val evidence = conclusion.observation.properties
+            evidence(bodyKey) shouldBe expected
+            evidence(statusKey) shouldBe status.code.toString
+            evidence(idKey) shouldBe "req_transport_fixture"
+            conclusion.display should not include credential
+          case _ => fail("Expected a failed structured review")
+      }
+
+      execute(validBody, properties = settings.tail).toOption.value.metadata.keySet should not contain bodyKey
+      val absentId = execute(validBody, headers = Record.empty).toOption.value
+      absentId.metadata.keySet should not contain idKey
+    }
+
     "reject unknown AI tool names before provider execution" in {
       Given("a local provider service and a request with an unknown tool")
       given ExecutionContext = ExecutionContext.create()
@@ -2777,7 +2849,8 @@ final class TextusAiRunnerSpec
 
   private final class _FakeHttpDriver(
     response: String,
-    status: HttpStatus = HttpStatus.Ok
+    status: HttpStatus = HttpStatus.Ok,
+    responseHeaders: Record = Record.empty
   ) extends HttpDriver {
     var calls: Vector[String] = Vector.empty
     var body: Option[String] = None
@@ -2791,7 +2864,7 @@ final class TextusAiRunnerSpec
       headers: Map[String, String],
       properties: Vector[Property] = Vector.empty
     ): HttpResponse =
-      _http_response(response, status)
+      _http_response(response, status).withHeader(responseHeaders)
 
     override def post(
       path: String,
@@ -2803,7 +2876,7 @@ final class TextusAiRunnerSpec
       this.body = body
       this.headers = headers
       _last_properties = properties
-      _http_response(response, status)
+      _http_response(response, status).withHeader(responseHeaders)
     }
 
     override def put(

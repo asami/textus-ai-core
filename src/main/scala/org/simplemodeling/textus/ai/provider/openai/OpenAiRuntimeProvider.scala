@@ -12,11 +12,12 @@ import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.airuntime.ai.*
-import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport, ToolCallingChatService}
+import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport, ProviderHttpEvidence, ToolCallingChatService}
 
 /*
  * @since   Jul.  2, 2026
- * @version Aug. 21, 2026
+ *  version Aug. 21, 2026
+ * @version Nov. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 
@@ -408,30 +409,28 @@ final class OpenAiGenerateService(config: OpenAiRuntimeConfig, context: Executio
     given ExecutionContext = context
     val model = AiRequestProperties.effectiveModel(config.model, req.properties, "openai")
     AiRequestProperties.validateTools(req.properties).flatMap { tools =>
-    if (tools.isEmpty)
-      HttpSupport.post(
-        config.endpoint,
-        "/v1/chat/completions",
-        OpenAiJson.generateRequest(req, model),
-        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
-        headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
-        properties = req.properties
-      ).flatMap { json =>
-        OpenAiJson.extractText(json).map(text => GenerateResponse(text, Some(model), OpenAiJson.responseMetadata(json, req.properties)))
+      if tools.isEmpty then
+        _generate(req, model, "/v1/chat/completions", OpenAiJson.generateRequest(req, model))(OpenAiJson.extractText)
+      else
+        _generate(req, model, "/v1/responses", OpenAiJson.responseGenerateRequest(req, model))(OpenAiJson.extractResponseText)
+    }
+
+  private def _generate(req: GenerateRequest, model: String, path: String, body: Json)(
+    extract: Json => Consequence[String]
+  )(using ExecutionContext): Consequence[GenerateResponse] =
+    HttpSupport.postResponse(
+      config.endpoint, path, body, AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+      Vector("Authorization" -> s"Bearer ${config.apiKey}"), req.properties
+    ).flatMap { response =>
+      val text = response.getString
+      val evidence =
+        if req.recordSchema.nonEmpty && ProviderHttpEvidence.requested(req.properties) then
+          ProviderHttpEvidence.capture(response, text, config.apiKey)
+        else Map.empty[String, String]
+      val result = HttpSupport.decode(response.code, text.getOrElse("")).flatMap { json =>
+        extract(json).map(value => GenerateResponse(value, Some(model), OpenAiJson.responseMetadata(json, req.properties) ++ evidence))
       }
-    else
-      HttpSupport.post(
-        config.endpoint,
-        "/v1/responses",
-        OpenAiJson.responseGenerateRequest(req, model),
-        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
-        headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
-        properties = req.properties
-      ).flatMap { json =>
-        OpenAiJson.extractResponseText(json).map { text =>
-          GenerateResponse(text, Some(model), OpenAiJson.responseMetadata(json, req.properties))
-        }
-      }
+      ProviderHttpEvidence.retainOnFailure(result, evidence)
     }
 
 final class OpenAiChatService(config: OpenAiRuntimeConfig, context: ExecutionContext) extends ToolCallingChatService:

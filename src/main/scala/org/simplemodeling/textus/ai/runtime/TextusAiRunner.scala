@@ -28,7 +28,8 @@ import org.simplemodeling.textus.airuntime.ai.{ChatRequest, ChatResponse, Genera
  *
  * @since   Jul.  2, 2026
  *  version Aug. 21, 2026
- * @version Oct. 18, 2026
+ *  version Oct. 18, 2026
+ * @version Nov. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -557,17 +558,17 @@ final class TextusAiRunner(
               )
             }
           }
-          _ <- AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata)
-          _ <- AiExecutionFacts.validateMaxReasoningTokens(
-            effective,
-            resolution.policy.maxReasoningTokens,
-            response.metadata
+          _ <- ProviderHttpEvidence.retainOnFailure(
+            AiExecutionFacts.validateMaxOutputTokens(effective, maxtokens, response.metadata).flatMap { _ =>
+              AiExecutionFacts.validateMaxReasoningTokens(effective, resolution.policy.maxReasoningTokens, response.metadata)
+            }, response.metadata
           )
         } yield response
       } { response =>
-        costadmission.flatMap { admission =>
+        val normalized = costadmission.flatMap { admission =>
           _normalize_record_response(req, response, requirement, policymetadata, inputestimate, resolution, admission)
         }
+        ProviderHttpEvidence.retainOnFailure(normalized, response.metadata)
       }
     }
 
@@ -1091,7 +1092,8 @@ final class TextusAiRunner(
                   AiRecordResponse(
                     record,
                     _effective_model(response.model),
-                    AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting)
+                    AiExecutionFacts.lifecycleLimitations(metadata ++ accounting.responseMetadata, accounting) ++
+                      ProviderHttpEvidence.select(response.metadata)
                   ),
                   accounting
                 ))
