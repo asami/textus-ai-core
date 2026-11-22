@@ -7,6 +7,10 @@ lazy val projectIdentityEvidence = settingKey[CozyProjectIdentityEvidence]("Admi
 lazy val root = project
   .in(file("."))
   .enablePlugins(org.goldenport.cozy.CozyPlugin)
+  .enablePlugins((if (sys.props.get("textus.ai.development-artifacts").contains("true"))
+    Seq(Class.forName("org.goldenport.cozy.CozyDevelopmentArtifactsPlugin$", true, getClass.getClassLoader)
+      .getField("MODULE$").get(null).asInstanceOf[AutoPlugin])
+  else Seq.empty): _*)
   .settings(
     projectIdentityEvidence := TextusAiProjectYamlBuild.admitted(cozyProjectMetadata.value, scalaBinaryVersion.value),
     organization := TextusAiProjectYamlBuild.organization(projectIdentityEvidence.value),
@@ -23,6 +27,11 @@ lazy val root = project
     libraryDependencies ++= TextusAiProjectYamlBuild.dependencies(cozyProjectMetadata.value),
 
     cozyGeneratorBackend := "cozy",
+    cozyGenerationVersionOverrides ++=
+      (if (sys.props.get("textus.ai.development-artifacts").contains("true"))
+        sys.env.get("TEXTUS_AI_CNCF_RUNTIME_DESCRIPTOR_SHA256")
+          .map("runtime.cncf.descriptor.sha256" -> _).toMap
+      else Map.empty[String, String]),
     cozyDelegateProjectDir := None,
     cozyDelegateCommand := Seq("cozy"),
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),

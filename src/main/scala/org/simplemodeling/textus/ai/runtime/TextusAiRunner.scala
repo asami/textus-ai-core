@@ -29,7 +29,7 @@ import org.simplemodeling.textus.airuntime.ai.{ChatRequest, ChatResponse, Genera
  * @since   Jul.  2, 2026
  *  version Aug. 21, 2026
  *  version Oct. 18, 2026
- * @version Nov. 22, 2026
+ * @version Nov. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunner(
@@ -1691,4 +1691,59 @@ private[ai] final class AiConcurrencyAdmissionState {
 
   private[ai] def isBootstrapScope(scope: ConcurrencyScopeId): Boolean =
     _bootstrap_scopes.contains(scope)
+}
+
+/** Deterministic task admission and one actual provider invocation per call. */
+object AiTaskRunner {
+  def run(
+    request: AiTaskRequest,
+    candidates: Vector[AiTaskCandidate],
+    invoker: AiTaskInvoker
+  ): AiTaskResult = {
+    val eligible = candidates.filter { candidate =>
+      val included = candidate.verifiedIncludedUnits.exists(_ >= candidate.requiredUnits)
+      val affordable = candidate.verifiedCostUpperBoundMicrounits.exists(_ <= request.budgetMicrounits)
+      candidate.verifiedForRequest == request &&
+        request.requiredCapabilities.subsetOf(candidate.capabilities) &&
+        request.requiredTools.subsetOf(candidate.tools) &&
+        candidate.verifiedCostUpperBoundMicrounits.forall(_ <= request.budgetMicrounits) &&
+        (included || (request.allowPaidOverage && candidate.verifiedPaidEntitlement && candidate.verifiedIncludedUnits.isDefined && affordable))
+    }
+    val ranked = eligible.sortBy { candidate =>
+      val included = candidate.verifiedIncludedUnits.exists(_ >= candidate.requiredUnits)
+      (if (request.preferIncludedQuota && included) 0 else 1, candidate.provider, candidate.model)
+    }
+    val ambiguous = candidates.groupBy(candidate => (candidate.provider, candidate.model)).exists(_._2.size > 1)
+    if (ambiguous)
+      AiTaskResult.Declined(request, "Ambiguous provider and model candidate")
+    else ranked.headOption match {
+      case None => AiTaskResult.Declined(request, "No candidate has verified eligibility and budget")
+      case Some(candidate) =>
+        val capability = try invoker.preflight(request, candidate) catch {
+          case scala.util.control.NonFatal(_) => Left("Invoker preflight failed")
+        }
+        val admitted = capability.exists { c =>
+          c.request == request && c.candidate == candidate &&
+            c.maxInputCharacters >= request.input.content.length &&
+            c.maxOutputCharacters > 0 && c.maxOutputCharacters <= request.maxOutputCharacters &&
+            c.maxCostMicrounits >= 0 && c.maxCostMicrounits <= request.budgetMicrounits &&
+            candidate.verifiedCostUpperBoundMicrounits.forall(_ <= c.maxCostMicrounits) &&
+            c.deadlineMillis > 0 && c.deadlineMillis <= request.maxLatencyMillis &&
+            c.exactModel && c.singleAttempt && c.endToEndDeadline
+        }
+        if (!admitted)
+          return AiTaskResult.Declined(request, capability.left.toOption.getOrElse("Invoker cannot guarantee request bounds"))
+        val dispatch = try invoker.invoke(request, candidate) catch {
+          case scala.util.control.NonFatal(_) =>
+            AiTaskDispatch.Uncertain("Invoker failed without a dispatch disposition", AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown))
+        }
+        val attempt = AiTaskAttempt(1, candidate, dispatch)
+        dispatch match {
+          case AiTaskDispatch.Completed(_, _) => AiTaskResult.Completed(request, attempt)
+          case AiTaskDispatch.Uncertain(_, _) => AiTaskResult.Uncertain(request, attempt)
+          case AiTaskDispatch.Declined(_, _) => AiTaskResult.ProviderDeclined(request, attempt)
+          case AiTaskDispatch.Failed(_, _) => AiTaskResult.Failed(request, attempt)
+        }
+    }
+  }
 }
