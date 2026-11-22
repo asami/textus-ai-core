@@ -423,11 +423,12 @@ final class OpenAiGenerateService(config: OpenAiRuntimeConfig, context: Executio
       Vector("Authorization" -> s"Bearer ${config.apiKey}"), req.properties
     ).flatMap { response =>
       val text = response.getString
+      val capturehttp = req.recordSchema.nonEmpty && ProviderHttpEvidence.requested(req.properties)
       val evidence =
-        if req.recordSchema.nonEmpty && ProviderHttpEvidence.requested(req.properties) then
+        if capturehttp then
           ProviderHttpEvidence.capture(response, text, config.apiKey)
         else Map.empty[String, String]
-      val result = HttpSupport.decode(response.code, text.getOrElse("")).flatMap { json =>
+      val result = HttpSupport.decode(response.code, text.getOrElse(""), includeParseError = !capturehttp).flatMap { json =>
         extract(json).map(value => GenerateResponse(value, Some(model), OpenAiJson.responseMetadata(json, req.properties) ++ evidence))
       }
       ProviderHttpEvidence.retainOnFailure(result, evidence)

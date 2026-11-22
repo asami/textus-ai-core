@@ -2,6 +2,7 @@ package org.simplemodeling.textus.ai.runtime
 
 import java.net.URI
 import java.nio.charset.StandardCharsets.UTF_8
+import java.util.regex.Matcher
 
 import io.circe.Json
 import io.circe.parser.parse
@@ -302,12 +303,14 @@ private[textus] object HttpSupport:
     ctx.unitOfWorkInterpreter(UnitOfWorkOp.HttpPost(url, Some(body.noSpaces), effectiveheaders, effectiveproperties))
   }
 
-  def decode(status: Int, body: String): Consequence[Json] =
+  def decode(status: Int, body: String, includeParseError: Boolean = true): Consequence[Json] =
     if status / 100 != 2 then
       Consequence.serviceUnavailable(_failure_message(status, body))
     else
       parse(body) match
-        case Left(e) => Consequence.valueInvalid(s"Invalid JSON response: ${e.getMessage}")
+        case Left(e) =>
+          val message = if includeParseError then s"Invalid JSON response: ${e.getMessage}" else "Invalid JSON response"
+          Consequence.valueInvalid(message)
         case Right(json) => Consequence.success(json)
 
   private def _failure_message(status: Int, body: String): String =
@@ -337,6 +340,8 @@ private[textus] object ProviderHttpEvidence:
   private val maxBodyBytes = 1024 * 1024
   private val keys = Set(statusKey, requestIdKey, bodyKey, bodyOmittedKey)
   private val openAiSecret = """\bsk-[A-Za-z0-9_-]{16,}""".r
+  private val _json_string = """ "(?:[^"\\]++|\\.)*+" """.trim.r
+  private val _unicode_escape = """\\u([0-9a-fA-F]{4})""".r
 
   def requested(properties: Vector[Property]): Boolean =
     properties.exists(p => p.name == captureProperty && p.value == "true")
@@ -346,12 +351,36 @@ private[textus] object ProviderHttpEvidence:
     val requestId = response.headerValue("x-request-id")
       .filter(_.matches("req_[A-Za-z0-9_-]{1,128}")).map(requestIdKey -> _)
     val content = body.map { value =>
-      val withoutCredential = if credential.nonEmpty then value.replace(credential, "[REDACTED]") else value
-      val safe = openAiSecret.replaceAllIn(withoutCredential, "[REDACTED]")
-      if safe.getBytes(UTF_8).length <= maxBodyBytes then bodyKey -> safe
-      else bodyOmittedKey -> "size-limit"
+      if value.getBytes(UTF_8).length > maxBodyBytes then bodyOmittedKey -> "size-limit"
+      else {
+        val safe = _redact_body(value, credential)
+        if safe.getBytes(UTF_8).length <= maxBodyBytes then bodyKey -> safe
+        else bodyOmittedKey -> "size-limit"
+      }
     }
     status ++ requestId ++ content
+  }
+
+  private def _redact_body(body: String, credential: String): String = {
+    val stringsredacted = _json_string.replaceAllIn(body, matched => {
+      val original = matched.matched
+      val rewritten = if original.indexOf('\\') < 0 then original
+      else parse(original).toOption.flatMap(_.asString).fold(original) { decoded =>
+        val redacted = _redact_text(decoded, credential)
+        if decoded.equals(redacted) then original else Json.fromString(redacted).noSpaces
+      }
+      Matcher.quoteReplacement(rewritten)
+    })
+    val safe = _redact_text(stringsredacted, credential)
+    // An incomplete JSON string may still contain a recoverable escaped credential.
+    val decoded = _unicode_escape.replaceAllIn(safe, matched =>
+      Matcher.quoteReplacement(Integer.parseInt(matched.group(1), 16).toChar.toString))
+    if decoded.equals(_redact_text(decoded, credential)) then safe else "[REDACTED]"
+  }
+
+  private def _redact_text(text: String, credential: String): String = {
+    val withoutcredential = if credential.nonEmpty then text.replace(credential, "[REDACTED]") else text
+    openAiSecret.replaceAllIn(withoutcredential, "[REDACTED]")
   }
 
   def select(metadata: Map[String, String]): Map[String, String] =

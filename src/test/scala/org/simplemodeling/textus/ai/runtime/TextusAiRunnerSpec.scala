@@ -1741,6 +1741,7 @@ final class TextusAiRunnerSpec
     }
 
     "retain opted-in OpenAI HTTP evidence across the record SPI" in {
+      Given("a structured OpenAI review request using a local HTTP fixture and explicitly requesting transport evidence")
       val endpoint = URI.create("https://provider.example")
       val credential = "private-fixture-key"
       val schema = Record.dataAuto("required" -> Vector("answer"))
@@ -1778,10 +1779,12 @@ final class TextusAiRunnerSpec
       val statusKey = "ai.provider.http.status"
       val idKey = "ai.provider.http.request-id"
       val validBody = reply("""{"answer":"complete"}""")
+      When("the record runner receives a well-formed response")
       val result = execute(validBody) match {
         case Consequence.Success(value) => value
         case Consequence.Failure(conclusion) => fail(conclusion.display)
       }
+      Then("the transport evidence preserves the safe wire text without adding it to CallTree metadata")
       result.record.getString("answer") shouldBe Some("complete")
       result.metadata(bodyKey) shouldBe validBody
       result.metadata(statusKey) shouldBe "200"
@@ -1789,20 +1792,33 @@ final class TextusAiRunnerSpec
       AiExecutionFacts.calltreeMetadata(result.metadata).values should not contain validBody
 
       val invalidSchemaBody = reply("""{"other":"received"}""")
+      val escapedCredential = "\\" + "u0070" + credential.drop(1)
+      val escapedOtherKey = "\\" + "u0073k-0123456789abcdef"
+      val untouchedEscape = "\\" + "u0024"
+      val escapedError = s""" { "$escapedCredential": ["$escapedCredential", "$escapedOtherKey", "$untouchedEscape"] } """ + "\n"
+      val redactedError = s""" { "[REDACTED]": ["[REDACTED]", "[REDACTED]", "$untouchedEscape"] } """ + "\n"
+      val incompleteError = "{\"error\":\"" + escapedCredential
       val failures = Vector(
         (s"rejected: $credential", HttpStatus.BadRequest, "rejected: [REDACTED]"),
+        (escapedError, HttpStatus.BadRequest, redactedError),
+        (incompleteError, HttpStatus.BadRequest, "[REDACTED]"),
+        (incompleteError, HttpStatus.Ok, "[REDACTED]"),
         ("not a provider JSON response", HttpStatus.Ok, "not a provider JSON response"),
         (reply("not a model record"), HttpStatus.Ok, reply("not a model record")),
         (invalidSchemaBody, HttpStatus.Ok, invalidSchemaBody)
       )
       failures.foreach { case (body, status, expected) =>
-        execute(body, status) match
+        When("the record runner receives an HTTP error or cannot accept the provider response")
+        val failure = execute(body, status)
+        Then("the failed result retains available HTTP evidence with credentials redacted")
+        failure match
           case Consequence.Failure(conclusion) =>
             val evidence = conclusion.observation.properties
             evidence(bodyKey) shouldBe expected
             evidence(statusKey) shouldBe status.code.toString
             evidence(idKey) shouldBe "req_transport_fixture"
             conclusion.display should not include credential
+            conclusion.display should not include escapedCredential
           case _ => fail("Expected a failed structured review")
       }
 
