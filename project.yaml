@@ -9,7 +9,7 @@ project:
     name: "AiRuntime"
     className: "AiRuntimeComponent"
     displayName: "Textus AI Runtime"
-    version: "0.2.2"
+    version: "0.2.3-SNAPSHOT"
     config:
       textus.server.default-port: "18002"
 
@@ -18,7 +18,7 @@ cml:
 
 build:
   scalaVersion: "3.3.8"
-  cozyVersion: "0.3.2.2"
+  cozyVersion: "0.3.3-SNAPSHOT"
   dependencies:
     compile:
       - "org.goldenport::goldenport-cncf:0.5.2"

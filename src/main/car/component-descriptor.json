@@ -3,7 +3,7 @@
   "component": {
     "namespace": "org.simplemodeling.textus",
     "id": "AiRuntime",
-    "version": "0.2.2"
+    "version": "0.2.3-SNAPSHOT"
   },
   "config": {
     "textus.server.default-port": "18002"

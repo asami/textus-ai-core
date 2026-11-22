@@ -27,11 +27,6 @@ lazy val root = project
     libraryDependencies ++= TextusAiProjectYamlBuild.dependencies(cozyProjectMetadata.value),
 
     cozyGeneratorBackend := "cozy",
-    cozyGenerationVersionOverrides ++=
-      (if (sys.props.get("textus.ai.development-artifacts").contains("true"))
-        sys.env.get("TEXTUS_AI_CNCF_RUNTIME_DESCRIPTOR_SHA256")
-          .map("runtime.cncf.descriptor.sha256" -> _).toMap
-      else Map.empty[String, String]),
     cozyDelegateProjectDir := None,
     cozyDelegateCommand := Seq("cozy"),
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
