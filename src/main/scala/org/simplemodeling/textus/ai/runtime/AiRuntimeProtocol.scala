@@ -3,6 +3,7 @@ package org.simplemodeling.textus.ai.runtime
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{PortApi, ServiceContract, VariationPoint, VariationSelection}
 import org.goldenport.cncf.context.ExecutionContext
+import org.goldenport.record.Record
 import org.simplemodeling.textus.airuntime.ai.*
 
 /*
@@ -125,7 +126,7 @@ final case class AiTaskReceipt(
 )
 
 enum AiTaskDispatch {
-  case Completed(output: String, receipt: AiTaskReceipt)
+  case Completed(output: Record, receipt: AiTaskReceipt)
   case Declined(reason: String, receipt: AiTaskReceipt)
   case Failed(reason: String, receipt: AiTaskReceipt)
   case Uncertain(reason: String, receipt: AiTaskReceipt)

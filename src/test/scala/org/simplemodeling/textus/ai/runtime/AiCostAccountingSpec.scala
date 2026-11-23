@@ -1,5 +1,6 @@
 package org.simplemodeling.textus.ai.runtime
 
+import org.goldenport.record.Record
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -75,7 +76,7 @@ final class AiCostAccountingSpec
             request.maxOutputCharacters, request.budgetMicrounits, request.maxLatencyMillis, true, true, true))
         def invoke(request: AiTaskRequest, candidate: AiTaskCandidate): AiTaskDispatch = {
           calls = calls :+ candidate.provider
-          AiTaskDispatch.Completed("result", receipt)
+          AiTaskDispatch.Completed(Record.data("result" -> "ok"), receipt)
         }
       }
       When("selection considers unknown quota and a verified included allocation")
@@ -86,7 +87,7 @@ final class AiCostAccountingSpec
         AiTaskResult.Declined(request, "Ambiguous provider and model candidate")
       AiTaskRunner.run(request.copy(id = "other"), Vector(included), invoker)
         .isInstanceOf[AiTaskResult.Declined] shouldBe true
-      result shouldBe AiTaskResult.Completed(request, AiTaskAttempt(1, included, AiTaskDispatch.Completed("result", receipt)))
+      result shouldBe AiTaskResult.Completed(request, AiTaskAttempt(1, included, AiTaskDispatch.Completed(Record.data("result" -> "ok"), receipt)))
       AiTaskRunner.run(request.copy(allowPaidOverage = true), Vector(unknown.copy(verifiedForRequest = request.copy(allowPaidOverage = true))), invoker) shouldBe
         AiTaskResult.Declined(request.copy(allowPaidOverage = true), "No candidate has verified eligibility and budget")
       val paidrequest = request.copy(allowPaidOverage = true)
@@ -120,7 +121,7 @@ final class AiCostAccountingSpec
         }
         def invoke(r: AiTaskRequest, c: AiTaskCandidate): AiTaskDispatch = {
           calls = calls :+ c.provider
-          AiTaskDispatch.Completed("result", receipt)
+          AiTaskDispatch.Completed(Record.data("result" -> "ok"), receipt)
         }
       }
       AiTaskRunner.run(request, Vector(expensive, alternative.copy(verifiedPaidEntitlement = false)), invoker) shouldBe
@@ -134,7 +135,7 @@ final class AiCostAccountingSpec
       preflights shouldBe Vector.empty
       calls shouldBe Vector.empty
       AiTaskRunner.run(request, Vector(expensive, alternative), invoker) shouldBe
-        AiTaskResult.Completed(request, AiTaskAttempt(1, alternative, AiTaskDispatch.Completed("result", receipt)))
+        AiTaskResult.Completed(request, AiTaskAttempt(1, alternative, AiTaskDispatch.Completed(Record.data("result" -> "ok"), receipt)))
       preflights shouldBe Vector("b")
       calls shouldBe Vector("b")
     }

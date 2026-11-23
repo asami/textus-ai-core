@@ -111,11 +111,11 @@ and historical evidence above remain unchanged. The scenarios below are authored
 executable specifications; this document does not claim their execution, full
 validation, or a successful live provider review.
 
-JSON normalization preserves explicit values at the root and in nested objects,
-including empty arrays, nulls, and empty objects. Arrays become vectors in the
-Record. A non-object JSON root is retained under the `value` field. Encoding the
-normalized Record with `RecordEncoder.json` retains those explicit values;
-missing fields are never fabricated.
+Structured results use a Core `Record`. Null-valued object properties are
+omitted at every depth before validation. Empty arrays, empty objects and
+non-null values are preserved. Arrays become vectors, and a non-object non-null
+root is retained under the `value` field. A null root is invalid. A null array
+element stays at its original index and fails element validation there.
 
 Required presence is separate from content. An explicitly present empty array
 satisfies a required field. A missing field or null fails required presence,
@@ -128,8 +128,8 @@ The supported array-schema subset is:
   is required, even without a root `required` entry. When its item `required`
   fields are declared, every item must be an object containing those fields.
 - Standard `properties` entries with `type: array` validate present array
-  fields. An optional array may be absent; explicit null and non-array values
-  fail. Arrays listed in `required` must be present, and may be empty.
+  fields. Null is equivalent to omission for an object property. Arrays listed
+  in `required` must be present and may be empty. A present non-array fails.
 - Standard `items` with `type: object` requires object items and recursively
   checks their required fields and declared array properties. `items` with
   `type: array` recursively checks array shape and its items. Empty arrays

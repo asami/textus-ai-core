@@ -2,7 +2,7 @@ package org.simplemodeling.textus.ai.runtime
 
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
-import io.circe.Json
+import io.circe.{Json, JsonObject}
 import io.circe.parser.parse
 import org.goldenport.Consequence
 import org.goldenport.cncf.admission.{ConcurrencyGrant, ConcurrencyScopeId, ScopedConcurrencyAdmission}
@@ -1075,9 +1075,16 @@ final class TextusAiRunner(
       case Some(candidate) =>
         candidate.json match {
           case Some(json) =>
-            val record = _json_to_record(json)
-            _validate_schema(record, req.schema) match {
-              case Right(()) =>
+            val prepared = _omit_null_properties(json)
+            val fields = prepared.asObject.getOrElse(JsonObject.singleton("value", prepared))
+            val decoded = if (prepared.isNull)
+              Left("expected a Record value at $, found null")
+            else
+              _validate_schema(fields, req.schema).flatMap { _ =>
+                _json_to_record(fields, "$", wrappedRoot = !prepared.isObject)
+              }
+            decoded match {
+              case Right(record) =>
                 val metadata = AiExecutionFacts.normalize(
                   _effective_selection(requirement),
                   requirement,
@@ -1182,31 +1189,56 @@ final class TextusAiRunner(
     results.result()
   }
 
-  private def _json_to_record(json: Json): Record =
-    json.asObject
-      .map(obj => Record.createFull(obj.toVector.map { case (key, value) => key -> _json_to_value(value) }))
-      .getOrElse(Record.createFull(Vector("value" -> _json_to_value(json))))
+  private def _omit_null_properties(json: Json): Json =
+    json.mapObject { fields =>
+      JsonObject.fromIterable(fields.toVector.collect {
+        case (key, value) if !value.isNull => key -> _omit_null_properties(value)
+      })
+    }.mapArray(_.map(_omit_null_properties))
 
-  private def _json_to_value(json: Json): Any =
-    json.fold(
-      jsonNull = null,
-      jsonBoolean = identity,
-      jsonNumber = n => n.toInt.getOrElse(n.toLong.getOrElse(n.toDouble)),
-      jsonString = identity,
-      jsonArray = _.map(_json_to_value).toVector,
-      jsonObject = obj => Record.createFull(obj.toVector.map { case (key, value) => key -> _json_to_value(value) })
+  private def _json_to_record(
+    fields: JsonObject,
+    path: String,
+    wrappedRoot: Boolean = false
+  ): Either[String, Record] =
+    fields.toVector.foldLeft[Either[String, Vector[(String, Any)]]](Right(Vector.empty)) {
+      case (acc, (key, value)) =>
+        acc.flatMap { members =>
+          val fieldPath = if (wrappedRoot) path else _property_path(path, key)
+          _json_to_value(value, fieldPath).map(decoded => members :+ (key -> decoded))
+        }
+    }.map(Record.createFull)
+
+  private def _json_to_value(json: Json, path: String): Either[String, Any] =
+    json.fold[Either[String, Any]](
+      jsonNull = Left(s"expected a Record value at $path, found null"),
+      jsonBoolean = value => Right(value),
+      jsonNumber = value => Right(value.toInt.getOrElse(value.toLong.getOrElse(value.toDouble))),
+      jsonString = value => Right(value),
+      jsonArray = values =>
+        values.zipWithIndex.foldLeft[Either[String, Vector[Any]]](Right(Vector.empty)) {
+          case (acc, (value, index)) =>
+            acc.flatMap(previous => _json_to_value(value, s"$path[$index]").map(previous :+ _))
+        },
+      jsonObject = fields => _json_to_record(fields, path)
     )
 
+  private def _property_path(path: String, key: String): String =
+    if (key.matches("[A-Za-z_][A-Za-z0-9_]*")) s"$path.$key"
+    else s"$path[${Json.fromString(key).noSpaces}]"
+
   private def _validate_schema(
-    record: Record,
+    fields: JsonObject,
     schema: Record
   ): Either[String, Unit] = {
-    val missing = _schema_required(schema).filterNot(field => _has_field(record, field))
+    val missing = _schema_required(schema).filterNot { field =>
+      fields(field).exists(value => value.asString.forall(_.trim.nonEmpty))
+    }
     if (missing.nonEmpty)
       Left(s"missing required fields: ${missing.mkString(",")}")
     else {
       val legacyerrors = _schema_array_specs(schema).flatMap { case (name, items) =>
-        _array_schema_error(record, name, Some(items), true)
+        _array_schema_error(fields, name, Some(items), true)
       }
       val propertyerrors = schema.getAny("properties").toVector.collect {
         case properties: Record => properties
@@ -1214,7 +1246,7 @@ final class TextusAiRunner(
         field.value.single match {
           case spec: Record if _string(spec.getAny("type")).contains("array") =>
             _array_schema_error(
-              record,
+              fields,
               field.key,
               spec.getAny("items").collect { case items: Record => items },
               _schema_required(schema).contains(field.key)
@@ -1238,28 +1270,23 @@ final class TextusAiRunner(
       }
 
   private def _array_schema_error(
-    record: Record,
+    fields: JsonObject,
     name: String,
     items: Option[Record],
     required: Boolean
   ): Option[String] =
-    record.fields.find(_.key == name) match {
-      case Some(field) => _array_value_error(field.value.single, items, name)
+    fields(name) match {
+      case Some(value) => _array_value_error(value, items, name)
       case None if required => Some(s"missing array field: $name")
       case None => None
     }
 
   private def _array_value_error(
-    value: Any,
+    value: Json,
     items: Option[Record],
     path: String
   ): Option[String] = {
-    val values = value match {
-      case xs: Seq[?] => Some(xs.toVector)
-      case xs: Array[?] => Some(xs.toVector)
-      case _ => None
-    }
-    values match {
+    value.asArray match {
       case Some(xs) =>
         xs.zipWithIndex.flatMap { case (item, index) =>
           items.flatMap { schema =>
@@ -1268,9 +1295,9 @@ final class TextusAiRunner(
               case Some("array") =>
                 _array_value_error(item, schema.getAny("items").collect { case r: Record => r }, itempath)
               case itemtype if itemtype.contains("object") || _schema_required(schema).nonEmpty =>
-                item match {
-                  case r: Record => _validate_schema(r, schema).left.toOption.map(message => s"$itempath $message")
-                  case _ => Some(s"$itempath must be an object")
+                item.asObject match {
+                  case Some(fields) => _validate_schema(fields, schema).left.toOption.map(message => s"$itempath $message")
+                  case None => Some(s"$itempath must be an object")
                 }
               case _ => None
             }
@@ -1283,16 +1310,6 @@ final class TextusAiRunner(
 
   private def _schema_required(schema: Record): Vector[String] =
     _strings(schema.getAny("required"))
-
-  private def _has_field(
-    record: Record,
-    field: String
-  ): Boolean =
-    record.getAny(field).exists {
-      case null => false
-      case s: String => s.trim.nonEmpty
-      case _ => true
-    }
 
   private def _records(value: Any): Vector[Record] =
     value match {

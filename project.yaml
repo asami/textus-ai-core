@@ -21,8 +21,8 @@ build:
   cozyVersion: "0.3.3-SNAPSHOT"
   dependencies:
     compile:
-      - "org.goldenport::goldenport-cncf:0.5.2"
-      - "org.simplemodeling::simplemodeling-model:0.2.0"
+      - "org.goldenport::goldenport-cncf:0.5.6-SNAPSHOT"
+      - "org.simplemodeling::simplemodeling-model:0.2.2-SNAPSHOT"
     test:
       - "org.scalatest::scalatest:3.2.19"
 
@@ -38,10 +38,10 @@ packaging:
       domain: "ai-runtime"
     runtime:
       cncf:
-        minimum: "0.5.2"
+        minimum: "0.5.6-SNAPSHOT"
         excluded: []
         tested:
-          - "0.5.2"
+          - "0.5.6-SNAPSHOT"
 
 warehouse:
   repository_artifacts:

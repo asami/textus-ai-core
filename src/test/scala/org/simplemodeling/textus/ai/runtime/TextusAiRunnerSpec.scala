@@ -46,7 +46,7 @@ import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
  * @since   Jul.  2, 2026
  *  version Aug. 21, 2026
  *  version Oct. 18, 2026
- * @version Nov. 22, 2026
+ * @version Nov. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -1913,10 +1913,9 @@ final class TextusAiRunnerSpec
       }
 
       Vector(
-        "object fields" -> """{"empty":[],"nothing":null,"object":{},"nested":{"empty":[],"nothing":null,"object":{}},"values":[null,{},[]]}""",
+        "object fields" -> """{"empty":[],"object":{},"nested":{"empty":[],"object":{}},"values":[{},[]]}""",
         "empty root object" -> "{}",
-        "empty root array" -> "[]",
-        "root null" -> "null"
+        "empty root array" -> "[]"
       ).foreach { case (label, text) =>
         s"preserve explicit JSON values in $label" in {
           Given(s"a deterministic Gemma response containing $label and no required fields")
@@ -1931,6 +1930,34 @@ final class TextusAiRunnerSpec
 
           Then("all explicit values are retained, with a value envelope for a non-object root")
           encoded shouldBe candidate.asObject.map(_ => candidate).getOrElse(Json.obj("value" -> candidate))
+          driver.calls should have size 1
+        }
+      }
+
+      "omit null object properties at the root and within array items" in {
+        val candidate = parse("""{"note":null,"items":[{"note":null},{"note":"keep"}],"empty":[]}""").toOption.value
+        val driver = _record_http_driver(candidate)
+        given ExecutionContext = _context(driver)
+        val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+        val result = runner.generateRecord(AiRecordRequest("null object properties", Record.empty))
+        val encoded = RecordEncoder.jsonC(result.toOption.value.record).toOption.value
+        parse(encoded).toOption.value shouldBe parse("""{"items":[{},{"note":"keep"}],"empty":[]}""").toOption.value
+        driver.calls should have size 1
+      }
+
+      Vector(
+        ("root null", "null", "at $, found null"),
+        ("array null", """{"nested":{"a.b":[{},null,{}]}}""", """at $.nested["a.b"][1], found null""")
+      ).foreach { case (label, text, expected) =>
+        s"report the position of a $label without a declared element type" in {
+          val driver = _record_http_driver(parse(text).toOption.value)
+          given ExecutionContext = _context(driver)
+          val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+          val result = runner.generateRecord(AiRecordRequest("explicit null", Record.empty))
+          result.isSuccess shouldBe false
+          result.toString should include (expected)
           driver.calls should have size 1
         }
       }
@@ -1952,7 +1979,7 @@ final class TextusAiRunnerSpec
       Vector("name", "field").foreach { alias =>
         Vector(
           ("absent", "{}", "missing array field: exhibitions"),
-          ("null", """{"exhibitions":null}""", "must be an array"),
+          ("null", """{"exhibitions":null}""", "missing array field: exhibitions"),
           ("object", """{"exhibitions":{}}""", "must be an array"),
           ("scalar", """{"exhibitions":"invalid"}""", "must be an array"),
           ("scalar item", """{"exhibitions":[1]}""", "exhibitions[0] must be an object"),
@@ -2009,7 +2036,7 @@ final class TextusAiRunnerSpec
       Vector(
         ("absent", "{}", true),
         ("empty", """{"notes":[]}""", true),
-        ("null", """{"notes":null}""", false),
+        ("null", """{"notes":null}""", true),
         ("non-array", """{"notes":"invalid"}""", false)
       ).foreach { case (label, text, accepted) =>
         s"distinguish $label optional standard arrays from required presence" in {
@@ -2022,11 +2049,12 @@ final class TextusAiRunnerSpec
           When("the registered binding validates the optional declared array")
           val result = runner.generateRecord(AiRecordRequest("optional notes", schema))
 
-          Then("absence or an empty array succeeds while an explicit null or scalar fails")
+          Then("null and absence have the same result, and a scalar fails")
           result.isSuccess shouldBe accepted
-          if (accepted)
-            parse(RecordEncoder.json(result.toOption.value.record)).toOption.value shouldBe parse(text).toOption.get
-          else
+          if (accepted) {
+            val expected = if (label == "null") Json.obj() else parse(text).toOption.value
+            parse(RecordEncoder.json(result.toOption.value.record)).toOption.value shouldBe expected
+          } else
             result.toString should include ("notes must be an array")
           driver.calls should have size 1
         }
@@ -2912,7 +2940,7 @@ final class TextusAiRunnerSpec
     )
 
 
-  private def _context(driver: HttpDriver): ExecutionContext = {
+  private def _context(driver: _FakeHttpDriver): ExecutionContext = {
     val base = ExecutionContext.create()
     var runtime: RuntimeContext = null
     lazy val context: ExecutionContext = ExecutionContext.withRuntimeContext(base, runtime)
@@ -2926,8 +2954,13 @@ final class TextusAiRunnerSpec
       ),
       unitofworksupplier = () => uow,
       unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
-        def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] =
-          new UnitOfWorkInterpreter(uow).interpret(fa)
+        def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] = fa match {
+          // These specs exercise provider requests at the UoW boundary.
+          // Only their recording transport handles the HTTP operation.
+          case UnitOfWorkOp.HttpPost(path, body, headers, properties) =>
+            Consequence(driver.post(path, body, headers, properties))
+          case operation => new UnitOfWorkInterpreter(uow).interpret(operation)
+        }
       },
       commitaction = _ => (),
       abortaction = _ => (),
