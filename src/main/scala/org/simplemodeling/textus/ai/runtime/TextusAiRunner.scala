@@ -38,6 +38,7 @@ final class TextusAiRunner(
   profiles: AiProfileConfig = AiProfileConfig.empty
 ) extends AiRunner {
   private val _log = LoggerFactory.getLogger(classOf[TextusAiRunner])
+  import TextusAiRecordProjection.*
 
   def generate(req: AiGenerateRequest)(using ExecutionContext): Consequence[AiGenerateResponse] =
     _effective_resolution(req.requirement).flatMap { resolution =>
@@ -527,6 +528,10 @@ final class TextusAiRunner(
       s"Allowed repair paths:\n${acceptance.allowedRepairPaths}"
 
   def generateRecord(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] =
+    if (req.metadata.keys.exists(_.startsWith("ai.task."))) provider.boundedRecordC(req)
+    else _legacy_record_c(req)
+
+  private def _legacy_record_c(req: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] =
     _effective_resolution(req.requirement).flatMap { resolution =>
       val requirement = resolution.requirement
       val effective = _effective_selection(requirement)
@@ -1189,155 +1194,6 @@ final class TextusAiRunner(
     results.result()
   }
 
-  private def _omit_null_properties(json: Json): Json =
-    json.mapObject { fields =>
-      JsonObject.fromIterable(fields.toVector.collect {
-        case (key, value) if !value.isNull => key -> _omit_null_properties(value)
-      })
-    }.mapArray(_.map(_omit_null_properties))
-
-  private def _json_to_record(
-    fields: JsonObject,
-    path: String,
-    wrappedRoot: Boolean = false
-  ): Either[String, Record] =
-    fields.toVector.foldLeft[Either[String, Vector[(String, Any)]]](Right(Vector.empty)) {
-      case (acc, (key, value)) =>
-        acc.flatMap { members =>
-          val fieldPath = if (wrappedRoot) path else _property_path(path, key)
-          _json_to_value(value, fieldPath).map(decoded => members :+ (key -> decoded))
-        }
-    }.map(Record.createFull)
-
-  private def _json_to_value(json: Json, path: String): Either[String, Any] =
-    json.fold[Either[String, Any]](
-      jsonNull = Left(s"expected a Record value at $path, found null"),
-      jsonBoolean = value => Right(value),
-      jsonNumber = value => Right(value.toInt.getOrElse(value.toLong.getOrElse(value.toDouble))),
-      jsonString = value => Right(value),
-      jsonArray = values =>
-        values.zipWithIndex.foldLeft[Either[String, Vector[Any]]](Right(Vector.empty)) {
-          case (acc, (value, index)) =>
-            acc.flatMap(previous => _json_to_value(value, s"$path[$index]").map(previous :+ _))
-        },
-      jsonObject = fields => _json_to_record(fields, path)
-    )
-
-  private def _property_path(path: String, key: String): String =
-    if (key.matches("[A-Za-z_][A-Za-z0-9_]*")) s"$path.$key"
-    else s"$path[${Json.fromString(key).noSpaces}]"
-
-  private def _validate_schema(
-    fields: JsonObject,
-    schema: Record
-  ): Either[String, Unit] = {
-    val missing = _schema_required(schema).filterNot { field =>
-      fields(field).exists(value => value.asString.forall(_.trim.nonEmpty))
-    }
-    if (missing.nonEmpty)
-      Left(s"missing required fields: ${missing.mkString(",")}")
-    else {
-      val legacyerrors = _schema_array_specs(schema).flatMap { case (name, items) =>
-        _array_schema_error(fields, name, Some(items), true)
-      }
-      val propertyerrors = schema.getAny("properties").toVector.collect {
-        case properties: Record => properties
-      }.flatMap(_.fields).flatMap { field =>
-        field.value.single match {
-          case spec: Record if _string(spec.getAny("type")).contains("array") =>
-            _array_schema_error(
-              fields,
-              field.key,
-              spec.getAny("items").collect { case items: Record => items },
-              _schema_required(schema).contains(field.key)
-            )
-          case _ => None
-        }
-      }
-      (legacyerrors ++ propertyerrors).headOption match {
-        case Some(message) => Left(message)
-        case None => Right(())
-      }
-    }
-  }
-
-  private def _schema_array_specs(schema: Record): Vector[(String, Record)] =
-    _records(schema.getAny("arrays"))
-      .flatMap { record =>
-        _string(record.getAny("name"))
-          .orElse(_string(record.getAny("field")))
-          .map(name => name -> record)
-      }
-
-  private def _array_schema_error(
-    fields: JsonObject,
-    name: String,
-    items: Option[Record],
-    required: Boolean
-  ): Option[String] =
-    fields(name) match {
-      case Some(value) => _array_value_error(value, items, name)
-      case None if required => Some(s"missing array field: $name")
-      case None => None
-    }
-
-  private def _array_value_error(
-    value: Json,
-    items: Option[Record],
-    path: String
-  ): Option[String] = {
-    value.asArray match {
-      case Some(xs) =>
-        xs.zipWithIndex.flatMap { case (item, index) =>
-          items.flatMap { schema =>
-            val itempath = s"$path[$index]"
-            _string(schema.getAny("type")) match {
-              case Some("array") =>
-                _array_value_error(item, schema.getAny("items").collect { case r: Record => r }, itempath)
-              case itemtype if itemtype.contains("object") || _schema_required(schema).nonEmpty =>
-                item.asObject match {
-                  case Some(fields) => _validate_schema(fields, schema).left.toOption.map(message => s"$itempath $message")
-                  case None => Some(s"$itempath must be an object")
-                }
-              case _ => None
-            }
-          }
-        }.headOption
-      case None =>
-        Some(s"$path must be an array")
-    }
-  }
-
-  private def _schema_required(schema: Record): Vector[String] =
-    _strings(schema.getAny("required"))
-
-  private def _records(value: Any): Vector[Record] =
-    value match {
-      case null => Vector.empty
-      case r: Record => Vector(r)
-      case Some(v) => _records(v)
-      case xs: Vector[?] => xs.flatMap(_records)
-      case xs: Seq[?] => xs.toVector.flatMap(_records)
-      case xs: Array[?] => xs.toVector.flatMap(_records)
-      case _ => Vector.empty
-    }
-
-  private def _strings(value: Any): Vector[String] =
-    value match {
-      case null => Vector.empty
-      case None => Vector.empty
-      case r: Record => r.getAny("value").toVector.flatMap(_strings)
-      case Some(v) => _strings(v)
-      case xs: Vector[?] => xs.flatMap(_strings)
-      case xs: Seq[?] => xs.toVector.flatMap(_strings)
-      case xs: Array[?] => xs.toVector.flatMap(_strings)
-      case s: String => s.split("[,\\s]+").toVector.map(_.trim).filter(_.nonEmpty)
-      case other => Vector(other.toString)
-    }
-
-  private def _string(value: Any): Option[String] =
-    _strings(value).headOption
-
   private def _effective_model(
     model: Option[String]
   ): Option[String] =
@@ -1390,6 +1246,12 @@ class TextusAiRunnerProvider(
 ) extends SpiProvider[AiRunner] {
   private val _late_concurrency_admissions =
     new ConcurrentHashMap[ConcurrencyScopeId, ScopedConcurrencyAdmission]()
+
+  private[runtime] def boundedRecordC(request: AiRecordRequest)(using ExecutionContext): Consequence[AiRecordResponse] =
+    component.port.get[AiBoundedRecordBinding] match {
+      case None => Consequence.operationIllegal("ai.task.declined", "Bounded record runtime is unconfigured")
+      case Some(binding) => AiBoundedRecordProtocol.runC(request, binding)
+    }
 
   private[runtime] def componentScope = component.scopeContext
 
@@ -1700,6 +1562,167 @@ class TextusAiRunnerProvider(
     }
 }
 
+private[ai] object TextusAiRecordProjection {
+  def project(json: Json, schema: Json): Either[String, Record] = for {
+    schemaFields <- schema.asObject.toRight("Expected an object schema")
+    schemaRecord <- _json_to_record(schemaFields, "$schema")
+    prepared = _omit_null_properties(json)
+    fields <- prepared.asObject.toRight("Expected JSON object")
+    _ <- _validate_schema(fields, schemaRecord)
+    result <- _json_to_record(fields, "$")
+  } yield result
+
+  def _omit_null_properties(json: Json): Json =
+    json.mapObject { fields =>
+      JsonObject.fromIterable(fields.toVector.collect {
+        case (key, value) if !value.isNull => key -> _omit_null_properties(value)
+      })
+    }.mapArray(_.map(_omit_null_properties))
+
+  def _json_to_record(
+    fields: JsonObject,
+    path: String,
+    wrappedRoot: Boolean = false
+  ): Either[String, Record] =
+    fields.toVector.foldLeft[Either[String, Vector[(String, Any)]]](Right(Vector.empty)) {
+      case (acc, (key, value)) =>
+        acc.flatMap { members =>
+          val fieldPath = if (wrappedRoot) path else _property_path(path, key)
+          _json_to_value(value, fieldPath).map(decoded => members :+ (key -> decoded))
+        }
+    }.map(Record.createFull)
+
+  def _json_to_value(json: Json, path: String): Either[String, Any] =
+    json.fold[Either[String, Any]](
+      jsonNull = Left(s"expected a Record value at $path, found null"),
+      jsonBoolean = value => Right(value),
+      jsonNumber = value => Right(value.toInt.getOrElse(value.toLong.getOrElse(value.toDouble))),
+      jsonString = value => Right(value),
+      jsonArray = values =>
+        values.zipWithIndex.foldLeft[Either[String, Vector[Any]]](Right(Vector.empty)) {
+          case (acc, (value, index)) =>
+            acc.flatMap(previous => _json_to_value(value, s"$path[$index]").map(previous :+ _))
+        },
+      jsonObject = fields => _json_to_record(fields, path)
+    )
+
+  def _property_path(path: String, key: String): String =
+    if (key.matches("[A-Za-z_][A-Za-z0-9_]*")) s"$path.$key"
+    else s"$path[${Json.fromString(key).noSpaces}]"
+
+  def _validate_schema(
+    fields: JsonObject,
+    schema: Record
+  ): Either[String, Unit] = {
+    val missing = _schema_required(schema).filterNot { field =>
+      fields(field).exists(value => value.asString.forall(_.trim.nonEmpty))
+    }
+    if (missing.nonEmpty)
+      Left(s"missing required fields: ${missing.mkString(",")}")
+    else {
+      val legacyerrors = _schema_array_specs(schema).flatMap { case (name, items) =>
+        _array_schema_error(fields, name, Some(items), true)
+      }
+      val propertyerrors = schema.getAny("properties").toVector.collect {
+        case properties: Record => properties
+      }.flatMap(_.fields).flatMap { field =>
+        field.value.single match {
+          case spec: Record if _string(spec.getAny("type")).contains("array") =>
+            _array_schema_error(
+              fields,
+              field.key,
+              spec.getAny("items").collect { case items: Record => items },
+              _schema_required(schema).contains(field.key)
+            )
+          case _ => None
+        }
+      }
+      (legacyerrors ++ propertyerrors).headOption match {
+        case Some(message) => Left(message)
+        case None => Right(())
+      }
+    }
+  }
+
+  def _schema_array_specs(schema: Record): Vector[(String, Record)] =
+    _records(schema.getAny("arrays"))
+      .flatMap { record =>
+        _string(record.getAny("name"))
+          .orElse(_string(record.getAny("field")))
+          .map(name => name -> record)
+      }
+
+  def _array_schema_error(
+    fields: JsonObject,
+    name: String,
+    items: Option[Record],
+    required: Boolean
+  ): Option[String] =
+    fields(name) match {
+      case Some(value) => _array_value_error(value, items, name)
+      case None if required => Some(s"missing array field: $name")
+      case None => None
+    }
+
+  def _array_value_error(
+    value: Json,
+    items: Option[Record],
+    path: String
+  ): Option[String] = {
+    value.asArray match {
+      case Some(xs) =>
+        xs.zipWithIndex.flatMap { case (item, index) =>
+          items.flatMap { schema =>
+            val itempath = s"$path[$index]"
+            _string(schema.getAny("type")) match {
+              case Some("array") =>
+                _array_value_error(item, schema.getAny("items").collect { case r: Record => r }, itempath)
+              case itemtype if itemtype.contains("object") || _schema_required(schema).nonEmpty =>
+                item.asObject match {
+                  case Some(fields) => _validate_schema(fields, schema).left.toOption.map(message => s"$itempath $message")
+                  case None => Some(s"$itempath must be an object")
+                }
+              case _ => None
+            }
+          }
+        }.headOption
+      case None =>
+        Some(s"$path must be an array")
+    }
+  }
+
+  def _schema_required(schema: Record): Vector[String] =
+    _strings(schema.getAny("required"))
+
+  def _records(value: Any): Vector[Record] =
+    value match {
+      case null => Vector.empty
+      case r: Record => Vector(r)
+      case Some(v) => _records(v)
+      case xs: Vector[?] => xs.flatMap(_records)
+      case xs: Seq[?] => xs.toVector.flatMap(_records)
+      case xs: Array[?] => xs.toVector.flatMap(_records)
+      case _ => Vector.empty
+    }
+
+  def _strings(value: Any): Vector[String] =
+    value match {
+      case null => Vector.empty
+      case None => Vector.empty
+      case r: Record => r.getAny("value").toVector.flatMap(_strings)
+      case Some(v) => _strings(v)
+      case xs: Vector[?] => xs.flatMap(_strings)
+      case xs: Seq[?] => xs.toVector.flatMap(_strings)
+      case xs: Array[?] => xs.toVector.flatMap(_strings)
+      case s: String => s.split("[,\\s]+").toVector.map(_.trim).filter(_.nonEmpty)
+      case other => Vector(other.toString)
+    }
+
+  def _string(value: Any): Option[String] =
+    _strings(value).headOption
+
+}
+
 private[ai] final class AiConcurrencyAdmissionState {
   @volatile private var _bootstrap_scopes: Set[ConcurrencyScopeId] = Set.empty
 
@@ -1711,12 +1734,114 @@ private[ai] final class AiConcurrencyAdmissionState {
 }
 
 /** Deterministic task admission and one actual provider invocation per call. */
+private[runtime] object AiBoundedRecordProtocol {
+  private val _contract = "textus-ai.bounded-task.v1"
+  private val _fields = Set("ai.task.contract", "ai.task.id", "ai.task.kind", "ai.task.continuation",
+    "ai.task.input-reference")
+
+  def runC(request: AiRecordRequest, binding: AiBoundedRecordBinding)(using ExecutionContext): Consequence[AiRecordResponse] = {
+    val started = System.nanoTime()
+    val metadata = request.metadata.filter((key, _) => key.startsWith("ai.task."))
+    val canonical = metadata.values.forall(value => value != null && value.nonEmpty && value == value.trim &&
+      value.length <= 4096 && !value.exists(_.isControl))
+    if (metadata.keySet != _fields || !canonical || !metadata.get("ai.task.contract").contains(_contract) ||
+        request.requirement.tools.nonEmpty || request.prompt == null || request.prompt.isEmpty || request.prompt.length > 1000000)
+      Consequence.operationIllegal("ai.task.declined", "The bounded record request is unsupported")
+    else {
+      val limits = binding.limits
+      val deadline = AiTaskDeadline.after(started, limits.maxLatencyMillis)
+      AiTaskDeadline.await(deadline) { for {
+      schema <- request.schema.toJsonStringC
+      selected = AiTaskRequest(metadata("ai.task.id"), metadata("ai.task.kind"),
+        AiTaskPackage(metadata("ai.task.input-reference"), metadata("ai.task.continuation"), request.prompt),
+        schema, Set("structured-record"), Set.empty, request.requirement.executionClass.map(_.id).getOrElse("standard-work"),
+        limits.maxLatencyMillis, limits.budgetMicrounits, limits.preferIncludedQuota, limits.allowPaidOverage,
+        limits.maxOutputCharacters)
+      _ <- _remaining_c(deadline)
+      prepared <- binding.prepare(selected, deadline)
+      _ <- _remaining_c(deadline)
+      (candidates, invoker) = prepared
+      response <- AiTaskRunner.runWithDeadline(selected, candidates, invoker, request.requirement.provider, deadline) match {
+        case AiTaskResult.Completed(_, attempt) => attempt.dispatch match {
+          case AiTaskDispatch.Completed(output, receipt) if deadline.remainingMillis > 0 &&
+              receipt.actualProvider.contains(attempt.selected.provider) && receipt.actualModel.contains(attempt.selected.model) =>
+            val included = attempt.selected.verifiedIncludedUnits.exists(_ >= attempt.selected.requiredUnits)
+            val admission = if (included) "verified-included" else "authorized-paid"
+            Consequence.success(AiRecordResponse(output, receipt.actualModel,
+              metadata ++ _receipt_metadata(receipt) + ("ai.usage.allowance_admission" -> admission)))
+          case AiTaskDispatch.Completed(_, receipt) if deadline.remainingMillis <= 0 =>
+            _failure("ai.task.uncertain", "Bounded task deadline expired after dispatch", receipt)
+          case AiTaskDispatch.Completed(_, receipt) =>
+            _failure("ai.task.uncertain", "The actual bounded producer did not match its selection", receipt)
+          case _ => Consequence.operationIllegal("ai.task.uncertain", "Unexpected bounded task completion")
+        }
+        case AiTaskResult.Declined(_, _) | AiTaskResult.ProviderDeclined(_, _) =>
+          Consequence.operationIllegal("ai.task.declined", "The bounded record task was declined before dispatch")
+        case AiTaskResult.Failed(_, attempt) => attempt.dispatch match {
+          case AiTaskDispatch.Failed(_, receipt) => _failure("ai.task.failed", "The bounded producer returned a failure", receipt)
+          case _ => Consequence.operationIllegal("ai.task.uncertain", "Unexpected bounded task failure")
+        }
+        case AiTaskResult.Uncertain(_, attempt) => attempt.dispatch match {
+          case AiTaskDispatch.Uncertain(_, receipt) => _failure("ai.task.uncertain", "The bounded producer outcome is uncertain", receipt)
+          case _ => Consequence.operationIllegal("ai.task.uncertain", "Unexpected bounded task outcome")
+        }
+      }
+      } yield response } match {
+        case Right(result) => result
+        case Left(Some(receipt)) => _failure("ai.task.uncertain", "Bounded task deadline expired after possible dispatch", receipt)
+        case Left(None) => Consequence.operationIllegal("ai.task.declined", "Bounded task ended before dispatch")
+      }
+    }
+  }
+
+  private def _remaining_c(deadline: AiTaskDeadline): Consequence[Unit] =
+    if (deadline.remainingMillis > 0) Consequence.unit
+    else Consequence.operationIllegal("ai.task.declined", "Bounded task deadline expired before dispatch")
+
+  private def _failure(operation: String, message: String, receipt: AiTaskReceipt): Consequence[AiRecordResponse] = {
+    val failure = Consequence.operationIllegal(operation, message).conclusion
+    val observation = failure.observation
+    Consequence.Failure(failure.copy(observation = observation.copy(properties =
+      observation.properties ++ _receipt_metadata(receipt))))
+  }
+
+  private def _receipt_metadata(receipt: AiTaskReceipt): Map[String, String] = {
+    val usage = receipt.usage match {
+      case AiTaskUsage.Measured(units, cost) => _usage_metadata(units, cost, "observed")
+      case AiTaskUsage.Estimated(units, cost) => _usage_metadata(units, cost, "estimated")
+      case AiTaskUsage.Unknown => Map.empty
+    }
+    usage ++ receipt.reservationBasis.map("ai.usage.reservation_basis" -> _) ++ receipt.actualProvider.map("ai.execution.provider" -> _) ++
+      receipt.actualModel.map(AiExecutionFacts.MODEL -> _) ++
+      receipt.providerRequestId.map("ai.provider.http.request-id" -> _) ++
+      receipt.trace.map("ai.task.trace" -> _)
+  }
+
+  private def _usage_metadata(units: Long, cost: Option[Long], origin: String): Map[String, String] =
+    Map("ai.usage.total_tokens" -> units.toString, "ai.usage.total_tokens_source" -> origin) ++
+      cost.map(value => "ai.usage.cost_microunits" -> value.toString)
+}
+
 object AiTaskRunner {
   def run(
     request: AiTaskRequest,
     candidates: Vector[AiTaskCandidate],
     invoker: AiTaskInvoker
-  ): AiTaskResult = {
+  ): AiTaskResult = run(request, candidates, invoker, None)
+
+  def run(
+    request: AiTaskRequest,
+    candidates: Vector[AiTaskCandidate],
+    invoker: AiTaskInvoker,
+    preferredProvider: Option[String]
+  ): AiTaskResult = runInternal(request, candidates, invoker, preferredProvider, None)
+
+  private[runtime] def runWithDeadline(request: AiTaskRequest, candidates: Vector[AiTaskCandidate],
+      invoker: AiTaskInvoker, preferredProvider: Option[String], deadline: AiTaskDeadline): AiTaskResult =
+    runInternal(request, candidates, invoker, preferredProvider, Some(deadline))
+
+  private def runInternal(request: AiTaskRequest, candidates: Vector[AiTaskCandidate],
+      invoker: AiTaskInvoker, preferredProvider: Option[String], deadline: Option[AiTaskDeadline]): AiTaskResult = {
     val eligible = candidates.filter { candidate =>
       val included = candidate.verifiedIncludedUnits.exists(_ >= candidate.requiredUnits)
       val affordable = candidate.verifiedCostUpperBoundMicrounits.exists(_ <= request.budgetMicrounits)
@@ -1728,7 +1853,8 @@ object AiTaskRunner {
     }
     val ranked = eligible.sortBy { candidate =>
       val included = candidate.verifiedIncludedUnits.exists(_ >= candidate.requiredUnits)
-      (if (request.preferIncludedQuota && included) 0 else 1, candidate.provider, candidate.model)
+      (if (request.preferIncludedQuota && included) 0 else 1,
+        if (preferredProvider.contains(candidate.provider)) 0 else 1, candidate.provider, candidate.model)
     }
     val ambiguous = candidates.groupBy(candidate => (candidate.provider, candidate.model)).exists(_._2.size > 1)
     if (ambiguous)
@@ -1750,7 +1876,10 @@ object AiTaskRunner {
         }
         if (!admitted)
           return AiTaskResult.Declined(request, capability.left.toOption.getOrElse("Invoker cannot guarantee request bounds"))
-        val dispatch = try invoker.invoke(request, candidate) catch {
+        val dispatch = try deadline match {
+          case Some(d) => invoker.dispatchAfterPreflight(request, candidate, d)
+          case None => invoker.invoke(request, candidate)
+        } catch {
           case scala.util.control.NonFatal(_) =>
             AiTaskDispatch.Uncertain("Invoker failed without a dispatch disposition", AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown))
         }

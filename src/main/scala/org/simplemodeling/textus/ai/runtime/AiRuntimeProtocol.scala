@@ -122,7 +122,8 @@ final case class AiTaskReceipt(
   actualModel: Option[String],
   providerRequestId: Option[String],
   trace: Option[String],
-  usage: AiTaskUsage
+  usage: AiTaskUsage,
+  reservationBasis: Option[String] = None
 )
 
 enum AiTaskDispatch {
@@ -164,4 +165,166 @@ trait AiTaskInvoker {
   def preflight(request: AiTaskRequest, candidate: AiTaskCandidate): Either[String, AiTaskInvocationCapability]
   /** Invoke once; return Uncertain if dispatch may have occurred without a conclusive result. */
   def invoke(request: AiTaskRequest, candidate: AiTaskCandidate): AiTaskDispatch
+
+  private[ai] def dispatchAfterPreflight(request: AiTaskRequest, candidate: AiTaskCandidate,
+      deadline: AiTaskDeadline): AiTaskDispatch = {
+    val unknown = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
+    if (!deadline.beginDispatch(unknown)) AiTaskDispatch.Declined("Deadline expired before dispatch", unknown)
+    else invoke(request, candidate)
+  }
+}
+
+/** One monotonic time window shared by selection, reservation and dispatch. */
+final class AiTaskDeadline private (val endNanos: Long, readNanos: () => Long) {
+  private var closed = false
+  private var receipt: Option[AiTaskReceipt] = None
+  def remainingMillis: Long =
+    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(math.max(0L, endNanos - readNanos()))
+  private[ai] def beginDispatch(initial: AiTaskReceipt): Boolean = synchronized {
+    if (closed || remainingMillis <= 0 || receipt.nonEmpty) false
+    else { receipt = Some(initial); true }
+  }
+  private[ai] def observeReceipt(value: AiTaskReceipt): Unit = synchronized {
+    if (!closed && receipt.nonEmpty) receipt = Some(value)
+  }
+  private[ai] def close(): Option[AiTaskReceipt] = synchronized {
+    closed = true
+    receipt
+  }
+}
+
+object AiTaskDeadline {
+  private[ai] val maxMillis = 86400000L
+  private val executor = new java.util.concurrent.ThreadPoolExecutor(4, 4, 30L,
+    java.util.concurrent.TimeUnit.SECONDS, new java.util.concurrent.ArrayBlockingQueue[Runnable](64),
+    (r: Runnable) => { val t = new Thread(r, "textus-ai-bounded-task"); t.setDaemon(true); t },
+    new java.util.concurrent.ThreadPoolExecutor.AbortPolicy())
+  executor.allowCoreThreadTimeOut(true)
+
+  /** Left contains the last receipt if dispatch may have begun. */
+  private[ai] def await[A](deadline: AiTaskDeadline)(body: => A): Either[Option[AiTaskReceipt], A] = {
+    val task = new java.util.concurrent.FutureTask[A](new java.util.concurrent.Callable[A] {
+      def call(): A = body
+    })
+    try {
+      executor.execute(task)
+      val remaining = deadline.remainingMillis
+      if (remaining <= 0) throw new java.util.concurrent.TimeoutException()
+      val result = task.get(remaining, java.util.concurrent.TimeUnit.MILLISECONDS)
+      if (deadline.remainingMillis <= 0) Left(deadline.close()) else Right(result)
+    } catch {
+      case _: InterruptedException =>
+        val observed = deadline.close(); task.cancel(true); executor.remove(task)
+        Thread.currentThread().interrupt(); Left(observed)
+      case _: java.util.concurrent.TimeoutException =>
+        val observed = deadline.close(); task.cancel(true); executor.remove(task); Left(observed)
+      case _: java.util.concurrent.RejectedExecutionException => Left(deadline.close())
+      case _: java.util.concurrent.ExecutionException => Left(deadline.close())
+    }
+  }
+
+  private[ai] def after(startNanos: Long, durationMillis: Long, readNanos: () => Long = () => System.nanoTime())
+      : AiTaskDeadline = {
+    require(durationMillis > 0 && durationMillis <= maxMillis)
+    new AiTaskDeadline(startNanos + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(durationMillis), readNanos)
+  }
+}
+
+/** Installed on the provider component by a host with a qualified usage policy.
+  * Constructing this binding grants no provider effect. Preparation establishes
+  * request-bound candidates without dispatch and supplies their bounded invoker.
+  */
+trait AiBoundedRecordBinding {
+  def limits: AiBoundedRecordLimits
+  def prepare(request: AiTaskRequest, deadline: AiTaskDeadline)(using ExecutionContext)
+      : Consequence[(Vector[AiTaskCandidate], AiTaskInvoker)]
+}
+
+object AiBoundedRecordBinding {
+  private[ai] def combine(bindings: Vector[AiBoundedRecordBinding]): Option[AiBoundedRecordBinding] =
+    bindings match {
+      case Vector() => None
+      case Vector(binding) => Some(binding)
+      case values => Some(new AiBoundedRecordBinding {
+        override val limits = AiBoundedRecordLimits(
+          values.map(_.limits.maxLatencyMillis).min,
+          values.map(_.limits.budgetMicrounits).min,
+          values.map(_.limits.maxOutputCharacters).min,
+          preferIncludedQuota = values.exists(_.limits.preferIncludedQuota),
+          allowPaidOverage = values.forall(_.limits.allowPaidOverage)
+        )
+
+        override def prepare(request: AiTaskRequest, deadline: AiTaskDeadline)(using ExecutionContext)
+            : Consequence[(Vector[AiTaskCandidate], AiTaskInvoker)] = {
+          val prepared = values.foldLeft(Consequence.success(Vector.empty[(AiTaskCandidate, AiTaskInvoker)])) {
+            (previous, binding) => for {
+              accumulated <- previous
+              entry <- binding.prepare(request, deadline)
+            } yield accumulated ++ entry._1.map(_ -> entry._2)
+          }
+          prepared.map { entries =>
+            val byCandidate = entries.toMap
+            val invoker = new AiTaskInvoker {
+              def preflight(r: AiTaskRequest, candidate: AiTaskCandidate): Either[String, AiTaskInvocationCapability] =
+                byCandidate.get(candidate).toRight("Provider was absent from this bounded selection").flatMap(_.preflight(r, candidate))
+
+              def invoke(r: AiTaskRequest, candidate: AiTaskCandidate): AiTaskDispatch =
+                byCandidate(candidate).invoke(r, candidate)
+
+              override private[ai] def dispatchAfterPreflight(r: AiTaskRequest, candidate: AiTaskCandidate,
+                  deadline: AiTaskDeadline): AiTaskDispatch =
+                byCandidate(candidate).dispatchAfterPreflight(r, candidate, deadline)
+            }
+            entries.map(_._1) -> invoker
+          }
+        }
+      })
+    }
+}
+
+final case class AiBoundedRecordLimits(maxLatencyMillis: Long, budgetMicrounits: Long,
+  maxOutputCharacters: Int, preferIncludedQuota: Boolean = true, allowPaidOverage: Boolean = false) {
+  require(maxLatencyMillis > 0 && maxLatencyMillis <= AiTaskDeadline.maxMillis &&
+    budgetMicrounits >= 0 && maxOutputCharacters > 0)
+}
+
+/** Host-provided reservation. Acquisition must be atomic across all users of the
+ * same provider allowance, request-bound and bounded by the supplied deadline.
+ * The authority must reject reuse of the same request across invoker instances;
+ * a reservation remains consumed after a possible dispatch, including timeout.
+ * Implementations must guarantee the reserved bound cannot incur paid overage
+ * when the request disallows it; estimates and observed balances are not proof.
+ */
+final case class AiTaskAllowance(
+  request: AiTaskRequest,
+  candidate: AiTaskCandidate,
+  maxOutputTokens: Int,
+  maxCostMicrounits: Long,
+  reservationBasis: Option[String] = None,
+  validUntil: Option[java.time.Instant] = None
+)
+trait AiTaskAllowanceAuthority {
+  def reserve(request: AiTaskRequest, candidate: AiTaskCandidate, deadlineNanos: Long): Either[String, AiTaskAllowance]
+}
+
+/** Supplied only by a host that owns and qualifies the actual bounded interpreter.
+ * The implementation must make one POST, disallow redirects, bound the complete
+ * response body, and respect the supplied remaining total timeout. A failure
+ * after entry is conservatively treated as possibly dispatched.
+ */
+sealed trait AiTaskManagedPostResult
+object AiTaskManagedPostResult {
+  case object NotDispatched extends AiTaskManagedPostResult
+  case object PossiblyDispatched extends AiTaskManagedPostResult
+  final case class Response(status: Int, requestId: Option[String], body: String) extends AiTaskManagedPostResult
+}
+
+trait AiTaskManagedPost {
+  def isQualified: Boolean = false
+  def post(body: io.circe.Json, timeoutMillis: Long, maxResponseBytes: Int): Either[String, (Int, Option[String], String)]
+  def postObserved(body: io.circe.Json, timeoutMillis: Long, maxResponseBytes: Int): AiTaskManagedPostResult =
+    post(body, timeoutMillis, maxResponseBytes) match {
+      case Left(_) => AiTaskManagedPostResult.PossiblyDispatched
+      case Right((status, requestId, response)) => AiTaskManagedPostResult.Response(status, requestId, response)
+    }
 }

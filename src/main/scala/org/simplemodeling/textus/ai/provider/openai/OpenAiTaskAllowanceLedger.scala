@@ -93,10 +93,17 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
   def reserveDailyFirst(request: OpenAiAllowanceRequest, daily: Option[OpenAiAllowanceGrant],
       credit: Option[OpenAiCreditGrant], deadlineNanos: Long)
       (using context: ExecutionContext): Either[String, OpenAiBudgetAdmission] = {
+    reserveDailyFirst(request, daily, credit, deadlineNanos, 0)
+  }
+
+  private[openai] def reserveDailyFirst(request: OpenAiAllowanceRequest, daily: Option[OpenAiAllowanceGrant],
+      credit: Option[OpenAiCreditGrant], deadlineNanos: Long, marginPercent: Int)
+      (using context: ExecutionContext): Either[String, OpenAiBudgetAdmission] = {
+    if (marginPercent < 0 || marginPercent > 99) return Left("Invalid daily margin")
     if (executor == null || deadlineNanos - nanoTime() <= 0) return Left("Deadline or executor unavailable")
     try {
       val future = executor.submit(new Callable[Either[String, BoundedAdmission]] {
-        def call(): Either[String, BoundedAdmission] = _reserve_daily_first(request, daily, credit, deadlineNanos)
+        def call(): Either[String, BoundedAdmission] = _reserve_daily_first(request, daily, credit, deadlineNanos, marginPercent)
       })
       val remaining = deadlineNanos - nanoTime()
       if (remaining <= 0) { future.cancel(false); Left("Deadline expired") }
@@ -121,7 +128,7 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
   }
 
   private def _reserve_daily_first(request: OpenAiAllowanceRequest, daily: Option[OpenAiAllowanceGrant],
-      credit: Option[OpenAiCreditGrant], deadline: Long)
+      credit: Option[OpenAiCreditGrant], deadline: Long, marginPercent: Int)
       (using ctx: ExecutionContext): Either[String, BoundedAdmission] = try {
     val text = (s: String) => s != null && s.nonEmpty && s.length <= 512 && s.trim == s
     val instant = now()
@@ -147,7 +154,7 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
     if (daily.isEmpty && !validIneligibility(instant)) return Left("Daily eligibility unknown or unverified")
     if (deadline - nanoTime() <= 0 || !_claim(request, deadline)) return Left("Request claim unavailable or already claimed")
     daily match {
-      case Some(g) => _select_daily(request, g, total, deadline) match {
+      case Some(g) => _select_daily(request, g, total, deadline, marginPercent) match {
         case DailySelection.Reserved(r) =>
           if (deadline - nanoTime() <= 0 || !validTime(request, g, now())) return Left("Daily boundary expired")
           return Right(BoundedAdmission(OpenAiDailyAdmission(r), None))
@@ -178,9 +185,12 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
   }
 
   private def _select_daily(request: OpenAiAllowanceRequest, grant: OpenAiAllowanceGrant, total: Long,
-      deadline: Long)(using ctx: ExecutionContext): DailySelection = {
-    if (total > grant.allowanceTokens) DailySelection.Unavailable
-    else change(request, grant, total, deadline, 4, false) match {
+      deadline: Long, marginPercent: Int)(using ctx: ExecutionContext): DailySelection = {
+    val usablePercent = 100 - marginPercent
+    val cutoff = (grant.allowanceTokens / 100) * usablePercent +
+      (grant.allowanceTokens % 100) * usablePercent / 100
+    if (total > cutoff) DailySelection.Unavailable
+    else change(request, grant, total, deadline, 4, cutoff, retryConflicts = false) match {
       case Right(reservation) => DailySelection.Reserved(reservation)
       case Left("Allowance exhausted") => DailySelection.Unavailable
       case Left(reason) => DailySelection.Denied(reason)
@@ -260,14 +270,15 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
       val total = Math.addExact(request.inputTokens, request.outputTokens)
       if (total > g.allowanceTokens || deadlineNanos - nanoTime() <= 0) return Left("Allowance or deadline exhausted")
       if (!_claim(request, deadlineNanos)) return Left("Request claim unavailable or already claimed")
-      val result = change(request, g, total, deadlineNanos, 4)
+      val result = change(request, g, total, deadlineNanos, 4, g.allowanceTokens)
       if (deadlineNanos - nanoTime() <= 0 || !validTime(request, g, now())) Left("Deadline, grant or provider day expired")
       else result
     } catch { case NonFatal(_) => Left("Reservation outcome unavailable") }
   }
 
   private def change(request: OpenAiAllowanceRequest, grant: OpenAiAllowanceGrant, total: Long,
-      deadline: Long, attempts: Int, retryConflicts: Boolean = true)(using ctx: ExecutionContext): Either[String, OpenAiAllowanceReservation] = {
+      deadline: Long, attempts: Int, cutoff: Long, retryConflicts: Boolean = true)
+      (using ctx: ExecutionContext): Either[String, OpenAiAllowanceReservation] = {
     if (attempts <= 0 || deadline - nanoTime() <= 0 || !validTime(request, grant, now())) return Left("Reservation deadline or provider day expired")
     try {
       ensureCollection(store)
@@ -278,9 +289,9 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
           val empty = LedgerEntity(id, encode(request.scope, grant.allowanceTokens, Vector.empty))
           if (deadline - nanoTime() <= 0 || !validTime(request, grant, now())) return Left("Deadline, grant or provider day expired")
           store.create(empty) match {
-            case Consequence.Success(_) => change(request, grant, total, deadline, attempts - 1, retryConflicts)
+            case Consequence.Success(_) => change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts)
             case Consequence.Failure(c) if c.observation.taxonomy == Taxonomy.dataStoreDuplicate && retryConflicts =>
-              change(request, grant, total, deadline, attempts - 1, retryConflicts)
+              change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts)
             case _ => Left("Ledger creation outcome unavailable")
           }
         case Some(Some(carrier)) =>
@@ -289,7 +300,7 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
               current._2 != grant.allowanceTokens || current._3.size >= MaxEntries ||
               current._3.exists(_._1 == request.requestId)) return Left("Ledger scope, capacity or request conflict")
           val used = current._3.foldLeft(0L)((n, entry) => Math.addExact(n, entry._3))
-          if (used > grant.allowanceTokens - total) return Left("Allowance exhausted")
+          if (total > cutoff || used > cutoff - total) return Left("Allowance exhausted")
           val next = LedgerEntity(id, encode(request.scope, grant.allowanceTokens,
             current._3 :+ ((request.requestId, request.requestDigest, total, grant.allocationProvenance))))
           val revision = carrier.revision
@@ -301,7 +312,7 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
               Right(OpenAiAllowanceReservation(request, total))
             case Consequence.Failure(c) if c.observation.cause.descriptor.facets.contains(
                 Descriptor.Facet.Reason("stale-entity-revision")) && retryConflicts =>
-              change(request, grant, total, deadline, attempts - 1, retryConflicts)
+              change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts)
             case _ => Left("Ledger update outcome unavailable")
           }
       }

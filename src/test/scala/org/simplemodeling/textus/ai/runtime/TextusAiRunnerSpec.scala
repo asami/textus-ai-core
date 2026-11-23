@@ -17,7 +17,7 @@ import org.goldenport.cncf.mcp.client.McpServerSetId
 import org.goldenport.cncf.operationtool.OperationToolSetId
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRecordResponse, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
 import org.goldenport.cncf.subsystem.Subsystem
 import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
@@ -57,6 +57,163 @@ final class TextusAiRunnerSpec
 
   "TextusAiRunner" should {
     "runtime binding and selection" which {
+    "use the host bounded task binding for a versioned record request" in {
+      Given("the existing AI runner SPI with a typed bounded task binding")
+      given ExecutionContext = ExecutionContext.create()
+      val component = _component()
+      var dispatched = Vector.empty[String]
+      var prepared = Vector.empty[(String, AiTaskDeadline)]
+      def binding(name: String): AiBoundedRecordBinding = new AiBoundedRecordBinding {
+        val limits = AiBoundedRecordLimits(5000, 0, 1024)
+        def prepare(request: AiTaskRequest, deadline: AiTaskDeadline)(using ExecutionContext)
+            : Consequence[(Vector[AiTaskCandidate], AiTaskInvoker)] = {
+          prepared :+= (request.id -> deadline)
+          request.input.reference shouldBe "retained-input"
+          request.input.provenance shouldBe "retained-continuation"
+          request.allowPaidOverage shouldBe false
+          val candidates = Vector(AiTaskCandidate(name, name + "-model", Set("structured-record"),
+            Set.empty, Some(20), 10, request, Some(0)))
+          val invoker = new AiTaskInvoker {
+            def preflight(request: AiTaskRequest, candidate: AiTaskCandidate): Either[String, AiTaskInvocationCapability] =
+              Right(AiTaskInvocationCapability(request, candidate, request.input.content.length,
+                request.maxOutputCharacters, 0, request.maxLatencyMillis, true, true, true))
+            def invoke(request: AiTaskRequest, candidate: AiTaskCandidate): AiTaskDispatch = {
+              candidate.provider shouldBe name
+              dispatched = dispatched :+ candidate.provider
+              AiTaskDispatch.Completed(Record.dataAuto("selected" -> candidate.provider), AiTaskReceipt(
+                Some(candidate.provider), Some(candidate.model), Some("req_record_fixture"), None, AiTaskUsage.Measured(9, None)))
+            }
+          }
+          Consequence.success(candidates -> invoker)
+        }
+      }
+      val provider = new TextusAiRunnerProvider(component)
+      val runner = provider.provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.value
+      val request = AiRecordRequest("structured fixture", Record.dataAuto("type" -> "object"),
+        requirement = AiRunnerRequirement(provider = Some("openai")), metadata = Map(
+          "ai.task.contract" -> "textus-ai.bounded-task.v1", "ai.task.id" -> "attempt-1",
+          "ai.task.kind" -> "record-fixture", "ai.task.continuation" -> "retained-continuation",
+          "ai.task.input-reference" -> "retained-input"))
+      When("the consumer requires the bounded protocol")
+      runner.generateRecord(request).isSuccess shouldBe false
+      dispatched shouldBe empty
+      val combined = AiBoundedRecordBinding.combine(Vector(binding("ollama"), binding("openai"))).value
+      component.withPort(Component.Port.input(combined).orElse(component.port))
+      val result = runner.generateRecord(request).toOption.value
+      Then("the eligible preferred producer returns a bound record with the actual usage")
+      result.record.getString("selected") shouldBe Some("openai")
+      result.model shouldBe Some("openai-model")
+      request.metadata.foreach((key, value) => result.metadata.get(key) shouldBe Some(value))
+      result.metadata("ai.provider.http.request-id") shouldBe "req_record_fixture"
+      result.metadata("ai.usage.total_tokens_source") shouldBe "observed"
+      result.metadata("ai.usage.allowance_admission") shouldBe "verified-included"
+      result.metadata.get("ai.usage.cost_microunits") shouldBe None
+      val alternate = runner.generateRecord(request.copy(requirement = AiRunnerRequirement(provider = Some("ollama")),
+        metadata = request.metadata.updated("ai.task.id", "attempt-2"))).toOption.value
+      alternate.record.getString("selected") shouldBe Some("ollama")
+      runner.generateRecord(request.copy(metadata = request.metadata.updated("ai.task.contract", "unknown"))).isSuccess shouldBe false
+      dispatched shouldBe Vector("openai", "ollama")
+      prepared.map(_._1) shouldBe Vector("attempt-1", "attempt-1", "attempt-2", "attempt-2")
+      prepared.grouped(2).foreach(entries => entries.map(_._2).distinct.size shouldBe 1)
+    }
+
+    "retain only observed producer facts on bounded record failures and uncertainty" in {
+      given ExecutionContext = ExecutionContext.create()
+      val component = _component()
+      var receipt = AiTaskReceipt(Some("fixture"), Some("observed-model"), Some("request-1"), None,
+        AiTaskUsage.Measured(9, None), Some("included-allocation"))
+      var uncertain = false
+      val binding = new AiBoundedRecordBinding {
+        val limits = AiBoundedRecordLimits(5000, 0, 1024)
+        def prepare(request: AiTaskRequest, deadline: AiTaskDeadline)(using ExecutionContext)
+            : Consequence[(Vector[AiTaskCandidate], AiTaskInvoker)] = {
+          val candidate = AiTaskCandidate("fixture", "requested-model", Set("structured-record"),
+            Set.empty, Some(20), 10, request, Some(0))
+          val invoker = new AiTaskInvoker {
+            def preflight(r: AiTaskRequest, c: AiTaskCandidate) =
+              Right(AiTaskInvocationCapability(r, c, r.input.content.length, r.maxOutputCharacters, 0,
+                r.maxLatencyMillis, true, true, true))
+            def invoke(r: AiTaskRequest, c: AiTaskCandidate) =
+              if (uncertain) AiTaskDispatch.Uncertain("uncertain", receipt)
+              else AiTaskDispatch.Failed("failed", receipt)
+          }
+          Consequence.success(Vector(candidate) -> invoker)
+        }
+      }
+      component.withPort(Component.Port.input(binding).orElse(component.port))
+      val runner = new TextusAiRunnerProvider(component)
+        .provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.value
+      val request = AiRecordRequest("fixture", Record.dataAuto("type" -> "object"), metadata = Map(
+        "ai.task.contract" -> "textus-ai.bounded-task.v1", "ai.task.id" -> "failure-fixture",
+        "ai.task.kind" -> "review", "ai.task.continuation" -> "continuation", "ai.task.input-reference" -> "reference"))
+      val failed = runner.generateRecord(request)
+      failed.isSuccess shouldBe false
+      val facts = failed match {
+        case Consequence.Failure(conclusion) => conclusion.observation.properties
+        case _ => fail("expected a failed task result")
+      }
+      facts.get(AiExecutionFacts.MODEL) shouldBe Some("observed-model")
+      facts.get(AiExecutionFacts.PROVIDER) shouldBe Some("fixture")
+      facts.get("ai.provider.http.request-id") shouldBe Some("request-1")
+      facts.get("ai.usage.total_tokens") shouldBe Some("9")
+      facts.get("ai.usage.total_tokens_source") shouldBe Some("observed")
+      facts.get("ai.usage.reservation_basis") shouldBe Some("included-allocation")
+      facts.get("ai.usage.cost_microunits") shouldBe None
+      uncertain = true
+      receipt = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
+      val unknown = runner.generateRecord(request)
+      unknown.isSuccess shouldBe false
+      val unknownFacts = unknown match {
+        case Consequence.Failure(conclusion) => conclusion.observation.properties
+        case _ => fail("expected an uncertain task failure")
+      }
+      unknownFacts.get(AiExecutionFacts.MODEL) shouldBe None
+      unknownFacts.get(AiExecutionFacts.PROVIDER) shouldBe None
+      unknownFacts.get("ai.provider.http.request-id") shouldBe None
+      unknownFacts.get("ai.usage.total_tokens") shouldBe None
+      unknownFacts.get("ai.usage.reservation_basis") shouldBe None
+    }
+
+    "bound a stalled preparation and prevent a late invocation" in {
+      import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
+      import java.util.concurrent.atomic.AtomicInteger
+      given ExecutionContext = ExecutionContext.create()
+      val entered = new CountDownLatch(1)
+      val release = new CountDownLatch(1)
+      val invocations = new AtomicInteger()
+      val binding = new AiBoundedRecordBinding {
+        val limits = AiBoundedRecordLimits(200, 0, 1024)
+        def prepare(request: AiTaskRequest, deadline: AiTaskDeadline)(using ExecutionContext)
+            : Consequence[(Vector[AiTaskCandidate], AiTaskInvoker)] = {
+          entered.countDown()
+          var waiting = true
+          while (waiting) try { release.await(); waiting = false } catch { case _: InterruptedException => () }
+          val candidate = AiTaskCandidate("fixture", "model", Set("structured-record"), Set.empty, Some(1), 1, request, Some(0))
+          val invoker = new AiTaskInvoker {
+            def preflight(r: AiTaskRequest, c: AiTaskCandidate) = Right(AiTaskInvocationCapability(r, c, 1000, 1024, 0, 200, true, true, true))
+            def invoke(r: AiTaskRequest, c: AiTaskCandidate) = {
+              invocations.incrementAndGet()
+              AiTaskDispatch.Uncertain("unexpected", AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown))
+            }
+          }
+          Consequence.success(Vector(candidate) -> invoker)
+        }
+      }
+      val request = AiRecordRequest("fixture", Record.dataAuto("type" -> "object"), metadata = Map(
+        "ai.task.contract" -> "textus-ai.bounded-task.v1", "ai.task.id" -> "blocked-prepare",
+        "ai.task.kind" -> "review", "ai.task.continuation" -> "continuation", "ai.task.input-reference" -> "reference"))
+      val caller = Executors.newSingleThreadExecutor()
+      try {
+        val result = caller.submit(new java.util.concurrent.Callable[Consequence[AiRecordResponse]] {
+          def call() = AiBoundedRecordProtocol.runC(request, binding)
+        })
+        entered.await(2, TimeUnit.SECONDS) shouldBe true
+        result.get(2, TimeUnit.SECONDS).isSuccess shouldBe false
+        release.countDown()
+        invocations.get() shouldBe 0
+      } finally { release.countDown(); caller.shutdownNow() }
+    }
+
     "delegate generate and chat requests through existing Textus AI runtime bindings" in {
       Given("a component with existing generate and chat runtime bindings")
       given ExecutionContext = ExecutionContext.create()

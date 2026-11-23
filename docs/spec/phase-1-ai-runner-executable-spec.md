@@ -159,3 +159,39 @@ no live HTTP/provider requests.
 Focused validation of `TextusAiRunnerSpec`, normal `cozyBuildCar`, independent
 review, and the separately admitted normal C4 execution remain caller-owned
 evidence. These deterministic scenarios do not establish live provider execution.
+
+### OpenAI daily reservation margin
+
+To enable the bounded OpenAI route, set `textus.ai.bounded-task.openai=true`
+in the executing Textus AI host and select the existing OpenAI connection for
+the intended organization, project and model. The host must grant managed
+HTTPS POST access to that endpoint. Supply the credential through the host's
+existing secret configuration.
+
+For the built-in authority, provide a verified allocation as a JSON object in
+`textus.ai.bounded-task.openai-allocation`. Bind `organization`, `project`,
+`origin`, `model` and `modelPool` to the selected connection and verified
+quota group. The object also records `inputTokenCeiling`, `maxOutputTokens`
+and `fullCostMicros` for the entire bounded request. A `daily` allocation
+contains the UTC `day`, gross `limitTokens`, `validFrom`, `expiresAt` and
+`provenance`. Optional monthly `credit` contains the verified
+`allocationId`, `limitMicros` and the same validity and provenance fields.
+For a credit-only allocation, also supply verified `dailyIneligible`
+evidence with its own validity and provenance.
+
+Refresh daily evidence at the UTC-day boundary. All instances using the same
+organization and model group must use the same shared reservation store.
+The allocation provenance refers to enrollment and allocation evidence
+verified by the host operator. API access alone cannot supply that evidence.
+
+For the built-in OpenAI allowance authority,
+`textus.ai.bounded-task.openai-daily-margin-percent` sets the percentage of the
+verified gross daily token allocation held in reserve. It defaults to 10 and
+accepts integers from 1 to 99. An invalid value disables the built-in
+authority. An injected authority manages its own policy.
+
+When the host loads a changed value, the new cutoff counts all reservations
+already recorded for the organization, model group and UTC day. A request
+beyond the cutoff can use monthly credit when a verified reservation covers
+the full potential charge. Traffic outside the ledger may still result in
+charges.
