@@ -249,6 +249,45 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
     } catch { case NonFatal(_) => Left("Credit ledger operation unavailable") }
   }
 
+  /** Records one request-bound observation on the original daily ledger row. */
+  private[openai] def settle(reservation: OpenAiAllowanceReservation, input: Long, output: Long,
+      responseId: String)(using ctx: ExecutionContext): Either[String, Unit] = {
+    val request = reservation.request
+    if (input < 0 || output < 0 || input > request.inputTokens || output > request.outputTokens ||
+        responseId == null || responseId.isEmpty || responseId.length > 512 || responseId.trim != responseId ||
+        responseId.exists(_.isControl)) return Left("Invalid usage observation")
+    def update(attempts: Int): Either[String, Unit] = try {
+      if (attempts <= 0) return Left("Settlement conflict")
+      ensureCollection(store)
+      val id = take(entityId(request.scope)).getOrElse(return Left("Invalid ledger identity"))
+      val carrier = take(store.loadDetached[LedgerEntity](id)).flatten.getOrElse(return Left("Ledger unavailable"))
+      val current = decode(carrier.entity.canonical).getOrElse(return Left("Invalid stored ledger"))
+      if (carrier.entity.id != id || carrier.revision.value <= 0 || current._1 != request.scope)
+        return Left("Ledger scope conflict")
+      val index = current._3.indexWhere(e => e._1 == request.requestId && e._2 == request.requestDigest && e._3 == reservation.totalTokens)
+      if (index < 0 || Math.addExact(request.inputTokens, request.outputTokens) != reservation.totalTokens)
+        return Left("Reservation mismatch")
+      val entry = current._3(index)
+      val observation = (input, output, responseId)
+      entry._5 match {
+        case Some(existing) => if (existing == observation) Right(()) else Left("Settlement conflict")
+        case None =>
+          val entries = current._3.updated(index, (entry._1, entry._2, entry._3, entry._4, Some(observation)))
+          val next = LedgerEntity(id, encode(current._1, current._2, entries))
+          val revision = carrier.revision
+          val policy = EntityMutationExecutionPolicy(concurrencyPolicy = EntityConcurrencyPolicy.Optimistic,
+            preconditionPolicy = RevisionPreconditionPolicy.ObservedRequired, observedRevision = Some(revision))
+          store.updateDetached(next, Some(revision), policy) match {
+            case Consequence.Success(ack) if ack.entity == next && ack.revision.value > revision.value => Right(())
+            case Consequence.Failure(c) if c.observation.cause.descriptor.facets.contains(
+                Descriptor.Facet.Reason("stale-entity-revision")) => update(attempts - 1)
+            case _ => Left("Settlement outcome unavailable")
+          }
+      }
+    } catch { case NonFatal(_) => Left("Settlement outcome unavailable") }
+    update(8)
+  }
+
   private def validTime(request: OpenAiAllowanceRequest, grant: OpenAiAllowanceGrant, instant: Instant): Boolean =
     request.scope.day == instant.atZone(ZoneOffset.UTC).toLocalDate && grant.expiresAt.isAfter(instant)
 
@@ -299,10 +338,10 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
           if (carrier.entity.id != id || carrier.revision.value <= 0 || current._1 != request.scope ||
               current._2 != grant.allowanceTokens || current._3.size >= MaxEntries ||
               current._3.exists(_._1 == request.requestId)) return Left("Ledger scope, capacity or request conflict")
-          val used = current._3.foldLeft(0L)((n, entry) => Math.addExact(n, entry._3))
+          val used = current._3.foldLeft(0L)((n, entry) => Math.addExact(n, entry._5.fold(entry._3) { case (input, output, _) => Math.addExact(input, output) }))
           if (total > cutoff || used > cutoff - total) return Left("Allowance exhausted")
           val next = LedgerEntity(id, encode(request.scope, grant.allowanceTokens,
-            current._3 :+ ((request.requestId, request.requestDigest, total, grant.allocationProvenance))))
+            current._3 :+ ((request.requestId, request.requestDigest, total, grant.allocationProvenance, None))))
           val revision = carrier.revision
           val policy = EntityMutationExecutionPolicy(concurrencyPolicy = EntityConcurrencyPolicy.Optimistic,
             preconditionPolicy = RevisionPreconditionPolicy.ObservedRequired, observedRevision = Some(revision))
@@ -342,13 +381,18 @@ object OpenAiTaskAllowanceLedger {
     "from" -> Json.fromString(grant.validFrom.toString), "expires" -> Json.fromString(grant.expiresAt.toString),
     "limit" -> Json.fromLong(grant.allocationMicrounits), "source" -> Json.fromString(grant.allocationProvenance),
     "used" -> Json.fromLong(used)).noSpaces
-  private type Entry = (String, String, Long, String)
+  private type Entry = (String, String, Long, String, Option[(Long, Long, String)])
   private def encode(scope: OpenAiAllowanceScope, limit: Long, entries: Vector[Entry]): String = Json.obj(
     "organization" -> Json.fromString(scope.organization), "pool" -> Json.fromString(scope.modelPool),
     "day" -> Json.fromString(scope.day.toString), "limit" -> Json.fromLong(limit),
-    "entries" -> Json.fromValues(entries.map { case (id, digest, tokens, source) => Json.obj(
-      "id" -> Json.fromString(id), "digest" -> Json.fromString(digest), "tokens" -> Json.fromLong(tokens),
-      "source" -> Json.fromString(source)) })).noSpaces
+    "entries" -> Json.fromValues(entries.map { case (id, digest, tokens, source, settlement) => Json.fromJsonObject(
+      settlement.fold(io.circe.JsonObject("id" -> Json.fromString(id), "digest" -> Json.fromString(digest),
+        "tokens" -> Json.fromLong(tokens), "source" -> Json.fromString(source))) { case (input, output, response) =>
+        io.circe.JsonObject("id" -> Json.fromString(id), "digest" -> Json.fromString(digest),
+          "tokens" -> Json.fromLong(tokens), "source" -> Json.fromString(source),
+          "settlement" -> Json.obj("input" -> Json.fromLong(input), "output" -> Json.fromLong(output),
+            "response" -> Json.fromString(response)))
+      }) })).noSpaces
   private def decode(s: String): Option[(OpenAiAllowanceScope, Long, Vector[Entry])] = try {
     val c = parser.parse(s).toOption.get.hcursor
     val scope = OpenAiAllowanceScope(c.get[String]("organization").toOption.get,
@@ -357,12 +401,17 @@ object OpenAiTaskAllowanceLedger {
     val entries = c.downField("entries").focus.flatMap(_.asArray).get.map { j =>
       val e = j.hcursor
       (e.get[String]("id").toOption.get, e.get[String]("digest").toOption.get,
-        e.get[Long]("tokens").toOption.get, e.get[String]("source").toOption.get)
+        e.get[Long]("tokens").toOption.get, e.get[String]("source").toOption.get,
+        e.downField("settlement").focus.map { j =>
+          val c = j.hcursor
+          (c.get[Long]("input").toOption.get, c.get[Long]("output").toOption.get, c.get[String]("response").toOption.get)
+        })
     }
     if (limit <= 0 || entries.size > MaxEntries || entries.exists(e => e._1.isEmpty ||
-        !e._2.matches("[0-9a-f]{64}") || e._3 <= 0 || e._4.isEmpty) ||
+        !e._2.matches("[0-9a-f]{64}") || e._3 <= 0 || e._4.isEmpty || e._5.exists { case (input, output, response) =>
+          input < 0 || output < 0 || response.isEmpty || Math.addExact(input, output) > e._3 }) ||
         entries.map(_._1).distinct.size != entries.size ||
-        entries.foldLeft(0L)((n, e) => Math.addExact(n, e._3)) > limit) None
+        entries.foldLeft(0L)((n, e) => Math.addExact(n, e._5.fold(e._3) { case (input, output, _) => Math.addExact(input, output) })) > limit) None
     else Some((scope, limit, entries))
   } catch { case NonFatal(_) => None }
 

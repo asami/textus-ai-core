@@ -182,7 +182,13 @@ private[ai] final class OpenAiLedgerBackedAllowance(
       Some(1L), 1L, r, Some(0L)))
   }
 
-  override def reserve(r: AiTaskRequest, candidate: AiTaskCandidate, deadlineNanos: Long): Either[String, AiTaskAllowance] = {
+  private[openai] final case class InvocationAllowance(allowance: AiTaskAllowance,
+    settle: Option[(Long, Long, String) => Either[String, Unit]])
+
+  override def reserve(r: AiTaskRequest, candidate: AiTaskCandidate, deadlineNanos: Long): Either[String, AiTaskAllowance] =
+    reserveInvocation(r, candidate, deadlineNanos).map(_.allowance)
+
+  private[openai] def reserveInvocation(r: AiTaskRequest, candidate: AiTaskCandidate, deadlineNanos: Long): Either[String, InvocationAllowance] = {
     given ExecutionContext = context
     if (!assess(r, deadlineNanos).contains(candidate)) return Left("Allocation or request is unavailable")
     val now = Instant.now()
@@ -210,8 +216,14 @@ private[ai] final class OpenAiLedgerBackedAllowance(
       val boundary = if (daily.nonEmpty) allocation.daily.get.window.until else allocation.dailyIneligible.get.until
       val midnight = day.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant
       val scopeEnd = if (until.isBefore(boundary)) until else boundary
-      AiTaskAllowance(r, candidate, outputLimit, 0L, Some(basis),
+      val allowance = AiTaskAllowance(r, candidate, outputLimit, 0L, Some(basis),
         Some(if (scopeEnd.isBefore(midnight)) scopeEnd else midnight))
+      val settlement = admission match {
+        case OpenAiDailyAdmission(reservation) =>
+          Some((input: Long, output: Long, response: String) => ledger.settle(reservation, input, output, response))
+        case _: OpenAiCreditAdmission => None
+      }
+      InvocationAllowance(allowance, settlement)
     }
   }
 }

@@ -569,12 +569,16 @@ final class OpenAiBoundedTaskInvoker(
     if (initialPreflight(request, candidate).isLeft)
       return AiTaskDispatch.Declined("Bounded OpenAI preflight failed", unknown)
     if (deadline.remainingMillis <= 0) return AiTaskDispatch.Declined("Deadline expired before reservation", unknown)
-    val reservation = try authority.reserve(request, candidate, deadline.endNanos) catch {
+    val reservation = try authority match {
+      case ledger: OpenAiLedgerBackedAllowance =>
+        ledger.reserveInvocation(request, candidate, deadline.endNanos).map(x => (x.allowance, x.settle))
+      case _ => authority.reserve(request, candidate, deadline.endNanos).map(x => (x, None))
+    } catch {
       case scala.util.control.NonFatal(_) => Left("Allowance reservation failed")
     }
-    val grant = reservation match {
+    val (grant, settlement) = reservation match {
       case Left(reason) => return AiTaskDispatch.Declined(reason, unknown)
-      case Right(value) if value.request != request || value.candidate != candidate ||
+      case Right((value, _)) if value.request != request || value.candidate != candidate ||
           value.maxOutputTokens <= 0 || value.maxCostMicrounits < 0 || value.maxCostMicrounits > request.budgetMicrounits =>
         return AiTaskDispatch.Declined("Allowance reservation does not match request", unknown)
       case Right(value) => value
@@ -600,7 +604,31 @@ final class OpenAiBoundedTaskInvoker(
         val usage = decoded.flatMap(_.hcursor.downField("usage").get[Long]("total_tokens").toOption)
           .filter(_ >= 0).map(x => AiTaskUsage.Measured(x, None)).getOrElse(AiTaskUsage.Unknown)
         val receipt = AiTaskReceipt(Some("openai"), decoded.flatMap(_.hcursor.get[String]("model").toOption), requestId, None, usage, grant.reservationBasis)
-        deadline.observeReceipt(receipt)
+        val observation = if (status / 100 == 2 && receipt.actualModel.contains(candidate.model)) {
+          for {
+            json <- decoded
+            responseId <- json.hcursor.get[String]("id").toOption
+            input <- json.hcursor.downField("usage").get[Long]("prompt_tokens").toOption
+            output <- json.hcursor.downField("usage").get[Long]("completion_tokens").toOption
+            total <- json.hcursor.downField("usage").get[Long]("total_tokens").toOption
+            sum <- scala.util.Try(Math.addExact(input, output)).toOption
+            if input >= 0 && output >= 0 && total == sum
+            apply <- settlement
+          } yield (apply, input, output, responseId)
+        } else None
+        observation match {
+          case Some((apply, input, output, responseId)) =>
+            // Freeze this exact observation against a concurrent timeout before ledger I/O.
+            val admitted = deadline.synchronized {
+              if (expired) false
+              else {
+                deadline.observeReceipt(receipt)
+                deadline.close().exists(_ eq receipt)
+              }
+            }
+            if (admitted) apply(input, output, responseId)
+          case None => deadline.observeReceipt(receipt)
+        }
         if (status / 100 != 2) AiTaskDispatch.Failed(s"Provider returned HTTP $status", receipt)
         else if (expired) AiTaskDispatch.Uncertain("Deadline expired after dispatch", receipt)
         else if (!receipt.actualModel.contains(candidate.model))

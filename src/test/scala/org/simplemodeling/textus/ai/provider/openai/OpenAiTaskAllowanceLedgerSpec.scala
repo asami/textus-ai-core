@@ -52,6 +52,78 @@ final class OpenAiTaskAllowanceLedgerSpec extends AnyWordSpec with Matchers {
   private def _credit(r: OpenAiAllowanceRequest, cost: Long = 6L) =
     OpenAiCreditGrant(r, "allocation", instant.minusSeconds(60), instant.plusSeconds(172800), 10L, cost, "trusted-credit")
 
+  "Daily settlement" should {
+    "retain the original reservation and claim while reclaiming only once for its original day" in fixture { (ledger, ctx) =>
+      given ExecutionContext = ctx
+      val first = request("settled")
+      val reservation = ledger.reserve(first, Some(grant(first, 20L)), deadline).toOption.get
+      ledger.settle(reservation.copy(request = first.copy(requestDigest = "b" * 64)), 2L, 1L, "response-1").isLeft shouldBe true
+      ledger.settle(reservation, 2L, 1L, "response-1") shouldBe Right(())
+      ledger.settle(reservation, 2L, 1L, "response-1") shouldBe Right(())
+      ledger.settle(reservation, 2L, 2L, "response-1").isLeft shouldBe true
+      ledger.reserve(first, Some(grant(first, 20L)), deadline).isLeft shouldBe true
+      val second = request("after-settlement")
+      ledger.reserve(second, Some(grant(second, 20L)), deadline).isRight shouldBe true
+      val third = request("over-limit")
+      ledger.reserve(third, Some(grant(third, 20L)), deadline).isLeft shouldBe true
+    }
+
+    "settle the original day after midnight and retain history after restart" in {
+      val path = Files.createTempDirectory("openai-settlement-restart-").resolve("ledger.db")
+      val provider = SqlDataStore.sqlite(path.toString)
+      val ctx = ExecutionContext.test()
+      ctx.dataStoreSpace.useDataStore(provider)
+      val executor = Executors.newFixedThreadPool(4)
+      val clock = new AtomicReference[Instant](instant)
+      try {
+        given ExecutionContext = ctx
+        val first = request("restart-settlement")
+        val ledger = new OpenAiTaskAllowanceLedger(new StandardEntityStore, trusted, executor, () => clock.get())
+        val reservation = ledger.reserve(first, Some(grant(first, 20L)), deadline).toOption.get
+        clock.set(instant.plusSeconds(86400))
+        val restarted = new OpenAiTaskAllowanceLedger(new StandardEntityStore, trusted, executor, () => clock.get())
+        restarted.settle(reservation, 2L, 1L, "restart-response") shouldBe Right(())
+        restarted.settle(reservation, 2L, 1L, "restart-response") shouldBe Right(())
+        restarted.settle(reservation, 1L, 1L, "restart-response").isLeft shouldBe true
+        clock.set(instant)
+        restarted.reserve(first, Some(grant(first, 20L)), deadline).isLeft shouldBe true
+        val next = request("restart-next")
+        restarted.reserve(next, Some(grant(next, 20L)), deadline).isRight shouldBe true
+      } finally { executor.shutdown(); executor.awaitTermination(10, TimeUnit.SECONDS); provider.closeC() }
+    }
+
+    "enforce the shared margin-adjusted limit during concurrent admissions" in fixture { (ledger, ctx) =>
+      val gate = new CountDownLatch(1)
+      val callers = Executors.newFixedThreadPool(2)
+      try {
+        def call(id: String) = callers.submit(new Callable[Either[String, OpenAiBudgetAdmission]] {
+          def call(): Either[String, OpenAiBudgetAdmission] = {
+            given ExecutionContext = ctx
+            gate.await()
+            val r = request(id)
+            ledger.reserveDailyFirst(r, Some(grant(r, 20L)), None, deadline, 10)
+          }
+        })
+        val a = call("margin-a")
+        val b = call("margin-b")
+        gate.countDown()
+        val results = Vector(a.get(15, TimeUnit.SECONDS), b.get(15, TimeUnit.SECONDS))
+        results.count(_.isRight) shouldBe 1
+      } finally callers.shutdownNow()
+    }
+
+    "retain a full reservation for invalid observations" in fixture { (ledger, ctx) =>
+      given ExecutionContext = ctx
+      val first = request("invalid-usage")
+      val reservation = ledger.reserve(first, Some(grant(first)), deadline).toOption.get
+      ledger.settle(reservation, 7L, 1L, "response").isLeft shouldBe true
+      ledger.settle(reservation, 1L, 5L, "response").isLeft shouldBe true
+      ledger.settle(reservation, 1L, 1L, "").isLeft shouldBe true
+      val next = request("no-refund")
+      ledger.reserve(next, Some(grant(next)), deadline).isLeft shouldBe true
+    }
+  }
+
   "Daily-first admission" should {
     "bound delayed authority verification and retain the possibly applied credit" in {
       val path = Files.createTempDirectory("openai-authority-delay-").resolve("ledger.db")

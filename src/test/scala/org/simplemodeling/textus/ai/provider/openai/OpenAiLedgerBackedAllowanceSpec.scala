@@ -3,7 +3,8 @@ package org.simplemodeling.textus.ai.provider.openai
 import java.net.URI
 import java.nio.file.Files
 import java.time.{Instant, ZoneOffset}
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.atomic.AtomicLong
 import io.circe.Json
 import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.datastore.sql.SqlDataStore
@@ -57,6 +58,118 @@ final class OpenAiLedgerBackedAllowanceSpec extends AnyWordSpec with Matchers {
   private def deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
 
   "A host-owned OpenAI allocation" should {
+    "settle a trusted response before rejecting its application output" in fixture { ctx =>
+      val base = io.circe.parser.parse(allocation(true, false)).toOption.get
+      val sizing = base.hcursor.downField("sizing").focus.get.mapObject(_.add("overheadTokens", Json.fromLong(100)))
+      val first = request("application-rejected")
+      val second = request("after-rejection")
+      def total(r: AiTaskRequest): Long =
+        OpenAiBoundedRequest.body(r, config.model, 32).noSpaces.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong + 132L
+      val cutoff = total(second) + 2L
+      val gross = (cutoff * 100L + 89L) / 90L
+      val actualCutoff = gross * 90L / 100L
+      actualCutoff shouldBe cutoff
+      total(first) should be <= actualCutoff
+      (total(first) + total(second)) should be > actualCutoff
+      val daily = base.hcursor.downField("daily").focus.get.mapObject(_.add("limitTokens", Json.fromLong(gross)))
+      val json = base.mapObject(_.add("sizing", sizing).add("daily", daily).remove("credit"))
+      val authority = OpenAiLedgerBackedAllowance.create(config,
+        OpenAiLedgerBackedAllowance.parse(json.noSpaces, config).get, ctx, sizingVerifier = Some(fixtureVerifier))
+      val post = new AiTaskManagedPost {
+        override def isQualified = true
+        def post(body: Json, timeoutMillis: Long, maxResponseBytes: Int) = Right((200, Some("http-id"),
+          s"""{"id":"response-1","model":"${config.model}","usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"choices":[{"finish_reason":"stop","message":{"content":"not-json"}}]}"""))
+      }
+      val result = new OpenAiBoundedTaskInvoker(authority, post, 4096).invoke(first, authority.assess(first, deadline).get)
+      result match {
+        case AiTaskDispatch.Failed(reason, receipt) =>
+          reason shouldBe "Invalid output JSON"
+          receipt.usage shouldBe AiTaskUsage.Measured(2L, None)
+        case other => fail(s"Expected invalid output JSON failure, got $other")
+      }
+      authority.reserve(second, authority.assess(second, deadline).get, deadline).isRight shouldBe true
+    }
+
+    "retain reservations when dispatch or provider usage is uncertain or mismatched" in {
+      Vector("missing", "mismatch", "uncertain").foreach { scenario => fixture { ctx =>
+        val base = io.circe.parser.parse(allocation(true, false)).toOption.get
+        val sizing = base.hcursor.downField("sizing").focus.get.mapObject(_.add("overheadTokens", Json.fromLong(100)))
+        val first = request("uncertain-first")
+        val second = request("uncertain-next-")
+        def total(r: AiTaskRequest): Long =
+          OpenAiBoundedRequest.body(r, config.model, 32).noSpaces.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong + 132L
+        val gross = (total(first) * 100L + 89L) / 90L
+        val daily = base.hcursor.downField("daily").focus.get.mapObject(_.add("limitTokens", Json.fromLong(gross)))
+        val json = base.mapObject(_.add("sizing", sizing).add("daily", daily).remove("credit"))
+        val authority = OpenAiLedgerBackedAllowance.create(config,
+          OpenAiLedgerBackedAllowance.parse(json.noSpaces, config).get, ctx, sizingVerifier = Some(fixtureVerifier))
+        val post = new AiTaskManagedPost {
+          override def isQualified = true
+          def post(body: Json, timeoutMillis: Long, maxResponseBytes: Int) = {
+            if (scenario == "uncertain") Left("unknown dispatch")
+            else {
+              val model = if (scenario == "mismatch") "other-model" else config.model
+              val usage = if (scenario == "mismatch") ",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}" else ""
+              Right((200, Some("http-id"), s"""{"id":"response","model":"$model"$usage,"choices":[]}"""))
+            }
+          }
+        }
+        new OpenAiBoundedTaskInvoker(authority, post, 4096).invoke(first, authority.assess(first, deadline).get)
+        authority.reserve(second, authority.assess(second, deadline).get, deadline).isLeft shouldBe true
+      }}
+    }
+
+    "retain the reservation when a valid response arrives after deadline closure" in {
+      Vector(true, false).foreach { expire => fixture { ctx =>
+      val base = io.circe.parser.parse(allocation(true, false)).toOption.get
+      val sizing = base.hcursor.downField("sizing").focus.get.mapObject(_.add("overheadTokens", Json.fromLong(100)))
+      val first = request("deadline-first")
+      val second = request("deadline-next-")
+      def total(r: AiTaskRequest): Long =
+        OpenAiBoundedRequest.body(r, config.model, 32).noSpaces.getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong + 132L
+      val cutoff = total(second) + 2L
+      val gross = (cutoff * 100L + 89L) / 90L
+      (gross * 90L / 100L) shouldBe cutoff
+      total(first) should be <= cutoff
+      (total(first) + total(second)) should be > cutoff
+      val daily = base.hcursor.downField("daily").focus.get.mapObject(_.add("limitTokens", Json.fromLong(gross)))
+      val json = base.mapObject(_.add("sizing", sizing).add("daily", daily).remove("credit"))
+      val authority = OpenAiLedgerBackedAllowance.create(config,
+        OpenAiLedgerBackedAllowance.parse(json.noSpaces, config).get, ctx, sizingVerifier = Some(fixtureVerifier))
+      val entered = new CountDownLatch(1)
+      val release = new CountDownLatch(1)
+      val post = new AiTaskManagedPost {
+        override def isQualified = true
+        def post(body: Json, timeoutMillis: Long, maxResponseBytes: Int) = {
+          entered.countDown()
+          release.await()
+          Right((200, Some("http-id"),
+            s"""{"id":"late-response","model":"${config.model}","usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"choices":[]}"""))
+        }
+      }
+      val clock = new AtomicLong(System.nanoTime())
+      val taskDeadline = AiTaskDeadline.after(clock.get(), 10000L, () => clock.get())
+      val invoker = new OpenAiBoundedTaskInvoker(authority, post, 4096)
+      val candidate = authority.assess(first, deadline).get
+      val result = new java.util.concurrent.atomic.AtomicReference[AiTaskDispatch]()
+      val worker = new Thread(() => result.set(invoker.dispatchAfterPreflight(first, candidate, taskDeadline)))
+      worker.start()
+      try {
+        entered.await(10, TimeUnit.SECONDS) shouldBe true
+        if (expire) clock.addAndGet(TimeUnit.SECONDS.toNanos(11))
+        val closed = taskDeadline.close()
+        closed.nonEmpty shouldBe true
+        closed.get.usage shouldBe AiTaskUsage.Unknown
+      } finally {
+        release.countDown()
+        worker.join(10000)
+      }
+      worker.isAlive shouldBe false
+      if (expire) result.get().isInstanceOf[AiTaskDispatch.Uncertain] shouldBe true
+      authority.reserve(second, authority.assess(second, deadline).get, deadline).isLeft shouldBe true
+      }}
+    }
+
     "require explicit model and format scoped sizing and separate caps" in fixture { ctx =>
       val base = io.circe.parser.parse(allocation(true, false)).toOption.get
       def auth(j: Json) = OpenAiLedgerBackedAllowance.parse(j.noSpaces, config)
