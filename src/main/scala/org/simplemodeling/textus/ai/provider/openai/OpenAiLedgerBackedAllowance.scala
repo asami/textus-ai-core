@@ -10,6 +10,14 @@ import org.goldenport.cncf.entity.StandardEntityStore
 import org.simplemodeling.textus.ai.runtime.*
 import scala.util.Try
 
+/** Independently registered evidence authority for provider framing and token bounds.
+ * A verifier must validate all supplied values against its own evidence.
+ */
+trait OpenAiRequestSizingVerifier {
+  def verify(endpoint: String, model: String, format: String, tokensPerByte: Long,
+    overheadTokens: Long, provenance: String): Boolean
+}
+
 /** Immutable operator-provided evidence; no credential or observed balance establishes authority. */
 private[ai] object OpenAiLedgerBackedAllowance {
   private val DefaultDailyMarginPercent = 10
@@ -17,9 +25,11 @@ private[ai] object OpenAiLedgerBackedAllowance {
   final case class Window(from: Instant, until: Instant, provenance: String)
   final case class Daily(day: LocalDate, limit: Long, window: Window)
   final case class Credit(id: String, limit: Long, window: Window)
+  final case class Sizing(model: String, format: String, tokensPerByte: Long, overheadTokens: Long, provenance: String)
   final case class Allocation(organization: String, project: String, model: String, modelPool: String,
     inputLimit: Long, outputLimit: Int, fullCostMicros: Long, daily: Option[Daily],
-    credit: Option[Credit], dailyIneligible: Option[Window])
+    credit: Option[Credit], dailyIneligible: Option[Window], sizing: Option[Sizing],
+    reviewOutputLimit: Option[Int], repairOutputLimit: Option[Int])
 
   private val executor = new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
     new ArrayBlockingQueue[Runnable](64), (r: Runnable) => {
@@ -44,7 +54,7 @@ private[ai] object OpenAiLedgerBackedAllowance {
   def parse(raw: String, connection: OpenAiRuntimeConfig): Option[Allocation] = try {
     val j = parser.parse(raw).toOption.get
     val required = Set("organization", "project", "origin", "model", "modelPool", "inputTokenCeiling", "maxOutputTokens", "fullCostMicros")
-    if (!fields(j, required, Set("daily", "credit", "dailyIneligible"))) return None
+    if (!fields(j, required, Set("daily", "credit", "dailyIneligible", "sizing", "reviewMaxOutputTokens", "repairMaxOutputTokens"))) return None
     val org = string(j, "organization").get
     val project = string(j, "project").get
     val model = string(j, "model").get
@@ -72,7 +82,21 @@ private[ai] object OpenAiLedgerBackedAllowance {
     }
     val ineligible = j.hcursor.downField("dailyIneligible").focus.map(d => window(d, Set.empty).get)
     if (daily.isEmpty && (credit.isEmpty || ineligible.isEmpty)) return None
-    Some(Allocation(org, project, model, pool, input, output, quote, daily, credit, ineligible))
+    val sizing = j.hcursor.downField("sizing").focus.map { v =>
+      if (!fields(v, Set("model", "format", "tokensPerByte", "overheadTokens", "provenance"))) return None
+      val m = string(v, "model").get
+      val format = string(v, "format").get
+      if (m != model || format != "chat-completions-bounded-record-v1") return None
+      Sizing(m, format, long(v, "tokensPerByte").get, long(v, "overheadTokens").get,
+        string(v, "provenance").get)
+    }
+    def taskLimit(key: String): Option[Int] = j.hcursor.downField(key).focus.map { v =>
+      v.asNumber.flatMap(_.toInt).filter(n => n > 0 && n <= output).get
+    }
+    val review = taskLimit("reviewMaxOutputTokens")
+    val repair = taskLimit("repairMaxOutputTokens")
+    if (review.isDefined != repair.isDefined) return None
+    Some(Allocation(org, project, model, pool, input, output, quote, daily, credit, ineligible, sizing, review, repair))
   } catch { case scala.util.control.NonFatal(_) => None }
 
   def dailyMarginPercent(value: Option[String]): Option[Int] = value match {
@@ -82,9 +106,10 @@ private[ai] object OpenAiLedgerBackedAllowance {
   }
 
   def create(config: OpenAiRuntimeConfig, allocation: Allocation, context: ExecutionContext,
-      dailyMarginPercent: Int = DefaultDailyMarginPercent): OpenAiTaskAllowanceAuthority = {
+      dailyMarginPercent: Int = DefaultDailyMarginPercent,
+      sizingVerifier: Option[OpenAiRequestSizingVerifier] = None): OpenAiTaskAllowanceAuthority = {
     require(dailyMarginPercent >= 1 && dailyMarginPercent <= 99, "Invalid daily margin")
-    new OpenAiLedgerBackedAllowance(config, allocation, context, dailyMarginPercent)
+    new OpenAiLedgerBackedAllowance(config, allocation, context, dailyMarginPercent, sizingVerifier)
   }
 }
 
@@ -92,7 +117,8 @@ private[ai] final class OpenAiLedgerBackedAllowance(
   config: OpenAiRuntimeConfig,
   allocation: OpenAiLedgerBackedAllowance.Allocation,
   context: ExecutionContext,
-  dailyMarginPercent: Int
+  dailyMarginPercent: Int,
+  sizingVerifier: Option[OpenAiRequestSizingVerifier]
 ) extends OpenAiTaskAllowanceAuthority {
   import OpenAiLedgerBackedAllowance.*
   override val connection: OpenAiRuntimeConfig = config.copy(organization = Some(allocation.organization), project = Some(allocation.project))
@@ -124,6 +150,25 @@ private[ai] final class OpenAiLedgerBackedAllowance(
   private val ledger = new OpenAiTaskAllowanceLedger(new StandardEntityStore, dailyVerifier,
     OpenAiLedgerBackedAllowance.executor, creditVerifier = creditVerifier, dailyIneligibility = ineligibility)
 
+  // Configuration is a claim; an independent registered authority must verify it.
+  private def sized(r: AiTaskRequest): Option[(Int, Long, String)] = try {
+    val limit = r.kind match {
+      case "review" | "independent-review" => allocation.reviewOutputLimit
+      case "compiler-repair" => allocation.repairOutputLimit
+      case _ => None
+    }
+    for {
+      s <- allocation.sizing
+      n <- limit
+      verifier <- sizingVerifier
+      if verifier.verify(connection.endpoint.toString, s.model, s.format, s.tokensPerByte, s.overheadTokens, s.provenance)
+      body = OpenAiBoundedRequest.body(r, allocation.model, n).noSpaces
+      bytes = body.getBytes(StandardCharsets.UTF_8).length.toLong
+      bound = Math.addExact(Math.multiplyExact(bytes, s.tokensPerByte), s.overheadTokens)
+      if bound <= allocation.inputLimit
+    } yield (n, bound, body)
+  } catch { case scala.util.control.NonFatal(_) => None }
+
   override def assess(r: AiTaskRequest, deadlineNanos: Long): Option[AiTaskCandidate] = {
     val now = Instant.now()
     val end = dispatchEnd(now, deadlineNanos)
@@ -132,7 +177,7 @@ private[ai] final class OpenAiLedgerBackedAllowance(
     val credit = end.exists(e => allocation.credit.exists(c => covers(c.window, now, e) &&
       c.limit >= allocation.fullCostMicros) &&
       (daily || allocation.dailyIneligible.exists(covers(_, now, e))))
-    val eligible = (daily || credit) && r.requiredTools.isEmpty
+    val eligible = (daily || credit) && r.requiredTools.isEmpty && sized(r).nonEmpty
     Option.when(eligible)(AiTaskCandidate("openai", allocation.model, Set("structured-record"), Set.empty,
       Some(1L), 1L, r, Some(0L)))
   }
@@ -142,14 +187,14 @@ private[ai] final class OpenAiLedgerBackedAllowance(
     if (!assess(r, deadlineNanos).contains(candidate)) return Left("Allocation or request is unavailable")
     val now = Instant.now()
     val day = now.atZone(ZoneOffset.UTC).toLocalDate
-    val body = OpenAiBoundedRequest.body(r, allocation.model, allocation.outputLimit).noSpaces
+    val (outputLimit, inputBound, body) = sized(r).getOrElse(return Left("Verified request sizing unavailable"))
     val bound = Json.arr(Json.fromString(allocation.organization), Json.fromString(allocation.project),
       Json.fromString(connection.endpoint.toString), Json.fromString(r.input.reference),
       Json.fromString(r.input.provenance), Json.fromString(body)).noSpaces
     val digest = MessageDigest.getInstance("SHA-256").digest(bound.getBytes(StandardCharsets.UTF_8))
       .map(b => f"${b & 0xff}%02x").mkString
     val scope = OpenAiAllowanceScope(allocation.organization, allocation.modelPool, day)
-    val request = OpenAiAllowanceRequest(scope, r.id, digest, allocation.inputLimit, allocation.outputLimit.toLong)
+    val request = OpenAiAllowanceRequest(scope, r.id, digest, inputBound, outputLimit.toLong)
     val end = dispatchEnd(now, deadlineNanos).getOrElse(return Left("Dispatch window unavailable"))
     val daily = allocation.daily.filter(d => d.day == day && covers(d.window, now, end))
       .map(d => OpenAiAllowanceGrant(request, d.limit, d.window.until, d.window.provenance))
@@ -165,7 +210,7 @@ private[ai] final class OpenAiLedgerBackedAllowance(
       val boundary = if (daily.nonEmpty) allocation.daily.get.window.until else allocation.dailyIneligible.get.until
       val midnight = day.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant
       val scopeEnd = if (until.isBefore(boundary)) until else boundary
-      AiTaskAllowance(r, candidate, allocation.outputLimit, 0L, Some(basis),
+      AiTaskAllowance(r, candidate, outputLimit, 0L, Some(basis),
         Some(if (scopeEnd.isBefore(midnight)) scopeEnd else midnight))
     }
   }

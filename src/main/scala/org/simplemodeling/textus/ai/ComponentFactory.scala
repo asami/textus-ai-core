@@ -19,7 +19,7 @@ import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeConfig, ClaudeCod
 import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, AntigravityExecutionBinding, AntigravityExecutionProfile, AntigravityRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.anthropic.AnthropicConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
-import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiConfig, OpenAiLedgerBackedAllowance, OpenAiTaskAllowanceAuthority}
+import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiConfig, OpenAiLedgerBackedAllowance, OpenAiRequestSizingVerifier, OpenAiTaskAllowanceAuthority}
 import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiBoundedRecordBinding, AiBoundedRecordLimits, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, AiRuntimeProfileCatalog, TextusAiRunnerProvider}
 import org.simplemodeling.textus.airuntime.AiRuntimeComponent
 
@@ -370,7 +370,7 @@ object ComponentFactory:
     } yield (config, evidence, margin)
     val openai = Option.when(enabled("openai"))(new OpenAiBoundedRecordBinding(
       context => component.port.get[OpenAiTaskAllowanceAuthority].orElse(
-        allocation.map((config, evidence, margin) => OpenAiLedgerBackedAllowance.create(config, evidence, context, margin))),
+        allocation.map((config, evidence, margin) => OpenAiLedgerBackedAllowance.create(config, evidence, context, margin, component.port.get[OpenAiRequestSizingVerifier]))),
       AiBoundedRecordLimits(120000L, 0L, 65536)
     ))
     AiBoundedRecordBinding.combine(Vector(ollama, openai).flatten)

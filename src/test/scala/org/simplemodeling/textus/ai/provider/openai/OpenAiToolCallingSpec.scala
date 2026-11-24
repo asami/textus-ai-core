@@ -93,7 +93,9 @@ final class OpenAiToolCallingSpec extends AnyWordSpec with Matchers with GivenWh
         val choice = Json.obj("message" -> Json.obj("content" -> Json.fromString("""{"answer":"ok"}""")))
         val response = Json.obj(
           "model" -> Json.fromString("exact-model"),
-          "usage" -> Json.obj("total_tokens" -> Json.fromLong(7L)),
+          "usage" -> Json.obj("total_tokens" -> Json.fromLong(7L),
+            "completion_tokens" -> Json.fromLong(6L),
+            "completion_tokens_details" -> Json.obj("reasoning_tokens" -> Json.fromLong(5L))),
           "choices" -> Json.arr(choice.mapObject(fields =>
             reason.fold(fields)(value => fields.add("finish_reason", Json.fromString(value)))))
         )
