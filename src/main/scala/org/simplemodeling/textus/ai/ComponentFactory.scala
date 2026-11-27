@@ -19,7 +19,7 @@ import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeConfig, ClaudeCod
 import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, AntigravityExecutionBinding, AntigravityExecutionProfile, AntigravityRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.anthropic.AnthropicConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
-import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiConfig, OpenAiGroupAllocationVerifier, OpenAiLedgerBackedAllowance, OpenAiRequestSizingVerifier, OpenAiTaskAllowanceAuthority}
+import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiConfig, OpenAiGroupAllocationVerifier, OpenAiHostEvidenceVerifier, OpenAiLedgerBackedAllowance, OpenAiRequestSizingVerifier, OpenAiTaskAllowanceAuthority}
 import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiBoundedRecordBinding, AiBoundedRecordLimits, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, AiRuntimeProfileCatalog, TextusAiRunnerProvider}
 import org.simplemodeling.textus.airuntime.AiRuntimeComponent
 
@@ -349,6 +349,8 @@ object ComponentFactory:
       .orElse(operationtoolport)
       .orElse(Component.Port.input(registrations))
       .orElse(withchat.port)
+      .orElse(configuration.flatMap(OpenAiHostEvidenceVerifier.fromConfiguration)
+        .map(Component.Port.input(_)).getOrElse(Component.Port.empty))
       .orElse(_bounded_record_port(withchat, configuration, gemmaconfig))
     )
 
