@@ -1775,6 +1775,14 @@ private[runtime] object AiBoundedRecordProtocol {
             _failure("ai.task.uncertain", "The actual bounded producer did not match its selection", receipt)
           case _ => Consequence.operationIllegal("ai.task.uncertain", "Unexpected bounded task completion")
         }
+        case AiTaskResult.ProviderDeclined(_, attempt) if (attempt.dispatch match {
+            case AiTaskDispatch.Declined(_, receipt) => receipt.preDispatchExhaustions.nonEmpty
+            case _ => false
+          }) => attempt.dispatch match {
+            case AiTaskDispatch.Declined(_, receipt) =>
+              _failure("ai.task.declined", "The bounded record task was declined before dispatch", receipt)
+            case _ => Consequence.operationIllegal("ai.task.declined", "The bounded record task was declined before dispatch")
+          }
         case AiTaskResult.Declined(_, _) | AiTaskResult.ProviderDeclined(_, _) =>
           Consequence.operationIllegal("ai.task.declined", "The bounded record task was declined before dispatch")
         case AiTaskResult.Failed(_, attempt) => attempt.dispatch match {
@@ -1789,6 +1797,10 @@ private[runtime] object AiBoundedRecordProtocol {
       } yield response } match {
         case Right(result) => result
         case Left(Some(receipt)) => _failure("ai.task.uncertain", "Bounded task deadline expired after possible dispatch", receipt)
+        case Left(None) if deadline.retainedExhaustions.nonEmpty =>
+          _failure("ai.task.declined", "Bounded task ended before dispatch",
+            AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
+              .copy(preDispatchExhaustions = deadline.retainedExhaustions))
         case Left(None) => Consequence.operationIllegal("ai.task.declined", "Bounded task ended before dispatch")
       }
     }
@@ -1813,6 +1825,16 @@ private[runtime] object AiBoundedRecordProtocol {
     }
     usage ++ receipt.reservationBasis.map("ai.usage.reservation_basis" -> _) ++ receipt.actualProvider.map("ai.execution.provider" -> _) ++
       receipt.actualModel.map(AiExecutionFacts.MODEL -> _) ++
+      receipt.modelGroup.map("ai.usage.model_group" -> _) ++
+      receipt.allocationProvenance.map("ai.usage.allocation_provenance" -> _) ++
+      receipt.externalUsageProvenance.map("ai.usage.external_provenance" -> _) ++
+      receipt.externalUsageTokens.map(value => "ai.usage.external_tokens_bound" -> value.toString) ++
+      Option.when(receipt.preDispatchExhaustions.nonEmpty)("ai.usage.pre_dispatch_exhaustions" ->
+        Json.fromValues(receipt.preDispatchExhaustions.map(e => Json.obj(
+          "provider" -> Json.fromString(e.provider), "model" -> Json.fromString(e.model),
+          "modelGroup" -> Json.fromString(e.modelGroup), "allocationProvenance" -> Json.fromString(e.allocationProvenance),
+          "externalUsageProvenance" -> Json.fromString(e.externalUsageProvenance),
+          "externalUsageTokens" -> Json.fromLong(e.externalUsageTokens), "providerInvoked" -> Json.False))).noSpaces) ++
       receipt.providerRequestId.map("ai.provider.http.request-id" -> _) ++
       receipt.trace.map("ai.task.trace" -> _)
   }
@@ -1854,12 +1876,15 @@ object AiTaskRunner {
     val ranked = eligible.sortBy { candidate =>
       val included = candidate.verifiedIncludedUnits.exists(_ >= candidate.requiredUnits)
       (if (request.preferIncludedQuota && included) 0 else 1,
-        if (preferredProvider.contains(candidate.provider)) 0 else 1, candidate.provider, candidate.model)
+        if (preferredProvider.contains(candidate.provider)) 0 else 1, candidate.provider,
+        invoker.candidatePriority(request, candidate), candidate.model)
     }
     val ambiguous = candidates.groupBy(candidate => (candidate.provider, candidate.model)).exists(_._2.size > 1)
     if (ambiguous)
       AiTaskResult.Declined(request, "Ambiguous provider and model candidate")
-    else ranked.headOption match {
+    else {
+      def runCandidate(remaining: Vector[AiTaskCandidate], index: Int,
+          previousExhaustions: Vector[AiTaskPreDispatchExhaustion]): AiTaskResult = remaining.headOption match {
       case None => AiTaskResult.Declined(request, "No candidate has verified eligibility and budget")
       case Some(candidate) =>
         val capability = try invoker.preflight(request, candidate) catch {
@@ -1874,8 +1899,13 @@ object AiTaskRunner {
             c.deadlineMillis > 0 && c.deadlineMillis <= request.maxLatencyMillis &&
             c.exactModel && c.singleAttempt && c.endToEndDeadline
         }
-        if (!admitted)
-          return AiTaskResult.Declined(request, capability.left.toOption.getOrElse("Invoker cannot guarantee request bounds"))
+        if (!admitted) {
+          val reason = capability.left.toOption.getOrElse("Invoker cannot guarantee request bounds")
+          if (previousExhaustions.isEmpty) return AiTaskResult.Declined(request, reason)
+          val receipt = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
+            .copy(preDispatchExhaustions = previousExhaustions)
+          return AiTaskResult.ProviderDeclined(request, AiTaskAttempt(index, candidate, AiTaskDispatch.Declined(reason, receipt)))
+        }
         val dispatch = try deadline match {
           case Some(d) => invoker.dispatchAfterPreflight(request, candidate, d)
           case None => invoker.invoke(request, candidate)
@@ -1883,13 +1913,31 @@ object AiTaskRunner {
           case scala.util.control.NonFatal(_) =>
             AiTaskDispatch.Uncertain("Invoker failed without a dispatch disposition", AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown))
         }
-        val attempt = AiTaskAttempt(1, candidate, dispatch)
+        def withHistory(receipt: AiTaskReceipt): AiTaskReceipt =
+          if (previousExhaustions.isEmpty) receipt else receipt.copy(preDispatchExhaustions = previousExhaustions)
+        val retained = dispatch match {
+          case AiTaskDispatch.Completed(output, receipt) => AiTaskDispatch.Completed(output, withHistory(receipt))
+          case AiTaskDispatch.Declined(reason, receipt) => AiTaskDispatch.Declined(reason, withHistory(receipt))
+          case AiTaskDispatch.Failed(reason, receipt) => AiTaskDispatch.Failed(reason, withHistory(receipt))
+          case AiTaskDispatch.Uncertain(reason, receipt) => AiTaskDispatch.Uncertain(reason, withHistory(receipt))
+        }
+        val attempt = AiTaskAttempt(index, candidate, retained)
         dispatch match {
           case AiTaskDispatch.Completed(_, _) => AiTaskResult.Completed(request, attempt)
           case AiTaskDispatch.Uncertain(_, _) => AiTaskResult.Uncertain(request, attempt)
-          case AiTaskDispatch.Declined(_, _) => AiTaskResult.ProviderDeclined(request, attempt)
+          case AiTaskDispatch.Declined(_, _) =>
+            val next = remaining.drop(1).headOption
+            val evidence = next.flatMap(n => invoker.takeExhaustionAfterDecline(request, candidate, n))
+            evidence match {
+              case Some(value) =>
+                deadline.foreach(_.recordExhaustion(value))
+                runCandidate(remaining.tail, index, previousExhaustions :+ value)
+              case None => AiTaskResult.ProviderDeclined(request, attempt)
+            }
           case AiTaskDispatch.Failed(_, _) => AiTaskResult.Failed(request, attempt)
         }
+      }
+      runCandidate(remaining = ranked, index = 1, previousExhaustions = Vector.empty)
     }
   }
 }

@@ -58,6 +58,82 @@ final class OpenAiLedgerBackedAllowanceSpec extends AnyWordSpec with Matchers {
   private def deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
 
   "A host-owned OpenAI allocation" should {
+    "reserve and invoke only the second group after a confirmed first-group exhaustion" in fixture { ctx =>
+      val base = OpenAiLedgerBackedAllowance.parse(allocation(true, false), config).get
+      val sizing = base.sizing.get.copy(overheadTokens = 100)
+      val first = base.copy(model = "gpt-5.6-sol", modelPool = "openai-daily-group-1",
+        credit = None, sizing = Some(sizing.copy(model = "gpt-5.6-sol")))
+      val second = base.copy(credit = None, sizing = Some(sizing))
+      val groups = Vector(OpenAiLedgerBackedAllowance.Group(first, first.daily.get.limit, "external-1"),
+        OpenAiLedgerBackedAllowance.Group(second, 0L, "external-2"))
+      val verifier = new OpenAiGroupAllocationVerifier {
+        def verify(organization: String, project: String, model: String, modelPool: String,
+            day: java.time.LocalDate, limitTokens: Long, externalTokens: Long, validFrom: Instant,
+            expiresAt: Instant, allocationProvenance: String, externalProvenance: String,
+            inputTokenCeiling: Long, maxOutputTokens: Int): Boolean = true
+      }
+      val sizeVerifier = new OpenAiRequestSizingVerifier {
+        def verify(endpoint: String, model: String, format: String, tokensPerByte: Long,
+            overheadTokens: Long, provenance: String): Boolean = Set(first.model, second.model)(model) &&
+          tokensPerByte == 1 && overheadTokens == 100 && provenance == "synthetic-fixture-only"
+      }
+      val r = request("two-group-invocation")
+      val members = OpenAiLedgerBackedAllowance.routeMembers(groups, r, ctx, verifier)
+      val authorities = members.map { m =>
+        new OpenAiLedgerBackedAllowance(config.copy(model = m.group.allocation.model), m.group.allocation,
+          ctx, 10, Some(sizeVerifier), Some(m))
+      }
+      var posted = Vector.empty[String]
+      val post = new AiTaskManagedPost {
+        override def isQualified = true
+        def post(body: Json, timeoutMillis: Long, maxResponseBytes: Int) = {
+          posted :+= body.hcursor.get[String]("model").toOption.get
+          Left("offline uncertainty")
+        }
+      }
+      val firstCandidate = authorities(0).assess(r, deadline).get
+      val secondCandidate = authorities(1).assess(r, deadline).get
+      new OpenAiBoundedTaskInvoker(authorities(0), post, 4096).invoke(r, firstCandidate)
+        .isInstanceOf[AiTaskDispatch.Declined] shouldBe true
+      members(0).takeExhausted() shouldBe true
+      new OpenAiBoundedTaskInvoker(authorities(1), post, 4096).invoke(r, secondCandidate)
+        .isInstanceOf[AiTaskDispatch.Uncertain] shouldBe true
+      posted shouldBe Vector("gpt-5.6-terra")
+      authorities(1).reserve(r, secondCandidate, deadline).isLeft shouldBe true
+    }
+
+    "require independent evidence for both exact daily groups and external usage" in {
+      val base = io.circe.parser.parse(allocation(true, false)).toOption.get
+      def group(model: String, pool: String): Json = {
+        val daily = base.hcursor.downField("daily").focus.get.mapObject(_.add("externalTokens", Json.fromLong(17))
+          .add("externalProvenance", Json.fromString("external-fixture")))
+        val sizing = base.hcursor.downField("sizing").focus.get.mapObject(_.add("model", Json.fromString(model)))
+        base.mapObject(_.add("model", Json.fromString(model)).add("modelPool", Json.fromString(pool))
+          .add("daily", daily).add("sizing", sizing).remove("credit"))
+      }
+      val values = Vector(group("gpt-5.6-sol", "openai-daily-group-1"),
+        group("gpt-5.6-terra", "openai-daily-group-2"))
+      val verifier = new OpenAiGroupAllocationVerifier {
+        def verify(organization: String, project: String, model: String, modelPool: String,
+            day: java.time.LocalDate, limitTokens: Long, externalTokens: Long, validFrom: Instant,
+            expiresAt: Instant, allocationProvenance: String, externalProvenance: String,
+            inputTokenCeiling: Long, maxOutputTokens: Int): Boolean =
+          organization == "org-fixture" && project == "proj-fixture" && externalTokens == 17 &&
+            externalProvenance == "external-fixture" && allocationProvenance == "operator-evidence"
+      }
+      def parse(xs: Vector[Json]) = OpenAiLedgerBackedAllowance.parseGroups(Json.fromValues(xs).noSpaces, config, verifier)
+      parse(values).map(_.map(_.allocation.model).toSet) shouldBe Some(Set("gpt-5.6-sol", "gpt-5.6-terra"))
+      parse(Vector(values.head, values.head)) shouldBe None
+      val wrongPool = values.head.mapObject(_.add("modelPool", Json.fromString("openai-daily-group-2")))
+      parse(Vector(wrongPool, values(1))) shouldBe None
+      val forged = values.head.mapObject(_.add("daily", values.head.hcursor.downField("daily").focus.get
+        .mapObject(_.add("externalTokens", Json.fromLong(0)))))
+      parse(Vector(forged, values(1))) shouldBe None
+      val paid = values.head.mapObject(_.add("credit", base.hcursor.downField("credit").focus.get))
+      parse(Vector(paid, values(1))) shouldBe None
+      OpenAiLedgerBackedAllowance.parseGroups(Json.fromValues(values).noSpaces, config, null) shouldBe None
+    }
+
     "settle a trusted response before rejecting its application output" in fixture { ctx =>
       val base = io.circe.parser.parse(allocation(true, false)).toOption.get
       val sizing = base.hcursor.downField("sizing").focus.get.mapObject(_.add("overheadTokens", Json.fromLong(100)))

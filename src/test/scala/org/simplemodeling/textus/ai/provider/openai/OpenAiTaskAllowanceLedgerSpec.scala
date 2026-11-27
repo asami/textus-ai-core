@@ -125,6 +125,103 @@ final class OpenAiTaskAllowanceLedgerSpec extends AnyWordSpec with Matchers {
   }
 
   "Daily-first admission" should {
+    "handoff only a confirmed exhaustion within one permanently claimed route" in fixture { (ledger, ctx) =>
+      given ExecutionContext = ctx
+      val group1 = scope.copy(modelPool = "group-1")
+      val group2 = scope.copy(modelPool = "group-2")
+      val fill = request("route-fill").copy(scope = group1)
+      ledger.reserve(fill, Some(grant(fill)), deadline).isRight shouldBe true
+      val first = request("route-request").copy(scope = group1)
+      val second = first.copy(scope = group2, requestDigest = "b" * 64)
+      val route = ledger.dailyRoute(scope.organization, first.requestId)
+      route.reserve(first, grant(first), 0L, 10, deadline) shouldBe OpenAiDailyRouteResult.KnownExhausted
+      route.reserve(second, grant(second, 20L), 0L, 10, deadline) match {
+        case OpenAiDailyRouteResult.Reserved(r) => r.request shouldBe second
+        case other => fail(s"Expected the second group reservation, got $other")
+      }
+      route.reserve(second, grant(second, 20L), 0L, 10, deadline) shouldBe OpenAiDailyRouteResult.Denied
+      val otherOwner = ledger.dailyRoute(scope.organization, first.requestId)
+      otherOwner.reserve(second, grant(second, 20L), 0L, 10, deadline) shouldBe OpenAiDailyRouteResult.Denied
+    }
+
+    "account for external use and seal a route after unverifiable evidence" in fixture { (ledger, ctx) =>
+      given ExecutionContext = ctx
+      val first = request("external-route")
+      val second = first.copy(scope = scope.copy(modelPool = "other"))
+      val route = ledger.dailyRoute(scope.organization, first.requestId)
+      route.reserve(first, grant(first, 20L), 9L, 10, deadline) shouldBe OpenAiDailyRouteResult.KnownExhausted
+      val untrusted = grant(second, 20L).copy(allocationProvenance = "untrusted")
+      route.reserve(second, untrusted, 0L, 10, deadline) shouldBe OpenAiDailyRouteResult.Denied
+      route.reserve(second, grant(second, 20L), 0L, 10, deadline) shouldBe OpenAiDailyRouteResult.Denied
+    }
+
+    "allow at most one concurrent owner of the same logical request" in fixture { (ledger, ctx) =>
+      val gate = new CountDownLatch(1)
+      val callers = Executors.newFixedThreadPool(2)
+      try {
+        def call() = callers.submit(new Callable[OpenAiDailyRouteResult] {
+          def call(): OpenAiDailyRouteResult = {
+            given ExecutionContext = ctx
+            val first = request("concurrent-route")
+            val next = first.copy(scope = scope.copy(modelPool = "other"))
+            val route = ledger.dailyRoute(scope.organization, first.requestId)
+            gate.await()
+            route.reserve(first, grant(first, 20L), 20L, 10, deadline) match {
+              case OpenAiDailyRouteResult.KnownExhausted => route.reserve(next, grant(next, 20L), 0L, 10, deadline)
+              case other => other
+            }
+          }
+        })
+        val a = call()
+        val b = call()
+        gate.countDown()
+        val results = Vector(a.get(15, TimeUnit.SECONDS), b.get(15, TimeUnit.SECONDS))
+        results.count { case OpenAiDailyRouteResult.Reserved(_) => true; case _ => false } shouldBe 1
+      } finally callers.shutdownNow()
+    }
+
+    "keep the route claim after restart and reject a stale UTC day" in {
+      val path = Files.createTempDirectory("openai-route-restart-").resolve("ledger.db")
+      val provider = SqlDataStore.sqlite(path.toString)
+      val ctx = ExecutionContext.test()
+      ctx.dataStoreSpace.useDataStore(provider)
+      val executor = Executors.newFixedThreadPool(2)
+      val clock = new AtomicReference[Instant](instant)
+      try {
+        given ExecutionContext = ctx
+        val first = request("restart-route")
+        val ledger = new OpenAiTaskAllowanceLedger(new StandardEntityStore, trusted, executor, () => clock.get())
+        val route = ledger.dailyRoute(scope.organization, first.requestId)
+        route.reserve(first, grant(first, 20L), 20L, 10, deadline) shouldBe OpenAiDailyRouteResult.KnownExhausted
+        val restarted = new OpenAiTaskAllowanceLedger(new StandardEntityStore, trusted, executor, () => clock.get())
+        val other = first.copy(scope = scope.copy(modelPool = "other"))
+        restarted.dailyRoute(scope.organization, first.requestId)
+          .reserve(other, grant(other, 20L), 0L, 10, deadline) shouldBe OpenAiDailyRouteResult.Denied
+        clock.set(instant.plusSeconds(86400))
+        route.reserve(other, grant(other, 20L), 0L, 10, deadline) shouldBe OpenAiDailyRouteResult.Denied
+      } finally { executor.shutdown(); executor.awaitTermination(10, TimeUnit.SECONDS); provider.closeC() }
+    }
+
+    "keep group capacity separate while retaining one organization-wide request claim" in fixture { (ledger, ctx) =>
+      given ExecutionContext = ctx
+      val first = request("group-shared-id").copy(scope = scope.copy(modelPool = "group-1"))
+      val duplicate = first.copy(scope = scope.copy(modelPool = "group-2"))
+      val other = request("group-other-id").copy(scope = duplicate.scope)
+      ledger.reserveDailyFirst(first, Some(grant(first)), None, deadline).isRight shouldBe true
+      ledger.reserveDailyFirst(duplicate, Some(grant(duplicate)), None, deadline).isLeft shouldBe true
+      ledger.reserveDailyFirst(other, Some(grant(other)), None, deadline).isRight shouldBe true
+    }
+
+    "retain the global claim after a pre-dispatch capacity refusal" in fixture { (ledger, ctx) =>
+      given ExecutionContext = ctx
+      val prior = request("fill-group").copy(scope = scope.copy(modelPool = "group-1"))
+      val refused = request("exhausted-claim").copy(scope = prior.scope)
+      val alternate = refused.copy(scope = scope.copy(modelPool = "group-2"))
+      ledger.reserveDailyFirst(prior, Some(grant(prior)), None, deadline).isRight shouldBe true
+      ledger.reserveDailyFirst(refused, Some(grant(refused)), None, deadline).isLeft shouldBe true
+      ledger.reserveDailyFirst(alternate, Some(grant(alternate)), None, deadline).isLeft shouldBe true
+    }
+
     "bound delayed authority verification and retain the possibly applied credit" in {
       val path = Files.createTempDirectory("openai-authority-delay-").resolve("ledger.db")
       val provider = SqlDataStore.sqlite(path.toString)

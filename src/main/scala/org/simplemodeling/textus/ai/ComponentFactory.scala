@@ -19,7 +19,7 @@ import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeConfig, ClaudeCod
 import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, AntigravityExecutionBinding, AntigravityExecutionProfile, AntigravityRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.anthropic.AnthropicConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
-import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiConfig, OpenAiLedgerBackedAllowance, OpenAiRequestSizingVerifier, OpenAiTaskAllowanceAuthority}
+import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiConfig, OpenAiGroupAllocationVerifier, OpenAiLedgerBackedAllowance, OpenAiRequestSizingVerifier, OpenAiTaskAllowanceAuthority}
 import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiBoundedRecordBinding, AiBoundedRecordLimits, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, AiRuntimeProfileCatalog, TextusAiRunnerProvider}
 import org.simplemodeling.textus.airuntime.AiRuntimeComponent
 
@@ -368,10 +368,29 @@ object ComponentFactory:
       margin <- OpenAiLedgerBackedAllowance.dailyMarginPercent(
         configuration.flatMap(RuntimeConfig.getString(_, "textus.ai.bounded-task.openai-daily-margin-percent")))
     } yield (config, evidence, margin)
+    val groupKey = "textus.ai.bounded-task.openai-groups"
+    def declared(values: Map[String, ConfigurationValue], parts: List[String]): Boolean =
+      values.contains(parts.mkString(".")) || values.exists {
+        case (key, ConfigurationValue.ObjectValue(children)) =>
+          val prefix = key.split("\\.").toList
+          parts.startsWith(prefix) && parts.size > prefix.size && declared(children, parts.drop(prefix.size))
+        case _ => false
+      }
+    val groupMode = configuration.exists(c => declared(c.configuration.values, groupKey.split("\\.").toList))
+    val grouped = Option.when(groupMode) { () =>
+      for {
+        raw <- configuration.flatMap(RuntimeConfig.getString(_, groupKey))
+        config <- configuration.flatMap(OpenAiConfig.fromConfiguration)
+        verifier <- component.port.get[OpenAiGroupAllocationVerifier]
+        evidence <- OpenAiLedgerBackedAllowance.parseGroups(raw, config, verifier)
+        margin <- OpenAiLedgerBackedAllowance.dailyMarginPercent(
+          configuration.flatMap(RuntimeConfig.getString(_, "textus.ai.bounded-task.openai-daily-margin-percent")))
+      } yield (config, evidence, margin, verifier, component.port.get[OpenAiRequestSizingVerifier])
+    }
     val openai = Option.when(enabled("openai"))(new OpenAiBoundedRecordBinding(
       context => component.port.get[OpenAiTaskAllowanceAuthority].orElse(
         allocation.map((config, evidence, margin) => OpenAiLedgerBackedAllowance.create(config, evidence, context, margin, component.port.get[OpenAiRequestSizingVerifier]))),
-      AiBoundedRecordLimits(120000L, 0L, 65536)
+      AiBoundedRecordLimits(120000L, 0L, 65536), grouped
     ))
     AiBoundedRecordBinding.combine(Vector(ollama, openai).flatten)
       .map(Component.Port.input(_)).getOrElse(Component.Port.empty)

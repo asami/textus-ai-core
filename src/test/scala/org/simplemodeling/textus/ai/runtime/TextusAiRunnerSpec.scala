@@ -39,7 +39,7 @@ import org.simplemodeling.textus.ai.provider.anthropic.{AnthropicConfig, Anthrop
 import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeGenerateService, ClaudeCodeRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaOllamaGenerateService, GemmaRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.google.{GoogleConfig, GoogleGenerateService, GoogleRuntimeConfig}
-import org.simplemodeling.textus.ai.provider.openai.{OpenAiGenerateService, OpenAiRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiGenerateService, OpenAiRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
@@ -56,6 +56,98 @@ final class TextusAiRunnerSpec
   with GivenWhenThen {
 
   "TextusAiRunner" should {
+    "attribute only a started daily reservation to the selected group on deadline" in {
+      val evidence = AiTaskGroupEvidence("group-2", "allocation", "external", 42L)
+      val before = AiTaskDeadline.after(System.nanoTime(), 10000L)
+      before.selectGroup(evidence)
+      before.close() shouldBe None
+      val dispatched = AiTaskDeadline.after(System.nanoTime(), 10000L)
+      dispatched.selectGroup(evidence)
+      val exhaustion = AiTaskPreDispatchExhaustion("openai", "gpt-5.6-sol", "group-1", "a", "e", 4L)
+      dispatched.recordExhaustion(exhaustion)
+      val initial = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown,
+        Some("verified-daily-reservation"))
+      dispatched.beginDispatch(initial) shouldBe true
+      val raw = initial.copy(actualProvider = Some("openai"))
+      dispatched.observeReceipt(raw)
+      val receipt = dispatched.closeForReporting().value
+      (dispatched.close().value eq raw) shouldBe true
+      receipt.modelGroup shouldBe Some("group-2")
+      receipt.allocationProvenance shouldBe Some("allocation")
+      receipt.externalUsageTokens shouldBe Some(42L)
+      receipt.actualProvider shouldBe Some("openai")
+      receipt.preDispatchExhaustions shouldBe Vector(exhaustion)
+      val copied = receipt.copy(receipt.actualProvider, receipt.actualModel, receipt.providerRequestId,
+        receipt.trace, receipt.usage, receipt.reservationBasis)
+      copied.preDispatchExhaustions shouldBe Vector(exhaustion)
+      new AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown, None).preDispatchExhaustions shouldBe empty
+      AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown, None).preDispatchExhaustions shouldBe empty
+    }
+
+    "try a second group only after a typed pre-dispatch exhaustion" in {
+      val request = AiTaskRequest("route", "review", AiTaskPackage("input", "origin", "body"),
+        "{}", Set("structured-record"), Set.empty, "standard", 10000L, 0L, true, false)
+      val first = AiTaskCandidate("openai", "gpt-5.6-terra", Set("structured-record"), Set.empty,
+        Some(1L), 1L, request, Some(0L))
+      val second = first.copy(model = "gpt-5.6-sol")
+      val receipt = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
+      def run(initial: AiTaskDispatch, typed: Boolean,
+          secondResult: AiTaskDispatch = AiTaskDispatch.Completed(Record.dataAuto("ok" -> true), receipt))
+          : (AiTaskResult, Vector[String]) = {
+        var calls = Vector.empty[String]
+        val invoker = new AiTaskInvoker {
+          override private[ai] def candidatePriority(r: AiTaskRequest, c: AiTaskCandidate): Int =
+            OpenAiBoundedRecordBinding.groupPriority(r.kind,
+              if (c == first) "openai-daily-group-2" else "openai-daily-group-1")
+          def preflight(r: AiTaskRequest, c: AiTaskCandidate) = Right(AiTaskInvocationCapability(
+            r, c, r.input.content.length, r.maxOutputCharacters, 0L, r.maxLatencyMillis, true, true, true))
+          def invoke(r: AiTaskRequest, c: AiTaskCandidate): AiTaskDispatch = {
+            calls :+= c.model
+            if (c == first) initial else secondResult
+          }
+          override private[ai] def takeExhaustionAfterDecline(r: AiTaskRequest, previous: AiTaskCandidate,
+              next: AiTaskCandidate): Option[AiTaskPreDispatchExhaustion] =
+            Option.when(typed && r == request && previous == first && next == second)(
+              AiTaskPreDispatchExhaustion("openai", first.model, "openai-daily-group-2", "allocation", "external", 7L))
+        }
+        val result = AiTaskRunner.run(request, Vector(second, first), invoker)
+        (result, calls)
+      }
+      val exhausted = run(AiTaskDispatch.Declined("fixture", receipt), true)
+      exhausted._1.isInstanceOf[AiTaskResult.Completed] shouldBe true
+      exhausted._2 shouldBe Vector(first.model, second.model)
+      exhausted._1 match {
+        case AiTaskResult.Completed(_, attempt) => attempt.dispatch match {
+          case AiTaskDispatch.Completed(_, evidence) =>
+            attempt.index shouldBe 1
+            evidence.preDispatchExhaustions shouldBe Vector(AiTaskPreDispatchExhaustion(
+              "openai", first.model, "openai-daily-group-2", "allocation", "external", 7L))
+          case other => fail(s"Expected completion, got $other")
+        }
+        case other => fail(s"Expected completion, got $other")
+      }
+      run(AiTaskDispatch.Declined("exhausted", receipt), false)._2 shouldBe Vector(first.model)
+      run(AiTaskDispatch.Uncertain("uncertain", receipt), true)._2 shouldBe Vector(first.model)
+      run(AiTaskDispatch.Failed("failed", receipt), true)._2 shouldBe Vector(first.model)
+      Vector(AiTaskDispatch.Declined("second-declined", receipt),
+        AiTaskDispatch.Failed("second-failed", receipt), AiTaskDispatch.Uncertain("second-uncertain", receipt)).foreach { secondResult =>
+        val result = run(AiTaskDispatch.Declined("first-exhausted", receipt), true, secondResult)._1
+        val attempt = result match {
+          case AiTaskResult.ProviderDeclined(_, a) => a
+          case AiTaskResult.Failed(_, a) => a
+          case AiTaskResult.Uncertain(_, a) => a
+          case other => fail(s"Unexpected result $other")
+        }
+        val actual = attempt.dispatch match {
+          case AiTaskDispatch.Declined(_, r) => r
+          case AiTaskDispatch.Failed(_, r) => r
+          case AiTaskDispatch.Uncertain(_, r) => r
+          case other => fail(s"Unexpected dispatch $other")
+        }
+        actual.preDispatchExhaustions.map(_.model) shouldBe Vector(first.model)
+      }
+    }
+
     "runtime binding and selection" which {
     "use the host bounded task binding for a versioned record request" in {
       Given("the existing AI runner SPI with a typed bounded task binding")
@@ -122,6 +214,8 @@ final class TextusAiRunnerSpec
       val component = _component()
       var receipt = AiTaskReceipt(Some("fixture"), Some("observed-model"), Some("request-1"), None,
         AiTaskUsage.Measured(9, None), Some("included-allocation"))
+        .copy(preDispatchExhaustions = Vector(AiTaskPreDispatchExhaustion(
+          "openai", "gpt-5.6-sol", "group-1", "allocation", "external", 5L)))
       var uncertain = false
       val binding = new AiBoundedRecordBinding {
         val limits = AiBoundedRecordLimits(5000, 0, 1024)
@@ -159,6 +253,9 @@ final class TextusAiRunnerSpec
       facts.get("ai.usage.total_tokens_source") shouldBe Some("observed")
       facts.get("ai.usage.reservation_basis") shouldBe Some("included-allocation")
       facts.get("ai.usage.cost_microunits") shouldBe None
+      val exhausted = parse(facts("ai.usage.pre_dispatch_exhaustions")).toOption.value.asArray.value
+      exhausted.head.hcursor.get[String]("model").toOption shouldBe Some("gpt-5.6-sol")
+      exhausted.head.hcursor.get[Boolean]("providerInvoked").toOption shouldBe Some(false)
       uncertain = true
       receipt = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
       val unknown = runner.generateRecord(request)
@@ -172,6 +269,7 @@ final class TextusAiRunnerSpec
       unknownFacts.get("ai.provider.http.request-id") shouldBe None
       unknownFacts.get("ai.usage.total_tokens") shouldBe None
       unknownFacts.get("ai.usage.reservation_basis") shouldBe None
+      unknownFacts.get("ai.usage.pre_dispatch_exhaustions") shouldBe None
     }
 
     "bound a stalled preparation and prevent a late invocation" in {

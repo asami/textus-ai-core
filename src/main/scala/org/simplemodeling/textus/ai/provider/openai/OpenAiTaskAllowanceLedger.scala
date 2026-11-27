@@ -53,6 +53,12 @@ sealed trait OpenAiBudgetAdmission
 final case class OpenAiDailyAdmission(reservation: OpenAiAllowanceReservation) extends OpenAiBudgetAdmission
 final case class OpenAiCreditAdmission(request: OpenAiAllowanceRequest, microunits: Long) extends OpenAiBudgetAdmission
 
+private[ai] enum OpenAiDailyRouteResult {
+  case Reserved(reservation: OpenAiAllowanceReservation)
+  case KnownExhausted
+  case Denied
+}
+
 /** An authoritative acknowledgment is the only positive result. No reservation is released,
   * including after timeout or an uncertain provider effect. The caller must dispatch exactly the
   * request and output bound described in the verified grant.
@@ -62,6 +68,64 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
     creditVerifier: OpenAiCreditGrantVerifier = null,
     dailyIneligibility: OpenAiDailyIneligibilityAuthority = null) {
   import OpenAiTaskAllowanceLedger.*
+
+  /** One live owner retains the durable organization/request claim for its entire route.
+    * A failed or timed-out operation seals it; no later caller can recover the claim.
+    */
+  private[ai] final class DailyRouteOwner(organization: String, requestId: String) {
+    private var claimed = false
+    private var sealedRoute = false
+
+    def reserve(request: OpenAiAllowanceRequest, grant: OpenAiAllowanceGrant, externalTokens: Long,
+        marginPercent: Int, deadline: Long, externalProvenance: String = "fixture-unspecified")
+        (using context: ExecutionContext): OpenAiDailyRouteResult = synchronized {
+      if (sealedRoute || request == null || request.scope == null || grant == null ||
+          request.requestDigest == null || grant.expiresAt == null ||
+          request.scope.organization != organization || request.requestId != requestId ||
+          externalTokens < 0 || externalProvenance == null || externalProvenance.isEmpty ||
+          marginPercent < 1 || marginPercent > 99 || executor == null ||
+          deadline - nanoTime() <= 0) { sealedRoute = true; return OpenAiDailyRouteResult.Denied }
+      val alreadyClaimed = claimed
+      val result = try {
+        val future = executor.submit(new Callable[OpenAiDailyRouteResult] {
+          def call(): OpenAiDailyRouteResult = try {
+            val at = now()
+            val validText = (s: String) => s != null && s.nonEmpty && s.length <= 512 && s.trim == s
+            if (store == null || verifier == null || request.scope.day == null ||
+                !validText(request.scope.organization) || !validText(request.scope.modelPool) ||
+                !validText(request.requestId) || !request.requestDigest.matches("[0-9a-f]{64}") ||
+                request.inputTokens <= 0 || request.outputTokens <= 0 || grant == null || grant.request != request ||
+                grant.allowanceTokens <= 0 || !validText(grant.allocationProvenance) || grant.expiresAt == null ||
+                !validTime(request, grant, at) || !verifier.verify(grant) || deadline - nanoTime() <= 0)
+              OpenAiDailyRouteResult.Denied
+            else if (!alreadyClaimed && !_claim(request, deadline)) OpenAiDailyRouteResult.Denied
+            else {
+              val total = Math.addExact(request.inputTokens, request.outputTokens)
+              _select_daily(request, grant, total, deadline, marginPercent, externalTokens, Some(externalProvenance)) match {
+                case DailySelection.Reserved(r) => OpenAiDailyRouteResult.Reserved(r)
+                case DailySelection.Unavailable => OpenAiDailyRouteResult.KnownExhausted
+                case DailySelection.Denied(_) => OpenAiDailyRouteResult.Denied
+              }
+            }
+          } catch { case NonFatal(_) => OpenAiDailyRouteResult.Denied }
+        })
+        val remaining = deadline - nanoTime()
+        if (remaining <= 0) { future.cancel(false); OpenAiDailyRouteResult.Denied }
+        else try future.get(remaining, TimeUnit.NANOSECONDS)
+        catch { case NonFatal(_) => future.cancel(false); OpenAiDailyRouteResult.Denied }
+      } catch { case NonFatal(_) => OpenAiDailyRouteResult.Denied }
+      if (deadline - nanoTime() <= 0 || !validTime(request, grant, now())) {
+        sealedRoute = true
+        OpenAiDailyRouteResult.Denied
+      } else result match {
+        case OpenAiDailyRouteResult.KnownExhausted => claimed = true; result
+        case _ => sealedRoute = true; result
+      }
+    }
+  }
+
+  private[openai] def dailyRoute(organization: String, requestId: String): DailyRouteOwner =
+    new DailyRouteOwner(organization, requestId)
 
   def reserve(request: OpenAiAllowanceRequest, grant: Option[OpenAiAllowanceGrant], deadlineNanos: Long)
       (using context: ExecutionContext): Either[String, OpenAiAllowanceReservation] = {
@@ -185,12 +249,15 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
   }
 
   private def _select_daily(request: OpenAiAllowanceRequest, grant: OpenAiAllowanceGrant, total: Long,
-      deadline: Long, marginPercent: Int)(using ctx: ExecutionContext): DailySelection = {
+      deadline: Long, marginPercent: Int, externalTokens: Long = 0L, externalProvenance: Option[String] = None)
+      (using ctx: ExecutionContext): DailySelection = {
     val usablePercent = 100 - marginPercent
     val cutoff = (grant.allowanceTokens / 100) * usablePercent +
       (grant.allowanceTokens % 100) * usablePercent / 100
-    if (total > cutoff) DailySelection.Unavailable
-    else change(request, grant, total, deadline, 4, cutoff, retryConflicts = false) match {
+    val source = externalProvenance.map(p => Json.obj("allocation" -> Json.fromString(grant.allocationProvenance),
+      "externalTokens" -> Json.fromLong(externalTokens), "externalProvenance" -> Json.fromString(p)).noSpaces)
+    if (externalTokens >= cutoff || total > cutoff - externalTokens) DailySelection.Unavailable
+    else change(request, grant, total, deadline, 4, cutoff - externalTokens, retryConflicts = false, source = source) match {
       case Right(reservation) => DailySelection.Reserved(reservation)
       case Left("Allowance exhausted") => DailySelection.Unavailable
       case Left(reason) => DailySelection.Denied(reason)
@@ -316,7 +383,7 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
   }
 
   private def change(request: OpenAiAllowanceRequest, grant: OpenAiAllowanceGrant, total: Long,
-      deadline: Long, attempts: Int, cutoff: Long, retryConflicts: Boolean = true)
+      deadline: Long, attempts: Int, cutoff: Long, retryConflicts: Boolean = true, source: Option[String] = None)
       (using ctx: ExecutionContext): Either[String, OpenAiAllowanceReservation] = {
     if (attempts <= 0 || deadline - nanoTime() <= 0 || !validTime(request, grant, now())) return Left("Reservation deadline or provider day expired")
     try {
@@ -328,9 +395,9 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
           val empty = LedgerEntity(id, encode(request.scope, grant.allowanceTokens, Vector.empty))
           if (deadline - nanoTime() <= 0 || !validTime(request, grant, now())) return Left("Deadline, grant or provider day expired")
           store.create(empty) match {
-            case Consequence.Success(_) => change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts)
+            case Consequence.Success(_) => change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts, source)
             case Consequence.Failure(c) if c.observation.taxonomy == Taxonomy.dataStoreDuplicate && retryConflicts =>
-              change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts)
+              change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts, source)
             case _ => Left("Ledger creation outcome unavailable")
           }
         case Some(Some(carrier)) =>
@@ -341,7 +408,7 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
           val used = current._3.foldLeft(0L)((n, entry) => Math.addExact(n, entry._5.fold(entry._3) { case (input, output, _) => Math.addExact(input, output) }))
           if (total > cutoff || used > cutoff - total) return Left("Allowance exhausted")
           val next = LedgerEntity(id, encode(request.scope, grant.allowanceTokens,
-            current._3 :+ ((request.requestId, request.requestDigest, total, grant.allocationProvenance, None))))
+            current._3 :+ ((request.requestId, request.requestDigest, total, source.getOrElse(grant.allocationProvenance), None))))
           val revision = carrier.revision
           val policy = EntityMutationExecutionPolicy(concurrencyPolicy = EntityConcurrencyPolicy.Optimistic,
             preconditionPolicy = RevisionPreconditionPolicy.ObservedRequired, observedRevision = Some(revision))
@@ -351,7 +418,7 @@ final class OpenAiTaskAllowanceLedger(store: EntityStore, verifier: OpenAiAllowa
               Right(OpenAiAllowanceReservation(request, total))
             case Consequence.Failure(c) if c.observation.cause.descriptor.facets.contains(
                 Descriptor.Facet.Reason("stale-entity-revision")) && retryConflicts =>
-              change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts)
+              change(request, grant, total, deadline, attempts - 1, cutoff, retryConflicts, source)
             case _ => Left("Ledger update outcome unavailable")
           }
       }

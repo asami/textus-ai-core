@@ -18,6 +18,14 @@ trait OpenAiRequestSizingVerifier {
     overheadTokens: Long, provenance: String): Boolean
 }
 
+/** Independent host authority for the complete daily allocation and external-use bound. */
+trait OpenAiGroupAllocationVerifier {
+  def verify(organization: String, project: String, model: String, modelPool: String,
+    day: LocalDate, limitTokens: Long, externalTokens: Long, validFrom: Instant, expiresAt: Instant,
+    allocationProvenance: String, externalProvenance: String, inputTokenCeiling: Long,
+    maxOutputTokens: Int): Boolean
+}
+
 /** Immutable operator-provided evidence; no credential or observed balance establishes authority. */
 private[ai] object OpenAiLedgerBackedAllowance {
   private val DefaultDailyMarginPercent = 10
@@ -30,6 +38,7 @@ private[ai] object OpenAiLedgerBackedAllowance {
     inputLimit: Long, outputLimit: Int, fullCostMicros: Long, daily: Option[Daily],
     credit: Option[Credit], dailyIneligible: Option[Window], sizing: Option[Sizing],
     reviewOutputLimit: Option[Int], repairOutputLimit: Option[Int])
+  final case class Group(allocation: Allocation, externalTokens: Long, externalProvenance: String)
 
   private val executor = new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
     new ArrayBlockingQueue[Runnable](64), (r: Runnable) => {
@@ -51,7 +60,9 @@ private[ai] object OpenAiLedgerBackedAllowance {
     _ <- Option.when(from.isBefore(until))(())
   } yield Window(from, until, provenance)
 
-  def parse(raw: String, connection: OpenAiRuntimeConfig): Option[Allocation] = try {
+  def parse(raw: String, connection: OpenAiRuntimeConfig): Option[Allocation] = parseInternal(raw, connection, false)
+
+  private def parseInternal(raw: String, connection: OpenAiRuntimeConfig, phaseGroups: Boolean): Option[Allocation] = try {
     val j = parser.parse(raw).toOption.get
     val required = Set("organization", "project", "origin", "model", "modelPool", "inputTokenCeiling", "maxOutputTokens", "fullCostMicros")
     if (!fields(j, required, Set("daily", "credit", "dailyIneligible", "sizing", "reviewMaxOutputTokens", "repairMaxOutputTokens"))) return None
@@ -64,23 +75,26 @@ private[ai] object OpenAiLedgerBackedAllowance {
     if (origin != "https://api.openai.com" || connection.endpoint.toString != origin ||
         connection.provider != "openai" || connection.mode != "remote" || connection.engine != "gpt" ||
         connection.model != model || !text(connection.apiKey)) return None
-    if (model != "gpt-5.6-terra" || pool != "openai-daily-group-2") return None
+    if (phaseGroups && (connection.organization.exists(_ != org) || connection.project.exists(_ != project))) return None
+    if (!Set(("gpt-5.6-terra", "openai-daily-group-2")).contains((model, pool)) &&
+        !(phaseGroups && (model, pool) == (("gpt-5.6-sol", "openai-daily-group-1")))) return None
     val input = long(j, "inputTokenCeiling").get
     val output = long(j, "maxOutputTokens").filter(_ <= Int.MaxValue).get.toInt
     val quote = long(j, "fullCostMicros").get
-    if (input != 1050000L || output > 128000 ||
-        quote < Math.addExact(Math.multiplyExact(input, 5L), Math.multiplyExact(output.toLong, 18L))) return None
+    if (output > 128000 || (if (phaseGroups) input > 20000000L else
+        input != 1050000L || quote < Math.addExact(Math.multiplyExact(input, 5L), Math.multiplyExact(output.toLong, 18L)))) return None
     val dailyJson = j.hcursor.downField("daily").focus
     val daily = dailyJson.map { d =>
       val w = window(d, Set("day", "limitTokens")).get
       val day = LocalDate.parse(string(d, "day").get)
-      Daily(day, long(d, "limitTokens").filter(_ <= 10000000L).get, w)
+      Daily(day, long(d, "limitTokens").filter(n => phaseGroups || n <= 10000000L).get, w)
     }
     val credit = j.hcursor.downField("credit").focus.map { c =>
       Credit(string(c, "allocationId").get, long(c, "limitMicros").get,
         window(c, Set("allocationId", "limitMicros")).get)
     }
     val ineligible = j.hcursor.downField("dailyIneligible").focus.map(d => window(d, Set.empty).get)
+    if (phaseGroups && (daily.isEmpty || credit.nonEmpty || ineligible.nonEmpty)) return None
     if (daily.isEmpty && (credit.isEmpty || ineligible.isEmpty)) return None
     val sizing = j.hcursor.downField("sizing").focus.map { v =>
       if (!fields(v, Set("model", "format", "tokensPerByte", "overheadTokens", "provenance"))) return None
@@ -99,6 +113,32 @@ private[ai] object OpenAiLedgerBackedAllowance {
     Some(Allocation(org, project, model, pool, input, output, quote, daily, credit, ineligible, sizing, review, repair))
   } catch { case scala.util.control.NonFatal(_) => None }
 
+  /** The verifier must attest a conservative external-use upper bound for the whole window. */
+  def parseGroups(raw: String, connection: OpenAiRuntimeConfig,
+      verifier: OpenAiGroupAllocationVerifier): Option[Vector[Group]] = try {
+    if (verifier == null) return None
+    val values = parser.parse(raw).toOption.flatMap(_.asArray).get
+    if (values.size != 2) return None
+    val groups = values.map { value =>
+      val daily = value.hcursor.downField("daily").focus.get
+      val external = daily.hcursor.get[Long]("externalTokens").toOption.filter(_ >= 0).get
+      val externalSource = string(daily, "externalProvenance").get
+      val strippedDaily = daily.mapObject(_.remove("externalTokens").remove("externalProvenance"))
+      val stripped = value.mapObject(_.add("daily", strippedDaily))
+      val model = string(value, "model").get
+      val allocation = parseInternal(stripped.noSpaces, connection.copy(model = model), true).get
+      val d = allocation.daily.get
+      if (!verifier.verify(allocation.organization, allocation.project, model, allocation.modelPool,
+          d.day, d.limit, external, d.window.from, d.window.until, d.window.provenance,
+          externalSource, allocation.inputLimit, allocation.outputLimit)) return None
+      Group(allocation, external, externalSource)
+    }.toVector
+    if (groups.map(g => (g.allocation.model, g.allocation.modelPool)).toSet != Set(
+        ("gpt-5.6-sol", "openai-daily-group-1"), ("gpt-5.6-terra", "openai-daily-group-2")) ||
+        groups.map(_.allocation.organization).distinct.size != 1 || groups.map(_.allocation.project).distinct.size != 1)
+      None else Some(groups)
+  } catch { case scala.util.control.NonFatal(_) => None }
+
   def dailyMarginPercent(value: Option[String]): Option[Int] = value match {
     case None => Some(DefaultDailyMarginPercent)
     case Some(raw) if raw.matches("[0-9]+") => Try(raw.toInt).toOption.filter(n => n >= 1 && n <= 99)
@@ -111,6 +151,36 @@ private[ai] object OpenAiLedgerBackedAllowance {
     require(dailyMarginPercent >= 1 && dailyMarginPercent <= 99, "Invalid daily margin")
     new OpenAiLedgerBackedAllowance(config, allocation, context, dailyMarginPercent, sizingVerifier)
   }
+
+  final class RouteMember(val group: Group, owner: OpenAiTaskAllowanceLedger#DailyRouteOwner) {
+    private var exhausted = false
+    def reserve(request: OpenAiAllowanceRequest, grant: OpenAiAllowanceGrant, margin: Int,
+        deadline: Long)(using ExecutionContext): OpenAiDailyRouteResult = {
+      val result = owner.reserve(request, grant, group.externalTokens, margin, deadline, group.externalProvenance)
+      synchronized { exhausted = result == OpenAiDailyRouteResult.KnownExhausted }
+      result
+    }
+    def takeExhausted(): Boolean = synchronized { val result = exhausted; exhausted = false; result }
+  }
+
+  def routeMembers(groups: Vector[Group], request: AiTaskRequest, context: ExecutionContext,
+      verifier: OpenAiGroupAllocationVerifier): Vector[RouteMember] = {
+    val grants = new OpenAiAllowanceGrantVerifier {
+      def verify(g: OpenAiAllowanceGrant): Boolean = groups.exists { group =>
+        val a = group.allocation
+        a.daily.exists(d => g.request.scope == OpenAiAllowanceScope(a.organization, a.modelPool, d.day) &&
+          g.allowanceTokens == d.limit && g.expiresAt == d.window.until &&
+          g.allocationProvenance == d.window.provenance &&
+          !Instant.now().isBefore(d.window.from) && Instant.now().isBefore(d.window.until) &&
+          verifier.verify(a.organization, a.project, a.model, a.modelPool, d.day, d.limit,
+            group.externalTokens, d.window.from, d.window.until, d.window.provenance,
+            group.externalProvenance, a.inputLimit, a.outputLimit))
+      }
+    }
+    val ledger = new OpenAiTaskAllowanceLedger(new StandardEntityStore, grants, executor)
+    val owner = ledger.dailyRoute(groups.head.allocation.organization, request.id)
+    groups.map(new RouteMember(_, owner))
+  }
 }
 
 private[ai] final class OpenAiLedgerBackedAllowance(
@@ -118,7 +188,8 @@ private[ai] final class OpenAiLedgerBackedAllowance(
   allocation: OpenAiLedgerBackedAllowance.Allocation,
   context: ExecutionContext,
   dailyMarginPercent: Int,
-  sizingVerifier: Option[OpenAiRequestSizingVerifier]
+  sizingVerifier: Option[OpenAiRequestSizingVerifier],
+  routeMember: Option[OpenAiLedgerBackedAllowance.RouteMember] = None
 ) extends OpenAiTaskAllowanceAuthority {
   import OpenAiLedgerBackedAllowance.*
   override val connection: OpenAiRuntimeConfig = config.copy(organization = Some(allocation.organization), project = Some(allocation.project))
@@ -177,7 +248,7 @@ private[ai] final class OpenAiLedgerBackedAllowance(
     val credit = end.exists(e => allocation.credit.exists(c => covers(c.window, now, e) &&
       c.limit >= allocation.fullCostMicros) &&
       (daily || allocation.dailyIneligible.exists(covers(_, now, e))))
-    val eligible = (daily || credit) && r.requiredTools.isEmpty && sized(r).nonEmpty
+    val eligible = (if (routeMember.nonEmpty) daily else daily || credit) && r.requiredTools.isEmpty && sized(r).nonEmpty
     Option.when(eligible)(AiTaskCandidate("openai", allocation.model, Set("structured-record"), Set.empty,
       Some(1L), 1L, r, Some(0L)))
   }
@@ -208,7 +279,18 @@ private[ai] final class OpenAiLedgerBackedAllowance(
       return Left("Daily eligibility window unavailable")
     val credit = allocation.credit.filter(c => covers(c.window, now, end)).map(c => OpenAiCreditGrant(request, c.id, c.window.from, c.window.until,
       c.limit, allocation.fullCostMicros, c.window.provenance))
-    ledger.reserveDailyFirst(request, daily, credit, deadlineNanos, dailyMarginPercent).map { admission =>
+    val reserved: Either[String, OpenAiBudgetAdmission] = routeMember match {
+      case Some(member) => daily match {
+        case Some(g) => member.reserve(request, g, dailyMarginPercent, deadlineNanos) match {
+          case OpenAiDailyRouteResult.Reserved(reservation) => Right(OpenAiDailyAdmission(reservation))
+          case OpenAiDailyRouteResult.KnownExhausted => Left("Daily allowance exhausted")
+          case OpenAiDailyRouteResult.Denied => Left("Daily reservation unavailable")
+        }
+        case None => Left("Daily eligibility window unavailable")
+      }
+      case None => ledger.reserveDailyFirst(request, daily, credit, deadlineNanos, dailyMarginPercent)
+    }
+    reserved.map { admission =>
       val (basis, until) = admission match {
         case _: OpenAiDailyAdmission => ("verified-daily-reservation", allocation.daily.get.window.until)
         case _: OpenAiCreditAdmission => ("verified-promotional-credit-reservation", allocation.credit.get.window.until)

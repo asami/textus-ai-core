@@ -123,8 +123,46 @@ final case class AiTaskReceipt(
   providerRequestId: Option[String],
   trace: Option[String],
   usage: AiTaskUsage,
-  reservationBasis: Option[String] = None
-)
+  reservationBasis: Option[String] = None,
+  modelGroup: Option[String] = None,
+  allocationProvenance: Option[String] = None,
+  externalUsageProvenance: Option[String] = None,
+  externalUsageTokens: Option[Long] = None,
+  preDispatchExhaustions: Vector[AiTaskPreDispatchExhaustion] = Vector.empty
+) {
+  def this(actualProvider: Option[String], actualModel: Option[String], providerRequestId: Option[String],
+      trace: Option[String], usage: AiTaskUsage, reservationBasis: Option[String]) =
+    this(actualProvider, actualModel, providerRequestId, trace, usage, reservationBasis,
+      None, None, None, None, Vector.empty)
+
+  def copy(actualProvider: Option[String] = this.actualProvider, actualModel: Option[String] = this.actualModel,
+      providerRequestId: Option[String] = this.providerRequestId, trace: Option[String] = this.trace,
+      usage: AiTaskUsage = this.usage, reservationBasis: Option[String] = this.reservationBasis,
+      modelGroup: Option[String] = this.modelGroup, allocationProvenance: Option[String] = this.allocationProvenance,
+      externalUsageProvenance: Option[String] = this.externalUsageProvenance,
+      externalUsageTokens: Option[Long] = this.externalUsageTokens,
+      preDispatchExhaustions: Vector[AiTaskPreDispatchExhaustion] = this.preDispatchExhaustions): AiTaskReceipt =
+    new AiTaskReceipt(actualProvider, actualModel, providerRequestId, trace, usage, reservationBasis,
+      modelGroup, allocationProvenance, externalUsageProvenance, externalUsageTokens, preDispatchExhaustions)
+
+  def copy(actualProvider: Option[String], actualModel: Option[String], providerRequestId: Option[String],
+      trace: Option[String], usage: AiTaskUsage, reservationBasis: Option[String]): AiTaskReceipt =
+    new AiTaskReceipt(actualProvider, actualModel, providerRequestId, trace, usage, reservationBasis,
+      modelGroup, allocationProvenance, externalUsageProvenance, externalUsageTokens, preDispatchExhaustions)
+}
+
+object AiTaskReceipt {
+  def apply(actualProvider: Option[String], actualModel: Option[String], providerRequestId: Option[String],
+      trace: Option[String], usage: AiTaskUsage, reservationBasis: Option[String]): AiTaskReceipt =
+    new AiTaskReceipt(actualProvider, actualModel, providerRequestId, trace, usage, reservationBasis)
+}
+
+/** An eligible candidate was refused on verified capacity before provider invocation. */
+final case class AiTaskPreDispatchExhaustion(provider: String, model: String, modelGroup: String,
+  allocationProvenance: String, externalUsageProvenance: String, externalUsageTokens: Long)
+
+private[ai] final case class AiTaskGroupEvidence(group: String, allocation: String,
+  externalProvenance: String, externalTokens: Long)
 
 enum AiTaskDispatch {
   case Completed(output: Record, receipt: AiTaskReceipt)
@@ -166,6 +204,12 @@ trait AiTaskInvoker {
   /** Invoke once; return Uncertain if dispatch may have occurred without a conclusive result. */
   def invoke(request: AiTaskRequest, candidate: AiTaskCandidate): AiTaskDispatch
 
+  private[ai] def candidatePriority(request: AiTaskRequest, candidate: AiTaskCandidate): Int = 0
+
+  /** Only an exact, known pre-dispatch exhaustion may authorize another candidate. */
+  private[ai] def takeExhaustionAfterDecline(request: AiTaskRequest, previous: AiTaskCandidate,
+      next: AiTaskCandidate): Option[AiTaskPreDispatchExhaustion] = None
+
   private[ai] def dispatchAfterPreflight(request: AiTaskRequest, candidate: AiTaskCandidate,
       deadline: AiTaskDeadline): AiTaskDispatch = {
     val unknown = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
@@ -178,6 +222,21 @@ trait AiTaskInvoker {
 final class AiTaskDeadline private (val endNanos: Long, readNanos: () => Long) {
   private var closed = false
   private var receipt: Option[AiTaskReceipt] = None
+  private var groupEvidence: Option[AiTaskGroupEvidence] = None
+  private var preDispatchExhaustions = Vector.empty[AiTaskPreDispatchExhaustion]
+  private[ai] def recordExhaustion(value: AiTaskPreDispatchExhaustion): Unit = synchronized {
+    if (!closed && receipt.isEmpty) preDispatchExhaustions :+= value
+  }
+  private[ai] def retainedExhaustions: Vector[AiTaskPreDispatchExhaustion] = synchronized(preDispatchExhaustions)
+  private[ai] def selectGroup(value: AiTaskGroupEvidence): Unit = synchronized {
+    if (!closed && receipt.isEmpty) groupEvidence = Some(value)
+  }
+  private def attributed(value: AiTaskReceipt): AiTaskReceipt =
+    if (!value.reservationBasis.contains("verified-daily-reservation") && value.actualProvider.isEmpty) value
+    else groupEvidence.fold(value.copy(preDispatchExhaustions = preDispatchExhaustions))(g =>
+      value.copy(modelGroup = Some(g.group), allocationProvenance = Some(g.allocation),
+        externalUsageProvenance = Some(g.externalProvenance), externalUsageTokens = Some(g.externalTokens),
+        preDispatchExhaustions = preDispatchExhaustions))
   def remainingMillis: Long =
     java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(math.max(0L, endNanos - readNanos()))
   private[ai] def beginDispatch(initial: AiTaskReceipt): Boolean = synchronized {
@@ -190,6 +249,10 @@ final class AiTaskDeadline private (val endNanos: Long, readNanos: () => Long) {
   private[ai] def close(): Option[AiTaskReceipt] = synchronized {
     closed = true
     receipt
+  }
+  private[ai] def closeForReporting(): Option[AiTaskReceipt] = synchronized {
+    closed = true
+    receipt.map(attributed)
   }
 }
 
@@ -211,15 +274,15 @@ object AiTaskDeadline {
       val remaining = deadline.remainingMillis
       if (remaining <= 0) throw new java.util.concurrent.TimeoutException()
       val result = task.get(remaining, java.util.concurrent.TimeUnit.MILLISECONDS)
-      if (deadline.remainingMillis <= 0) Left(deadline.close()) else Right(result)
+      if (deadline.remainingMillis <= 0) Left(deadline.closeForReporting()) else Right(result)
     } catch {
       case _: InterruptedException =>
-        val observed = deadline.close(); task.cancel(true); executor.remove(task)
+        val observed = deadline.closeForReporting(); task.cancel(true); executor.remove(task)
         Thread.currentThread().interrupt(); Left(observed)
       case _: java.util.concurrent.TimeoutException =>
-        val observed = deadline.close(); task.cancel(true); executor.remove(task); Left(observed)
-      case _: java.util.concurrent.RejectedExecutionException => Left(deadline.close())
-      case _: java.util.concurrent.ExecutionException => Left(deadline.close())
+        val observed = deadline.closeForReporting(); task.cancel(true); executor.remove(task); Left(observed)
+      case _: java.util.concurrent.RejectedExecutionException => Left(deadline.closeForReporting())
+      case _: java.util.concurrent.ExecutionException => Left(deadline.closeForReporting())
     }
   }
 
@@ -265,11 +328,17 @@ object AiBoundedRecordBinding {
           prepared.map { entries =>
             val byCandidate = entries.toMap
             val invoker = new AiTaskInvoker {
+              override private[ai] def candidatePriority(r: AiTaskRequest, candidate: AiTaskCandidate): Int =
+                byCandidate.get(candidate).fold(0)(_.candidatePriority(r, candidate))
               def preflight(r: AiTaskRequest, candidate: AiTaskCandidate): Either[String, AiTaskInvocationCapability] =
                 byCandidate.get(candidate).toRight("Provider was absent from this bounded selection").flatMap(_.preflight(r, candidate))
 
               def invoke(r: AiTaskRequest, candidate: AiTaskCandidate): AiTaskDispatch =
                 byCandidate(candidate).invoke(r, candidate)
+
+              override private[ai] def takeExhaustionAfterDecline(r: AiTaskRequest, previous: AiTaskCandidate,
+                  next: AiTaskCandidate): Option[AiTaskPreDispatchExhaustion] =
+                byCandidate.get(previous).flatMap(_.takeExhaustionAfterDecline(r, previous, next))
 
               override private[ai] def dispatchAfterPreflight(r: AiTaskRequest, candidate: AiTaskCandidate,
                   deadline: AiTaskDeadline): AiTaskDispatch =
