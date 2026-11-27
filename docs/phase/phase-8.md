@@ -78,3 +78,11 @@ before a comparison route runs and retain its terminal disposition afterward.
 - No Textus AI provider/model/tool selection enters the scheduler contract.
 - Deterministic component tests, relevant assembled tests, and CAR lint pass
   without a new failure.
+
+## AI Audit correlation direction
+
+Experiment scheduling and observation remain implementation-neutral. An Experiment arm does not require special behavior from Textus AI. CNCF ExecutionContext carries experiment/run/arm correlation through the assembled call path.
+
+If the selected arm executes AI, CNCF AI Audit records its normal AI Interaction and automatically captures that inherited Experiment correlation. The Experiment Observation may reference AIInteractionId/evidenceRef. If the arm is deterministic or otherwise non-AI, no AI Audit record is created solely because it is an Experiment.
+
+Experiment remains authoritative for comparison arms, runs, observations, reservations and summaries. AI Audit remains authoritative for detailed AI interaction evidence.

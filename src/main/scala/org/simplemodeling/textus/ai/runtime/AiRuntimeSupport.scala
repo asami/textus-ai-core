@@ -1,6 +1,8 @@
 package org.simplemodeling.textus.ai.runtime
 
 import java.net.URI
+import java.nio.charset.StandardCharsets.UTF_8
+import java.util.regex.Matcher
 
 import io.circe.Json
 import io.circe.parser.parse
@@ -9,9 +11,13 @@ import org.goldenport.cncf.context.ExecutionContext
 import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.cncf.unitofwork.UnitOfWorkOp
+import org.goldenport.http.HttpResponse
 import org.goldenport.protocol.Property
 import org.goldenport.record.Record
 
+/**
+ * @version Nov. 22, 2026
+ */
 private[textus] object AiRequestProperties:
   private val _tool_property_names = Vector(
     "ai.tools",
@@ -277,22 +283,35 @@ private[textus] object HttpSupport:
     timeoutseconds: Long,
     headers: Vector[(String, String)] = Vector.empty,
     properties: Vector[Property] = Vector.empty
-  )(using ctx: ExecutionContext): Consequence[Json] = {
+  )(using ExecutionContext): Consequence[Json] =
+    postResponse(endpoint, path, body, timeoutseconds, headers, properties).flatMap { response =>
+      decode(response.code, response.getString.getOrElse(""))
+    }
+
+  def postResponse(
+    endpoint: URI,
+    path: String,
+    body: Json,
+    timeoutseconds: Long,
+    headers: Vector[(String, String)],
+    properties: Vector[Property]
+  )(using ctx: ExecutionContext): Consequence[HttpResponse] = {
     val url = endpoint.resolve(path).toString
     val effectiveheaders = headers.toMap + ("Content-Type" -> "application/json")
     val effectiveproperties =
       properties :+ Property("http.timeout-seconds", timeoutseconds.toString, None)
-    ctx.unitOfWorkInterpreter(UnitOfWorkOp.HttpPost(url, Some(body.noSpaces), effectiveheaders, effectiveproperties)).flatMap { response =>
-      if response.code / 100 != 2 then
-        Consequence.serviceUnavailable(
-          _failure_message(response.code, response.getString.getOrElse(""))
-        )
-      else
-        parse(response.getString.getOrElse("")) match
-          case Left(e) => Consequence.valueInvalid(s"Invalid JSON response: ${e.getMessage}")
-          case Right(json) => Consequence.success(json)
-    }
+    ctx.unitOfWorkInterpreter(UnitOfWorkOp.HttpPost(url, Some(body.noSpaces), effectiveheaders, effectiveproperties))
   }
+
+  def decode(status: Int, body: String, includeParseError: Boolean = true): Consequence[Json] =
+    if status / 100 != 2 then
+      Consequence.serviceUnavailable(_failure_message(status, body))
+    else
+      parse(body) match
+        case Left(e) =>
+          val message = if includeParseError then s"Invalid JSON response: ${e.getMessage}" else "Invalid JSON response"
+          Consequence.valueInvalid(message)
+        case Right(json) => Consequence.success(json)
 
   private def _failure_message(status: Int, body: String): String =
     s"AI provider request failed: category=${failureCategory(status, body)} status=$status"
@@ -308,5 +327,70 @@ private[textus] object HttpSupport:
       case 429 => "rate_limited"
       case code if code >= 500 => "unavailable"
       case _ => "provider_rejected"
+    }
+  }
+
+/** Opt-in transport evidence. These keys are not part of CallTree metadata. */
+private[textus] object ProviderHttpEvidence:
+  val captureProperty = "ai.record.capture-provider-http"
+  private val statusKey = "ai.provider.http.status"
+  private val requestIdKey = "ai.provider.http.request-id"
+  private val bodyKey = "ai.provider.http.body"
+  private val bodyOmittedKey = "ai.provider.http.body-omitted"
+  private val maxBodyBytes = 1024 * 1024
+  private val keys = Set(statusKey, requestIdKey, bodyKey, bodyOmittedKey)
+  private val openAiSecret = """\bsk-[A-Za-z0-9_-]{16,}""".r
+  private val _json_string = """ "(?:[^"\\]++|\\.)*+" """.trim.r
+  private val _unicode_escape = """\\u([0-9a-fA-F]{4})""".r
+
+  def requested(properties: Vector[Property]): Boolean =
+    properties.exists(p => p.name == captureProperty && p.value == "true")
+
+  def capture(response: HttpResponse, body: Option[String], credential: String): Map[String, String] = {
+    val status = Map(statusKey -> response.code.toString)
+    val requestId = response.headerValue("x-request-id")
+      .filter(_.matches("req_[A-Za-z0-9_-]{1,128}")).map(requestIdKey -> _)
+    val content = body.map { value =>
+      if value.getBytes(UTF_8).length > maxBodyBytes then bodyOmittedKey -> "size-limit"
+      else {
+        val safe = _redact_body(value, credential)
+        if safe.getBytes(UTF_8).length <= maxBodyBytes then bodyKey -> safe
+        else bodyOmittedKey -> "size-limit"
+      }
+    }
+    status ++ requestId ++ content
+  }
+
+  private def _redact_body(body: String, credential: String): String = {
+    val stringsredacted = _json_string.replaceAllIn(body, matched => {
+      val original = matched.matched
+      val rewritten = if original.indexOf('\\') < 0 then original
+      else parse(original).toOption.flatMap(_.asString).fold(original) { decoded =>
+        val redacted = _redact_text(decoded, credential)
+        if decoded.equals(redacted) then original else Json.fromString(redacted).noSpaces
+      }
+      Matcher.quoteReplacement(rewritten)
+    })
+    val safe = _redact_text(stringsredacted, credential)
+    // An incomplete JSON string may still contain a recoverable escaped credential.
+    val decoded = _unicode_escape.replaceAllIn(safe, matched =>
+      Matcher.quoteReplacement(Integer.parseInt(matched.group(1), 16).toChar.toString))
+    if decoded.equals(_redact_text(decoded, credential)) then safe else "[REDACTED]"
+  }
+
+  private def _redact_text(text: String, credential: String): String = {
+    val withoutcredential = if credential.nonEmpty then text.replace(credential, "[REDACTED]") else text
+    openAiSecret.replaceAllIn(withoutcredential, "[REDACTED]")
+  }
+
+  def select(metadata: Map[String, String]): Map[String, String] =
+    metadata.filter { case (name, _) => keys(name) }
+
+  def retainOnFailure[A](result: Consequence[A], metadata: Map[String, String]): Consequence[A] = {
+    val evidence = select(metadata)
+    if evidence.isEmpty then result
+    else result.recoverWith { conclusion =>
+      val observation = conclusion.observation
+      Consequence.Failure(conclusion.copy(observation = observation.copy(properties = observation.properties ++ evidence)))
     }
   }

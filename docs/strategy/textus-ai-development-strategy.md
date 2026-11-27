@@ -462,3 +462,7 @@ Artifacts:
 - `docs/design/` records stable boundaries and decisions.
 - `docs/spec/` records implementation-facing, testable behavior.
 - `docs/journal/` records chronological history.
+
+## Planned structured Domain Rule evaluation (2026-11-26)
+
+Schedule within sm-workflow Phase 25.5, after CNCF Phase 114 typed evaluation SPI is available and before sm-workflow integration. Track delivery in [Phase 10](../phase/phase-10.md) and its [checklist](../phase/phase-10-checklist.md). Implement the CNCF SPI via Textus AI provider-neutral structured output contracts for Predicate, Selection and typed Value; map to OpenAI Structured Outputs and capability-aware alternatives. Validate schema and domain constraints; preserve decline/refusal, failure and invalid output separately from valid false. Reuse registered purpose and operator-owned deterministic routing, verified free allowance, explicit paid authorization, safe accounting and CNCF capability boundaries. Avoid recursive routing and provider leakage into CNCF. Qualify deterministic fixtures, opt-in live OpenAI integration, and Corpus/Experiment accuracy and economics across prompt complexity and model routes. Initial sm-workflow consumer uses Predicate and Selection. CNCF Phase 114.1 is not a prerequisite.

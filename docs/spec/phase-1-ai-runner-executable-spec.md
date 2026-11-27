@@ -102,3 +102,96 @@ sbt --batch test
 ```
 
 The suite must pass without live Gemini, OpenAI, Gemma, or Ollama access.
+
+## Structured JSON Array Contract Addendum (2026-10-18)
+
+This addendum records the narrow producer normalization and array-validation
+contract added under `P61-ADMISSION-AI-ARRAY-006`. The accepted Phase 1 status
+and historical evidence above remain unchanged. The scenarios below are authored
+executable specifications; this document does not claim their execution, full
+validation, or a successful live provider review.
+
+Structured results use a Core `Record`. Null-valued object properties are
+omitted at every depth before validation. Empty arrays, empty objects and
+non-null values are preserved. Arrays become vectors, and a non-object non-null
+root is retained under the `value` field. A null root is invalid. A null array
+element stays at its original index and fails element validation there.
+
+Required presence is separate from content. An explicitly present empty array
+satisfies a required field. A missing field or null fails required presence,
+and required strings must still be nonblank. Array declarations check shape
+separately: nulls, objects, and scalars are not arrays.
+
+The supported array-schema subset is:
+
+- Legacy `arrays` entries use `name` or `field`. Every declared legacy array
+  is required, even without a root `required` entry. When its item `required`
+  fields are declared, every item must be an object containing those fields.
+- Standard `properties` entries with `type: array` validate present array
+  fields. Null is equivalent to omission for an object property. Arrays listed
+  in `required` must be present and may be empty. A present non-array fails.
+- Standard `items` with `type: object` requires object items and recursively
+  checks their required fields and declared array properties. `items` with
+  `type: array` recursively checks array shape and its items. Empty arrays
+  remain valid at every level.
+
+This subset adds no general JSON-schema engine, scalar item type enforcement,
+minimum-size checks, enums, or fallback. Existing required scalar/item checks
+and bounded retry policy remain in place; schema mismatches are terminal.
+Provider selection, application-purpose resolution, and the normal UnitOfWork
+route remain unchanged.
+
+All new scenarios are in the `TextusAiRunnerSpec` section
+`explicit JSON values and declared arrays`. They use the actual registered
+Gemma runtime binding with deterministic `_FakeHttpDriver` responses and make
+no live HTTP/provider requests.
+
+| Scenario name or family | Given / When / Then contract |
+| --- | --- |
+| `preserve clean CBD review arrays through the registered Gemma binding and JSON encoding` | Given CBD-shaped checks and empty findings/modelSubjects/limitations, when the binding normalizes and the Record is encoded, then the JSON roundtrip preserves every array. |
+| `preserve explicit JSON values in …` | Given explicit empty/null/object values or a non-object root, when normalized and encoded, then values remain present, using a value envelope where needed. |
+| `accept an explicitly empty required legacy array` | Given a required legacy array with required item fields, when the empty array is validated, then presence succeeds without invented items. |
+| `reject … in a legacy array declared by … without retry` | Given either legacy alias and absent/null/non-array values, malformed items, or missing/null/blank item fields, when validated, then a terminal schema mismatch retains applicable missing-field diagnostics. |
+| `reject a CBD-shaped candidate with … without retry` | Given standard properties/items declarations and malformed root/nested arrays, malformed object items, or blank required scalars, when validated, then the mismatch is terminal. |
+| `distinguish … optional standard arrays from required presence` | Given an optional array declaration, when absent/empty/null/non-array candidates are validated, then only absence and an actual array succeed. |
+| `validate recursive array items for … arrays` | Given array items declared as arrays of named objects, when validated recursively, then empty arrays and valid object items succeed while malformed shapes or missing required item fields fail. |
+
+Focused validation of `TextusAiRunnerSpec`, normal `cozyBuildCar`, independent
+review, and the separately admitted normal C4 execution remain caller-owned
+evidence. These deterministic scenarios do not establish live provider execution.
+
+### OpenAI daily reservation margin
+
+To enable the bounded OpenAI route, set `textus.ai.bounded-task.openai=true`
+in the executing Textus AI host and select the existing OpenAI connection for
+the intended organization, project and model. The host must grant managed
+HTTPS POST access to that endpoint. Supply the credential through the host's
+existing secret configuration.
+
+For the built-in authority, provide a verified allocation as a JSON object in
+`textus.ai.bounded-task.openai-allocation`. Bind `organization`, `project`,
+`origin`, `model` and `modelPool` to the selected connection and verified
+quota group. The object also records `inputTokenCeiling`, `maxOutputTokens`
+and `fullCostMicros` for the entire bounded request. A `daily` allocation
+contains the UTC `day`, gross `limitTokens`, `validFrom`, `expiresAt` and
+`provenance`. Optional monthly `credit` contains the verified
+`allocationId`, `limitMicros` and the same validity and provenance fields.
+For a credit-only allocation, also supply verified `dailyIneligible`
+evidence with its own validity and provenance.
+
+Refresh daily evidence at the UTC-day boundary. All instances using the same
+organization and model group must use the same shared reservation store.
+The allocation provenance refers to enrollment and allocation evidence
+verified by the host operator. API access alone cannot supply that evidence.
+
+For the built-in OpenAI allowance authority,
+`textus.ai.bounded-task.openai-daily-margin-percent` sets the percentage of the
+verified gross daily token allocation held in reserve. It defaults to 10 and
+accepts integers from 1 to 99. An invalid value disables the built-in
+authority. An injected authority manages its own policy.
+
+When the host loads a changed value, the new cutoff counts all reservations
+already recorded for the organization, model group and UTC day. A request
+beyond the cutoff can use monthly credit when a verified reservation covers
+the full potential charge. Traffic outside the ledger may still result in
+charges.

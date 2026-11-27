@@ -12,11 +12,12 @@ import org.goldenport.cncf.spi.ai.runner.AiTool
 import org.goldenport.configuration.ResolvedConfiguration
 import org.simplemodeling.model.value.MessageRole
 import org.simplemodeling.textus.airuntime.ai.*
-import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, ChatService, GenerateService, HttpSupport, ToolCallingChatService}
+import org.simplemodeling.textus.ai.runtime.{AiRequestProperties, AiTaskManagedHttpPost, AiTaskManagedPostResult, ChatService, GenerateService, HttpSupport, ProviderHttpEvidence, ToolCallingChatService}
 
 /*
  * @since   Jul.  2, 2026
- * @version Aug. 21, 2026
+ *  version Aug. 21, 2026
+ * @version Nov. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 
@@ -27,7 +28,9 @@ final case class OpenAiRuntimeConfig(
   endpoint: URI,
   apiKey: String,
   model: String,
-  timeoutSeconds: Long = 30L
+  timeoutSeconds: Long = 30L,
+  organization: Option[String] = None,
+  project: Option[String] = None
 )
 
 object OpenAiConfig:
@@ -408,30 +411,29 @@ final class OpenAiGenerateService(config: OpenAiRuntimeConfig, context: Executio
     given ExecutionContext = context
     val model = AiRequestProperties.effectiveModel(config.model, req.properties, "openai")
     AiRequestProperties.validateTools(req.properties).flatMap { tools =>
-    if (tools.isEmpty)
-      HttpSupport.post(
-        config.endpoint,
-        "/v1/chat/completions",
-        OpenAiJson.generateRequest(req, model),
-        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
-        headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
-        properties = req.properties
-      ).flatMap { json =>
-        OpenAiJson.extractText(json).map(text => GenerateResponse(text, Some(model), OpenAiJson.responseMetadata(json, req.properties)))
+      if tools.isEmpty then
+        _generate(req, model, "/v1/chat/completions", OpenAiJson.generateRequest(req, model))(OpenAiJson.extractText)
+      else
+        _generate(req, model, "/v1/responses", OpenAiJson.responseGenerateRequest(req, model))(OpenAiJson.extractResponseText)
+    }
+
+  private def _generate(req: GenerateRequest, model: String, path: String, body: Json)(
+    extract: Json => Consequence[String]
+  )(using ExecutionContext): Consequence[GenerateResponse] =
+    HttpSupport.postResponse(
+      config.endpoint, path, body, AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
+      Vector("Authorization" -> s"Bearer ${config.apiKey}"), req.properties
+    ).flatMap { response =>
+      val text = response.getString
+      val capturehttp = req.recordSchema.nonEmpty && ProviderHttpEvidence.requested(req.properties)
+      val evidence =
+        if capturehttp then
+          ProviderHttpEvidence.capture(response, text, config.apiKey)
+        else Map.empty[String, String]
+      val result = HttpSupport.decode(response.code, text.getOrElse(""), includeParseError = !capturehttp).flatMap { json =>
+        extract(json).map(value => GenerateResponse(value, Some(model), OpenAiJson.responseMetadata(json, req.properties) ++ evidence))
       }
-    else
-      HttpSupport.post(
-        config.endpoint,
-        "/v1/responses",
-        OpenAiJson.responseGenerateRequest(req, model),
-        AiRequestProperties.effectiveTimeoutSeconds(config.timeoutSeconds, req.properties),
-        headers = Vector("Authorization" -> s"Bearer ${config.apiKey}"),
-        properties = req.properties
-      ).flatMap { json =>
-        OpenAiJson.extractResponseText(json).map { text =>
-          GenerateResponse(text, Some(model), OpenAiJson.responseMetadata(json, req.properties))
-        }
-      }
+      ProviderHttpEvidence.retainOnFailure(result, evidence)
     }
 
 final class OpenAiChatService(config: OpenAiRuntimeConfig, context: ExecutionContext) extends ToolCallingChatService:
@@ -502,3 +504,174 @@ final class OpenAiChatExtensionPoint(config: OpenAiRuntimeConfig)
 
   override def provide(contract: ServiceContract[ChatService], variation: VariationSelection)(using ExecutionContext): Consequence[ChatService] =
     Consequence.success(new OpenAiChatService(config, summon[ExecutionContext]))
+
+/** A host-assembled adapter. No default instance or entitlement is provided. */
+/** Canonical text-only request used for reservation binding and dispatch. */
+private[ai] object OpenAiBoundedRequest {
+  def body(request: org.simplemodeling.textus.ai.runtime.AiTaskRequest, model: String, maxOutputTokens: Int): Json = {
+    val prompt = s"${request.input.content}\n\nReturn only JSON matching this schema:\n${request.outputSchema}"
+    Json.obj(
+      "model" -> Json.fromString(model),
+      "messages" -> Json.arr(Json.obj("role" -> Json.fromString("user"), "content" -> Json.fromString(prompt))),
+      "stream" -> Json.False,
+      "service_tier" -> Json.fromString("default"),
+      "max_completion_tokens" -> Json.fromInt(maxOutputTokens)
+    )
+  }
+}
+
+final class OpenAiBoundedTaskInvoker(
+  authority: org.simplemodeling.textus.ai.runtime.AiTaskAllowanceAuthority,
+  transport: org.simplemodeling.textus.ai.runtime.AiTaskManagedPost,
+  maxResponseBytes: Int,
+  taskDeadline: Option[org.simplemodeling.textus.ai.runtime.AiTaskDeadline] = None
+) extends org.simplemodeling.textus.ai.runtime.AiTaskInvoker {
+  import org.simplemodeling.textus.ai.runtime.*
+  private var used = false
+  private val unknown = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
+
+  private def capability(request: AiTaskRequest, candidate: AiTaskCandidate): AiTaskInvocationCapability =
+    AiTaskInvocationCapability(request, candidate, 1000000, request.maxOutputCharacters,
+      request.budgetMicrounits, request.maxLatencyMillis, true, true, true)
+
+  private def initialPreflight(request: AiTaskRequest, candidate: AiTaskCandidate): Either[String, AiTaskInvocationCapability] = {
+    val qualified = try transport != null && transport.isQualified catch { case scala.util.control.NonFatal(_) => false }
+    if (authority == null || !qualified || maxResponseBytes <= 0 || candidate.provider != "openai" ||
+        candidate.verifiedForRequest != request || request.requiredTools.nonEmpty || request.maxLatencyMillis > AiTaskDeadline.maxMillis ||
+        taskDeadline.exists(_.remainingMillis <= 0) ||
+        io.circe.parser.parse(request.outputSchema).toOption.flatMap(_.asObject).isEmpty)
+      Left("Bounded OpenAI composition or request is unavailable")
+    else Right(capability(request, candidate))
+  }
+
+  def preflight(request: AiTaskRequest, candidate: AiTaskCandidate): Either[String, AiTaskInvocationCapability] =
+    if (synchronized { used }) Right(capability(request, candidate))
+    else initialPreflight(request, candidate) match {
+      case left @ Left(_) => if (synchronized { used }) Right(capability(request, candidate)) else left
+      case right => right
+    }
+
+  def invoke(request: AiTaskRequest, candidate: AiTaskCandidate): AiTaskDispatch = {
+    val deadline = taskDeadline.getOrElse(AiTaskDeadline.after(System.nanoTime(), request.maxLatencyMillis))
+    AiTaskDeadline.await(deadline)(invokeBounded(request, candidate, deadline)) match {
+      case Right(result) => result
+      case Left(Some(receipt)) => AiTaskDispatch.Uncertain("Deadline expired after possible dispatch", receipt)
+      case Left(None) => AiTaskDispatch.Declined("Deadline expired before dispatch", unknown)
+    }
+  }
+
+  override private[ai] def dispatchAfterPreflight(request: AiTaskRequest, candidate: AiTaskCandidate,
+      deadline: AiTaskDeadline): AiTaskDispatch = invokeBounded(request, candidate, deadline)
+
+  private def invokeBounded(request: AiTaskRequest, candidate: AiTaskCandidate, deadline: AiTaskDeadline): AiTaskDispatch = {
+    val first = synchronized { if (used) false else { used = true; true } }
+    if (!first) return AiTaskDispatch.Uncertain("Invoker already consumed; earlier dispatch may have occurred", unknown)
+    if (initialPreflight(request, candidate).isLeft)
+      return AiTaskDispatch.Declined("Bounded OpenAI preflight failed", unknown)
+    if (deadline.remainingMillis <= 0) return AiTaskDispatch.Declined("Deadline expired before reservation", unknown)
+    val reservation = try authority match {
+      case ledger: OpenAiLedgerBackedAllowance =>
+        ledger.reserveInvocation(request, candidate, deadline.endNanos).map(x => (x.allowance, x.settle))
+      case _ => authority.reserve(request, candidate, deadline.endNanos).map(x => (x, None))
+    } catch {
+      case scala.util.control.NonFatal(_) => Left("Allowance reservation failed")
+    }
+    val (grant, settlement) = reservation match {
+      case Left(reason) => return AiTaskDispatch.Declined(reason, unknown)
+      case Right((value, _)) if value.request != request || value.candidate != candidate ||
+          value.maxOutputTokens <= 0 || value.maxCostMicrounits < 0 || value.maxCostMicrounits > request.budgetMicrounits =>
+        return AiTaskDispatch.Declined("Allowance reservation does not match request", unknown)
+      case Right(value) => value
+    }
+    if (deadline.remainingMillis <= 0) return AiTaskDispatch.Declined("Deadline expired before dispatch", unknown)
+    val body = OpenAiBoundedRequest.body(request, candidate.model, grant.maxOutputTokens)
+    val remaining = grant.validUntil.fold(deadline.remainingMillis) { until =>
+      math.min(deadline.remainingMillis, java.time.Duration.between(java.time.Instant.now(), until).toMillis)
+    }
+    if (remaining <= 0) return AiTaskDispatch.Declined("Deadline expired before dispatch", unknown)
+    if (!deadline.beginDispatch(unknown.copy(reservationBasis = grant.reservationBasis)))
+      return AiTaskDispatch.Declined("Deadline expired before dispatch", unknown.copy(reservationBasis = grant.reservationBasis))
+    val response = try transport.postObserved(body, remaining, maxResponseBytes) catch {
+      case scala.util.control.NonFatal(_) => AiTaskManagedPostResult.PossiblyDispatched
+    }
+    def expired: Boolean = deadline.remainingMillis <= 0 || grant.validUntil.exists(until => !java.time.Instant.now().isBefore(until))
+    response match {
+      case AiTaskManagedPostResult.NotDispatched => AiTaskDispatch.Declined("Managed HTTP admission declined", unknown.copy(reservationBasis = grant.reservationBasis))
+      case AiTaskManagedPostResult.PossiblyDispatched => AiTaskDispatch.Uncertain("Transport did not produce a conclusive response", unknown.copy(reservationBasis = grant.reservationBasis))
+      case AiTaskManagedPostResult.Response(status, requestId, raw) =>
+        deadline.observeReceipt(AiTaskReceipt(Some("openai"), None, requestId, None, AiTaskUsage.Unknown, grant.reservationBasis))
+        val decoded = io.circe.parser.parse(raw).toOption
+        val usage = decoded.flatMap(_.hcursor.downField("usage").get[Long]("total_tokens").toOption)
+          .filter(_ >= 0).map(x => AiTaskUsage.Measured(x, None)).getOrElse(AiTaskUsage.Unknown)
+        val receipt = AiTaskReceipt(Some("openai"), decoded.flatMap(_.hcursor.get[String]("model").toOption), requestId, None, usage, grant.reservationBasis)
+        val observation = if (status / 100 == 2 && receipt.actualModel.contains(candidate.model)) {
+          for {
+            json <- decoded
+            responseId <- json.hcursor.get[String]("id").toOption
+            input <- json.hcursor.downField("usage").get[Long]("prompt_tokens").toOption
+            output <- json.hcursor.downField("usage").get[Long]("completion_tokens").toOption
+            total <- json.hcursor.downField("usage").get[Long]("total_tokens").toOption
+            sum <- scala.util.Try(Math.addExact(input, output)).toOption
+            if input >= 0 && output >= 0 && total == sum
+            apply <- settlement
+          } yield (apply, input, output, responseId)
+        } else None
+        observation match {
+          case Some((apply, input, output, responseId)) =>
+            // Freeze this exact observation against a concurrent timeout before ledger I/O.
+            val admitted = deadline.synchronized {
+              if (expired) false
+              else {
+                deadline.observeReceipt(receipt)
+                deadline.close().exists(_ eq receipt)
+              }
+            }
+            if (admitted) apply(input, output, responseId)
+          case None => deadline.observeReceipt(receipt)
+        }
+        if (status / 100 != 2) AiTaskDispatch.Failed(s"Provider returned HTTP $status", receipt)
+        else if (expired) AiTaskDispatch.Uncertain("Deadline expired after dispatch", receipt)
+        else if (!receipt.actualModel.contains(candidate.model))
+          AiTaskDispatch.Failed("Provider response model missing or differs from the exact requested model", receipt)
+        else {
+          val choice = decoded.flatMap(_.hcursor.downField("choices").downN(0).success)
+          val projected = for {
+            finished <- choice.filter(_.get[String]("finish_reason").toOption.contains("stop"))
+              .toRight("Provider did not complete the structured output")
+            message = finished.downField("message")
+            text <- message.get[String]("content").toOption.filter(_.length <= request.maxOutputCharacters)
+              .toRight("Missing or oversized output")
+            json <- io.circe.parser.parse(text).left.map(_ => "Invalid output JSON")
+            schema <- io.circe.parser.parse(request.outputSchema).left.map(_ => "Invalid schema")
+            record <- TextusAiRecordProjection.project(json, schema)
+          } yield record
+          projected match {
+            case Right(record) if !expired => AiTaskDispatch.Completed(record, receipt)
+            case Right(_) => AiTaskDispatch.Uncertain("Deadline expired during projection", receipt)
+            case Left(reason) => AiTaskDispatch.Failed(reason, receipt)
+          }
+        }
+    }
+  }
+}
+
+/** The host must qualify that this context uses CNCF's bounded managed HTTP
+ * driver and grants the destination. Constructing this wrapper is not itself
+ * evidence of entitlement. A fresh CNCF UoW context binds the interpreter to
+ * the driver being inspected; the destination still requires HTTP admission.
+ */
+final class OpenAiManagedTaskPost(config: OpenAiRuntimeConfig, context: ExecutionContext)
+    extends org.simplemodeling.textus.ai.runtime.AiTaskManagedPost {
+  private val managed = new AiTaskManagedHttpPost(config.endpoint, "/v1/chat/completions",
+    Vector("Authorization" -> s"Bearer ${config.apiKey}") ++
+      config.organization.toVector.map("OpenAI-Organization" -> _) ++
+      config.project.toVector.map("OpenAI-Project" -> _), context)
+
+  override def isQualified: Boolean = managed.isQualified
+
+  override def post(body: Json, timeoutMillis: Long, maxResponseBytes: Int): Either[String, (Int, Option[String], String)] =
+    managed.post(body, math.min(timeoutMillis, math.min(config.timeoutSeconds, 86400L) * 1000L), maxResponseBytes)
+
+  override def postObserved(body: Json, timeoutMillis: Long, maxResponseBytes: Int): AiTaskManagedPostResult =
+    managed.postObserved(body, math.min(timeoutMillis, math.min(config.timeoutSeconds, 86400L) * 1000L), maxResponseBytes)
+}

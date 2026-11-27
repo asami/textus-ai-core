@@ -11,7 +11,7 @@ import org.simplemodeling.textus.airuntime.AiRuntimeComponent
 
 /*
  * @since   Aug. 21, 2026
- * @version Oct. 11, 2026
+ * @version Nov. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 final class AiRuntimeIdentitySpec
