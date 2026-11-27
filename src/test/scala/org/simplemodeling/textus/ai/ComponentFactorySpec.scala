@@ -46,6 +46,203 @@ final class ComponentFactorySpec
     }
 
   "ComponentFactory" should {
+    "register host evidence verifiers from a home file and preserve explicit port precedence" in {
+      import org.simplemodeling.textus.ai.provider.openai.{OpenAiGroupAllocationVerifier, OpenAiRequestSizingVerifier}
+      val key = "textus.ai.bounded-task.openai-host-evidence"
+      val value = ConfigurationValue.StringValue("""{"version":1,"groups":[],"sizing":[]}""")
+      val source = java.nio.file.Path.of(System.getProperty("user.home"), ".textus", "config.json").toString
+      val trace = ConfigurationTrace(Map(key -> ConfigurationResolution(key, value, ConfigurationOrigin.Home,
+        Nil, Some("file"), Some(source))))
+      val config = ResolvedConfiguration(Configuration(Map(key -> value)), trace)
+      val subsystem = new Subsystem("host-evidence-fixture", configuration = config)
+      try {
+        val component = new ComponentFactory().createPrimaryC(ComponentCreate(subsystem, ComponentOrigin.Main)).toOption.value
+        component.port.get[OpenAiGroupAllocationVerifier] should not be empty
+        component.port.get[OpenAiRequestSizingVerifier] should not be empty
+        val explicit = new OpenAiRequestSizingVerifier {
+          def verify(endpoint: String, model: String, format: String, tokensPerByte: Long,
+            overheadTokens: Long, provenance: String): Boolean = false
+        }
+        component.withPort(Component.Port.input(explicit).orElse(component.port))
+        component.port.get[OpenAiRequestSizingVerifier].value should be theSameInstanceAs explicit
+      } finally subsystem.shutdownC()
+    }
+    "resolve group verifiers installed after factory creation on every prepare" in {
+      import java.time.{Instant, LocalDate, ZoneOffset}
+      import io.circe.Json
+      import org.goldenport.cncf.http.UrlConnectionHttpDriver
+      import org.simplemodeling.textus.ai.provider.openai.{OpenAiGroupAllocationVerifier, OpenAiRequestSizingVerifier}
+      import org.simplemodeling.textus.ai.runtime.{AiBoundedRecordBinding, AiTaskDeadline, AiTaskPackage, AiTaskRequest}
+
+      val now = Instant.now()
+      def group(model: String, pool: String): Json = Json.obj(
+        "organization" -> Json.fromString("org-fixture"), "project" -> Json.fromString("proj-fixture"),
+        "origin" -> Json.fromString("https://api.openai.com"), "model" -> Json.fromString(model),
+        "modelPool" -> Json.fromString(pool), "inputTokenCeiling" -> Json.fromLong(100000),
+        "maxOutputTokens" -> Json.fromInt(32), "reviewMaxOutputTokens" -> Json.fromInt(32),
+        "repairMaxOutputTokens" -> Json.fromInt(32), "fullCostMicros" -> Json.fromLong(1000),
+        "daily" -> Json.obj("day" -> Json.fromString(now.atZone(ZoneOffset.UTC).toLocalDate.toString),
+          "limitTokens" -> Json.fromLong(1000000), "validFrom" -> Json.fromString(now.minusSeconds(60).toString),
+          "expiresAt" -> Json.fromString(now.plusSeconds(300).toString), "provenance" -> Json.fromString("allocation"),
+          "externalTokens" -> Json.fromLong(0), "externalProvenance" -> Json.fromString("external")),
+        "sizing" -> Json.obj("model" -> Json.fromString(model),
+          "format" -> Json.fromString("chat-completions-bounded-record-v1"),
+          "tokensPerByte" -> Json.fromLong(1), "overheadTokens" -> Json.fromLong(100),
+          "provenance" -> Json.fromString("sizing")))
+      val raw = Json.arr(group("gpt-5.6-sol", "openai-daily-group-1"),
+        group("gpt-5.6-terra", "openai-daily-group-2")).noSpaces
+      val settings = Map("textus.ai.bounded-task.openai" -> "true", "textus.ai.openai.api-key" -> "fixture",
+        "textus.ai.openai.model" -> "gpt-5.6-terra", "textus.ai.bounded-task.openai-groups" -> raw)
+      val config = ResolvedConfiguration(Configuration(settings.map { case (k, v) => k -> ConfigurationValue.StringValue(v) }), ConfigurationTrace.empty)
+      val subsystem = new Subsystem("group-port-fixture", configuration = config)
+      try {
+        val component = new ComponentFactory().createPrimaryC(ComponentCreate(subsystem, ComponentOrigin.Main)).toOption.value
+        val origin = "https://api.openai.com"
+        val base = ExecutionContext.create()
+        lazy val active: ExecutionContext = ExecutionContext.withRuntimeContext(base, runtime)
+        lazy val unit = new UnitOfWork(active)
+        lazy val runtime: RuntimeContext = new RuntimeContext(
+          core = RuntimeContext.core("group-port-fixture", parent = Some(component.scopeContext),
+            observabilitycontext = base.observability, httpdriveroption = Some(new UrlConnectionHttpDriver(origin))),
+          unitofworksupplier = () => unit,
+          unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
+            override def apply[A](op: UnitOfWorkOp[A]): Consequence[A] = new UnitOfWorkInterpreter(unit).interpret(op)
+          }, commitaction = _ => (), abortaction = _ => (), disposeaction = _ => (), token = "group-port-fixture")
+        given ExecutionContext = active
+        val binding = component.port.get[AiBoundedRecordBinding].value
+        val request = AiTaskRequest("group-fixture", "review", AiTaskPackage("ref", "fixture", "hello"),
+          "{}", Set("structured-record"), Set.empty, "standard", 10000L, 0L, true, false)
+        def candidates = binding.prepare(request, AiTaskDeadline.after(System.nanoTime(), 10000L)).toOption.value._1
+        candidates shouldBe empty
+        var valid = false
+        val verifier = new OpenAiGroupAllocationVerifier {
+          def verify(organization: String, project: String, model: String, modelPool: String,
+            day: LocalDate, limitTokens: Long, externalTokens: Long, validFrom: Instant, expiresAt: Instant,
+            allocationProvenance: String, externalProvenance: String, inputTokenCeiling: Long,
+            maxOutputTokens: Int): Boolean = valid
+        }
+        val sizing = new OpenAiRequestSizingVerifier {
+          def verify(endpoint: String, model: String, format: String, tokensPerByte: Long,
+            overheadTokens: Long, provenance: String): Boolean = true
+        }
+        component.withPort(Component.Port.input(verifier).orElse(Component.Port.input(sizing)).orElse(component.port))
+        candidates shouldBe empty
+        valid = true
+        candidates.map(_.model).toSet shouldBe Set("gpt-5.6-sol", "gpt-5.6-terra")
+      } finally subsystem.shutdownC()
+    }
+
+    "admit grouped requests only with independently trusted host evidence before dispatch" in {
+      import java.time.{Instant, ZoneOffset}
+      import io.circe.Json
+      import org.goldenport.cncf.http.UrlConnectionHttpDriver
+      import org.simplemodeling.textus.ai.runtime.{AiBoundedRecordBinding, AiTaskDeadline, AiTaskPackage, AiTaskRequest, AiTaskResult, AiTaskRunner}
+
+      val now = Instant.now()
+      val day = now.atZone(ZoneOffset.UTC).toLocalDate.toString
+      val from = now.minusSeconds(60).toString
+      val until = now.plusSeconds(300).toString
+      val endpoint = "https://api.openai.com"
+      val model = "gpt-5.6-sol"
+      val format = "chat-completions-bounded-record-v1"
+      // The request policy and the host's evidence are assembled independently.
+      val group = Json.obj(
+        "organization" -> Json.fromString("org-fixture"), "project" -> Json.fromString("proj-fixture"),
+        "origin" -> Json.fromString(endpoint), "model" -> Json.fromString(model),
+        "modelPool" -> Json.fromString("openai-daily-group-1"), "inputTokenCeiling" -> Json.fromLong(100000),
+        "maxOutputTokens" -> Json.fromInt(32), "reviewMaxOutputTokens" -> Json.fromInt(32),
+        "repairMaxOutputTokens" -> Json.fromInt(32), "fullCostMicros" -> Json.fromLong(1000),
+        "daily" -> Json.obj("day" -> Json.fromString(day), "limitTokens" -> Json.fromLong(1000000),
+          "validFrom" -> Json.fromString(from), "expiresAt" -> Json.fromString(until),
+          "provenance" -> Json.fromString("allocation"), "externalTokens" -> Json.fromLong(25),
+          "externalProvenance" -> Json.fromString("external-bound")),
+        "sizing" -> Json.obj("model" -> Json.fromString(model), "format" -> Json.fromString(format),
+          "tokensPerByte" -> Json.fromLong(1), "overheadTokens" -> Json.fromLong(100),
+          "provenance" -> Json.fromString("sizing")))
+      val hostGroup = Json.obj(
+        "organization" -> Json.fromString("org-fixture"), "project" -> Json.fromString("proj-fixture"),
+        "model" -> Json.fromString(model), "modelPool" -> Json.fromString("openai-daily-group-1"),
+        "day" -> Json.fromString(day), "limitTokens" -> Json.fromLong(1000000),
+        "externalTokens" -> Json.fromLong(25), "validFrom" -> Json.fromString(from),
+        "expiresAt" -> Json.fromString(until), "allocationProvenance" -> Json.fromString("allocation"),
+        "externalProvenance" -> Json.fromString("external-bound"), "inputTokenCeiling" -> Json.fromLong(100000),
+        "maxOutputTokens" -> Json.fromInt(32))
+      val hostSizing = Json.obj("endpoint" -> Json.fromString(endpoint), "model" -> Json.fromString(model),
+        "format" -> Json.fromString(format), "tokensPerByte" -> Json.fromLong(1),
+        "overheadTokens" -> Json.fromLong(100), "provenance" -> Json.fromString("sizing"),
+        "validFrom" -> Json.fromString(from), "expiresAt" -> Json.fromString(until))
+      val secondModel = "gpt-5.6-terra"
+      val secondGroup = group.mapObject(_.add("model", Json.fromString(secondModel))
+        .add("modelPool", Json.fromString("openai-daily-group-2"))
+        .add("sizing", group.hcursor.downField("sizing").focus.get.mapObject(_.add("model", Json.fromString(secondModel)))))
+      val secondHostGroup = hostGroup.mapObject(_.add("model", Json.fromString(secondModel))
+        .add("modelPool", Json.fromString("openai-daily-group-2")))
+      val secondHostSizing = hostSizing.mapObject(_.add("model", Json.fromString(secondModel)))
+      val key = "textus.ai.bounded-task.openai-host-evidence"
+      val source = java.nio.file.Path.of(System.getProperty("user.home"), ".textus", "config.json").toString
+      val request = AiTaskRequest("host-evidence", "review", AiTaskPackage("ref", "fixture", "hello"),
+        "{}", Set("structured-record"), Set.empty, "standard", 10000L, 0L, true, false)
+
+      def exercise(label: String, groups: Vector[Json], sizing: Vector[Json], origin: ConfigurationOrigin,
+          present: Boolean, expected: Set[String]): Unit = {
+        val evidence = ConfigurationValue.StringValue(Json.obj("version" -> Json.fromInt(1),
+          "groups" -> Json.fromValues(groups), "sizing" -> Json.fromValues(sizing)).noSpaces)
+        val settings = Map("textus.ai.bounded-task.openai" -> "true", "textus.ai.openai.api-key" -> "fixture",
+          "textus.ai.openai.model" -> model, "textus.ai.bounded-task.openai-groups" -> Json.arr(group, secondGroup).noSpaces)
+          .map { case (k, v) => k -> ConfigurationValue.StringValue(v) }
+        val values = if (present) settings + (key -> evidence) else settings
+        val trace = if (present) ConfigurationTrace(Map(key -> ConfigurationResolution(key, evidence, origin,
+          Nil, Some("file"), Some(source)))) else ConfigurationTrace.empty
+        val subsystem = new Subsystem("host-admission-" + label, configuration = ResolvedConfiguration(Configuration(values), trace))
+        var posts = 0
+        try {
+          val component = new ComponentFactory().createPrimaryC(ComponentCreate(subsystem, ComponentOrigin.Main)).toOption.value
+          val base = ExecutionContext.create()
+          lazy val active: ExecutionContext = ExecutionContext.withRuntimeContext(base, runtime)
+          lazy val unit = new UnitOfWork(active)
+          lazy val runtime: RuntimeContext = new RuntimeContext(
+            core = RuntimeContext.core("host-admission-" + label, parent = Some(component.scopeContext),
+              observabilitycontext = base.observability, httpdriveroption = Some(new UrlConnectionHttpDriver(endpoint))),
+            unitofworksupplier = () => unit,
+            unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
+              def apply[A](op: UnitOfWorkOp[A]): Consequence[A] = op match {
+                case UnitOfWorkOp.HttpPost(_, _, _, _) =>
+                  posts += 1
+                  Consequence.operationIllegal("fixture.no-dispatch", "Unexpected transport attempt")
+                case _ => new UnitOfWorkInterpreter(unit).interpret(op)
+              }
+            }, commitaction = _ => (), abortaction = _ => (), disposeaction = _ => (), token = "host-admission-" + label)
+          given ExecutionContext = active
+          val (candidates, invoker) = component.port.get[AiBoundedRecordBinding].value
+            .prepare(request, AiTaskDeadline.after(System.nanoTime(), 10000L)).toOption.value
+          withClue(label) {
+            candidates.map(_.model).toSet shouldBe expected
+            candidates.foreach(candidate => invoker.preflight(request, candidate).isRight shouldBe true)
+            if (expected.isEmpty)
+              AiTaskRunner.run(request, candidates, invoker).isInstanceOf[AiTaskResult.Declined] shouldBe true
+            posts shouldBe 0
+          }
+        } finally subsystem.shutdownC()
+      }
+      val expired = Json.fromString(now.minusSeconds(1).toString)
+      val both = Set(model, secondModel)
+      val secondOnly = Set(secondModel)
+      val none = Set.empty[String]
+      val cases = Vector(
+        ("valid", Vector(hostGroup, secondHostGroup), Vector(hostSizing, secondHostSizing), ConfigurationOrigin.Home, true, both),
+        ("missing", Vector.empty[Json], Vector.empty[Json], ConfigurationOrigin.Home, false, none),
+        ("missing-group", Vector(secondHostGroup), Vector(hostSizing, secondHostSizing), ConfigurationOrigin.Home, true, none),
+        ("missing-sizing", Vector(hostGroup, secondHostGroup), Vector(secondHostSizing), ConfigurationOrigin.Home, true, secondOnly),
+        ("stale-group", Vector(hostGroup.mapObject(_.add("expiresAt", expired)), secondHostGroup), Vector(hostSizing, secondHostSizing), ConfigurationOrigin.Home, true, none),
+        ("stale-sizing", Vector(hostGroup, secondHostGroup), Vector(hostSizing.mapObject(_.add("expiresAt", expired)), secondHostSizing), ConfigurationOrigin.Home, true, secondOnly),
+        ("mismatched-group", Vector(hostGroup.mapObject(_.add("externalTokens", Json.fromLong(24))), secondHostGroup), Vector(hostSizing, secondHostSizing), ConfigurationOrigin.Home, true, none),
+        ("mismatched-sizing", Vector(hostGroup, secondHostGroup), Vector(hostSizing.mapObject(_.add("format", Json.fromString("other"))), secondHostSizing), ConfigurationOrigin.Home, true, secondOnly),
+        ("untrusted", Vector(hostGroup, secondHostGroup), Vector(hostSizing, secondHostSizing), ConfigurationOrigin.Environment, true, none))
+      cases.foreach { case (label, groups, sizing, origin, present, expected) =>
+        exercise(label, groups, sizing, origin, present, expected)
+      }
+    }
+
     "resolve initialization profiles" which {
       _example("E1", "resolve the runtime-wide profile before constructing provider ports") {
         Given("a runtime-wide Textus AI profile and no component-instance setting")

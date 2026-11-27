@@ -17,7 +17,7 @@ import org.goldenport.cncf.mcp.client.McpServerSetId
 import org.goldenport.cncf.operationtool.OperationToolSetId
 import org.goldenport.cncf.observability.ObservabilityEngine
 import org.goldenport.cncf.spi.{SpiContract, SpiResolver, SpiSelection}
-import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
+import org.goldenport.cncf.spi.ai.runner.{AiChatRequest, AiExecutionClass, AiGenerateRequest, AiMessage, AiRecordRequest, AiRecordResponse, AiRunner, AiRunnerApplicationPurpose, AiRunnerApplicationPurposePolicy, AiRunnerApplicationPurposeRegistration, AiRunnerApplicationPurposeRegistrationSocketSet, AiRunnerRequirement, AiRunnerTracePolicy, AiTool}
 import org.goldenport.cncf.subsystem.Subsystem
 import org.goldenport.cncf.unitofwork.{UnitOfWork, UnitOfWorkInterpreter, UnitOfWorkOp}
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
@@ -39,14 +39,14 @@ import org.simplemodeling.textus.ai.provider.anthropic.{AnthropicConfig, Anthrop
 import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeGenerateService, ClaudeCodeRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaOllamaGenerateService, GemmaRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.google.{GoogleConfig, GoogleGenerateService, GoogleRuntimeConfig}
-import org.simplemodeling.textus.ai.provider.openai.{OpenAiGenerateService, OpenAiRuntimeConfig}
+import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiGenerateService, OpenAiRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
 
 /*
  * @since   Jul.  2, 2026
  *  version Aug. 21, 2026
  *  version Oct. 18, 2026
- * @version Nov. 22, 2026
+ * @version Nov. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 final class TextusAiRunnerSpec
@@ -56,7 +56,262 @@ final class TextusAiRunnerSpec
   with GivenWhenThen {
 
   "TextusAiRunner" should {
+    "attribute only a started daily reservation to the selected group on deadline" in {
+      val evidence = AiTaskGroupEvidence("group-2", "allocation", "external", 42L)
+      val before = AiTaskDeadline.after(System.nanoTime(), 10000L)
+      before.selectGroup(evidence)
+      before.close() shouldBe None
+      val dispatched = AiTaskDeadline.after(System.nanoTime(), 10000L)
+      dispatched.selectGroup(evidence)
+      val exhaustion = AiTaskPreDispatchExhaustion("openai", "gpt-5.6-sol", "group-1", "a", "e", 4L)
+      dispatched.recordExhaustion(exhaustion)
+      val initial = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown,
+        Some("verified-daily-reservation"))
+      dispatched.beginDispatch(initial) shouldBe true
+      val raw = initial.copy(actualProvider = Some("openai"))
+      dispatched.observeReceipt(raw)
+      val receipt = dispatched.closeForReporting().value
+      (dispatched.close().value eq raw) shouldBe true
+      receipt.modelGroup shouldBe Some("group-2")
+      receipt.allocationProvenance shouldBe Some("allocation")
+      receipt.externalUsageTokens shouldBe Some(42L)
+      receipt.actualProvider shouldBe Some("openai")
+      receipt.preDispatchExhaustions shouldBe Vector(exhaustion)
+      val copied = receipt.copy(receipt.actualProvider, receipt.actualModel, receipt.providerRequestId,
+        receipt.trace, receipt.usage, receipt.reservationBasis)
+      copied.preDispatchExhaustions shouldBe Vector(exhaustion)
+      new AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown, None).preDispatchExhaustions shouldBe empty
+      AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown, None).preDispatchExhaustions shouldBe empty
+    }
+
+    "try a second group only after a typed pre-dispatch exhaustion" in {
+      val request = AiTaskRequest("route", "review", AiTaskPackage("input", "origin", "body"),
+        "{}", Set("structured-record"), Set.empty, "standard", 10000L, 0L, true, false)
+      val first = AiTaskCandidate("openai", "gpt-5.6-terra", Set("structured-record"), Set.empty,
+        Some(1L), 1L, request, Some(0L))
+      val second = first.copy(model = "gpt-5.6-sol")
+      val receipt = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
+      def run(initial: AiTaskDispatch, typed: Boolean,
+          secondResult: AiTaskDispatch = AiTaskDispatch.Completed(Record.dataAuto("ok" -> true), receipt))
+          : (AiTaskResult, Vector[String]) = {
+        var calls = Vector.empty[String]
+        val invoker = new AiTaskInvoker {
+          override private[ai] def candidatePriority(r: AiTaskRequest, c: AiTaskCandidate): Int =
+            OpenAiBoundedRecordBinding.groupPriority(r.kind,
+              if (c == first) "openai-daily-group-2" else "openai-daily-group-1")
+          def preflight(r: AiTaskRequest, c: AiTaskCandidate) = Right(AiTaskInvocationCapability(
+            r, c, r.input.content.length, r.maxOutputCharacters, 0L, r.maxLatencyMillis, true, true, true))
+          def invoke(r: AiTaskRequest, c: AiTaskCandidate): AiTaskDispatch = {
+            calls :+= c.model
+            if (c == first) initial else secondResult
+          }
+          override private[ai] def takeExhaustionAfterDecline(r: AiTaskRequest, previous: AiTaskCandidate,
+              next: AiTaskCandidate): Option[AiTaskPreDispatchExhaustion] =
+            Option.when(typed && r == request && previous == first && next == second)(
+              AiTaskPreDispatchExhaustion("openai", first.model, "openai-daily-group-2", "allocation", "external", 7L))
+        }
+        val result = AiTaskRunner.run(request, Vector(second, first), invoker)
+        (result, calls)
+      }
+      val exhausted = run(AiTaskDispatch.Declined("fixture", receipt), true)
+      exhausted._1.isInstanceOf[AiTaskResult.Completed] shouldBe true
+      exhausted._2 shouldBe Vector(first.model, second.model)
+      exhausted._1 match {
+        case AiTaskResult.Completed(_, attempt) => attempt.dispatch match {
+          case AiTaskDispatch.Completed(_, evidence) =>
+            attempt.index shouldBe 1
+            evidence.preDispatchExhaustions shouldBe Vector(AiTaskPreDispatchExhaustion(
+              "openai", first.model, "openai-daily-group-2", "allocation", "external", 7L))
+          case other => fail(s"Expected completion, got $other")
+        }
+        case other => fail(s"Expected completion, got $other")
+      }
+      run(AiTaskDispatch.Declined("exhausted", receipt), false)._2 shouldBe Vector(first.model)
+      run(AiTaskDispatch.Uncertain("uncertain", receipt), true)._2 shouldBe Vector(first.model)
+      run(AiTaskDispatch.Failed("failed", receipt), true)._2 shouldBe Vector(first.model)
+      Vector(AiTaskDispatch.Declined("second-declined", receipt),
+        AiTaskDispatch.Failed("second-failed", receipt), AiTaskDispatch.Uncertain("second-uncertain", receipt)).foreach { secondResult =>
+        val result = run(AiTaskDispatch.Declined("first-exhausted", receipt), true, secondResult)._1
+        val attempt = result match {
+          case AiTaskResult.ProviderDeclined(_, a) => a
+          case AiTaskResult.Failed(_, a) => a
+          case AiTaskResult.Uncertain(_, a) => a
+          case other => fail(s"Unexpected result $other")
+        }
+        val actual = attempt.dispatch match {
+          case AiTaskDispatch.Declined(_, r) => r
+          case AiTaskDispatch.Failed(_, r) => r
+          case AiTaskDispatch.Uncertain(_, r) => r
+          case other => fail(s"Unexpected dispatch $other")
+        }
+        actual.preDispatchExhaustions.map(_.model) shouldBe Vector(first.model)
+      }
+    }
+
     "runtime binding and selection" which {
+    "use the host bounded task binding for a versioned record request" in {
+      Given("the existing AI runner SPI with a typed bounded task binding")
+      given ExecutionContext = ExecutionContext.create()
+      val component = _component()
+      var dispatched = Vector.empty[String]
+      var prepared = Vector.empty[(String, AiTaskDeadline)]
+      def binding(name: String): AiBoundedRecordBinding = new AiBoundedRecordBinding {
+        val limits = AiBoundedRecordLimits(5000, 0, 1024)
+        def prepare(request: AiTaskRequest, deadline: AiTaskDeadline)(using ExecutionContext)
+            : Consequence[(Vector[AiTaskCandidate], AiTaskInvoker)] = {
+          prepared :+= (request.id -> deadline)
+          request.input.reference shouldBe "retained-input"
+          request.input.provenance shouldBe "retained-continuation"
+          request.allowPaidOverage shouldBe false
+          val candidates = Vector(AiTaskCandidate(name, name + "-model", Set("structured-record"),
+            Set.empty, Some(20), 10, request, Some(0)))
+          val invoker = new AiTaskInvoker {
+            def preflight(request: AiTaskRequest, candidate: AiTaskCandidate): Either[String, AiTaskInvocationCapability] =
+              Right(AiTaskInvocationCapability(request, candidate, request.input.content.length,
+                request.maxOutputCharacters, 0, request.maxLatencyMillis, true, true, true))
+            def invoke(request: AiTaskRequest, candidate: AiTaskCandidate): AiTaskDispatch = {
+              candidate.provider shouldBe name
+              dispatched = dispatched :+ candidate.provider
+              AiTaskDispatch.Completed(Record.dataAuto("selected" -> candidate.provider), AiTaskReceipt(
+                Some(candidate.provider), Some(candidate.model), Some("req_record_fixture"), None, AiTaskUsage.Measured(9, None)))
+            }
+          }
+          Consequence.success(candidates -> invoker)
+        }
+      }
+      val provider = new TextusAiRunnerProvider(component)
+      val runner = provider.provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.value
+      val request = AiRecordRequest("structured fixture", Record.dataAuto("type" -> "object"),
+        requirement = AiRunnerRequirement(provider = Some("openai")), metadata = Map(
+          "ai.task.contract" -> "textus-ai.bounded-task.v1", "ai.task.id" -> "attempt-1",
+          "ai.task.kind" -> "record-fixture", "ai.task.continuation" -> "retained-continuation",
+          "ai.task.input-reference" -> "retained-input"))
+      When("the consumer requires the bounded protocol")
+      runner.generateRecord(request).isSuccess shouldBe false
+      dispatched shouldBe empty
+      val combined = AiBoundedRecordBinding.combine(Vector(binding("ollama"), binding("openai"))).value
+      component.withPort(Component.Port.input(combined).orElse(component.port))
+      val result = runner.generateRecord(request).toOption.value
+      Then("the eligible preferred producer returns a bound record with the actual usage")
+      result.record.getString("selected") shouldBe Some("openai")
+      result.model shouldBe Some("openai-model")
+      request.metadata.foreach((key, value) => result.metadata.get(key) shouldBe Some(value))
+      result.metadata("ai.provider.http.request-id") shouldBe "req_record_fixture"
+      result.metadata("ai.usage.total_tokens_source") shouldBe "observed"
+      result.metadata("ai.usage.allowance_admission") shouldBe "verified-included"
+      result.metadata.get("ai.usage.cost_microunits") shouldBe None
+      val alternate = runner.generateRecord(request.copy(requirement = AiRunnerRequirement(provider = Some("ollama")),
+        metadata = request.metadata.updated("ai.task.id", "attempt-2"))).toOption.value
+      alternate.record.getString("selected") shouldBe Some("ollama")
+      runner.generateRecord(request.copy(metadata = request.metadata.updated("ai.task.contract", "unknown"))).isSuccess shouldBe false
+      dispatched shouldBe Vector("openai", "ollama")
+      prepared.map(_._1) shouldBe Vector("attempt-1", "attempt-1", "attempt-2", "attempt-2")
+      prepared.grouped(2).foreach(entries => entries.map(_._2).distinct.size shouldBe 1)
+    }
+
+    "retain only observed producer facts on bounded record failures and uncertainty" in {
+      given ExecutionContext = ExecutionContext.create()
+      val component = _component()
+      var receipt = AiTaskReceipt(Some("fixture"), Some("observed-model"), Some("request-1"), None,
+        AiTaskUsage.Measured(9, None), Some("included-allocation"))
+        .copy(preDispatchExhaustions = Vector(AiTaskPreDispatchExhaustion(
+          "openai", "gpt-5.6-sol", "group-1", "allocation", "external", 5L)))
+      var uncertain = false
+      val binding = new AiBoundedRecordBinding {
+        val limits = AiBoundedRecordLimits(5000, 0, 1024)
+        def prepare(request: AiTaskRequest, deadline: AiTaskDeadline)(using ExecutionContext)
+            : Consequence[(Vector[AiTaskCandidate], AiTaskInvoker)] = {
+          val candidate = AiTaskCandidate("fixture", "requested-model", Set("structured-record"),
+            Set.empty, Some(20), 10, request, Some(0))
+          val invoker = new AiTaskInvoker {
+            def preflight(r: AiTaskRequest, c: AiTaskCandidate) =
+              Right(AiTaskInvocationCapability(r, c, r.input.content.length, r.maxOutputCharacters, 0,
+                r.maxLatencyMillis, true, true, true))
+            def invoke(r: AiTaskRequest, c: AiTaskCandidate) =
+              if (uncertain) AiTaskDispatch.Uncertain("uncertain", receipt)
+              else AiTaskDispatch.Failed("failed", receipt)
+          }
+          Consequence.success(Vector(candidate) -> invoker)
+        }
+      }
+      component.withPort(Component.Port.input(binding).orElse(component.port))
+      val runner = new TextusAiRunnerProvider(component)
+        .provide(SpiContract("ai-runner", classOf[AiRunner]), SpiSelection()).toOption.value
+      val request = AiRecordRequest("fixture", Record.dataAuto("type" -> "object"), metadata = Map(
+        "ai.task.contract" -> "textus-ai.bounded-task.v1", "ai.task.id" -> "failure-fixture",
+        "ai.task.kind" -> "review", "ai.task.continuation" -> "continuation", "ai.task.input-reference" -> "reference"))
+      val failed = runner.generateRecord(request)
+      failed.isSuccess shouldBe false
+      val facts = failed match {
+        case Consequence.Failure(conclusion) => conclusion.observation.properties
+        case _ => fail("expected a failed task result")
+      }
+      facts.get(AiExecutionFacts.MODEL) shouldBe Some("observed-model")
+      facts.get(AiExecutionFacts.PROVIDER) shouldBe Some("fixture")
+      facts.get("ai.provider.http.request-id") shouldBe Some("request-1")
+      facts.get("ai.usage.total_tokens") shouldBe Some("9")
+      facts.get("ai.usage.total_tokens_source") shouldBe Some("observed")
+      facts.get("ai.usage.reservation_basis") shouldBe Some("included-allocation")
+      facts.get("ai.usage.cost_microunits") shouldBe None
+      val exhausted = parse(facts("ai.usage.pre_dispatch_exhaustions")).toOption.value.asArray.value
+      exhausted.head.hcursor.get[String]("model").toOption shouldBe Some("gpt-5.6-sol")
+      exhausted.head.hcursor.get[Boolean]("providerInvoked").toOption shouldBe Some(false)
+      uncertain = true
+      receipt = AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown)
+      val unknown = runner.generateRecord(request)
+      unknown.isSuccess shouldBe false
+      val unknownFacts = unknown match {
+        case Consequence.Failure(conclusion) => conclusion.observation.properties
+        case _ => fail("expected an uncertain task failure")
+      }
+      unknownFacts.get(AiExecutionFacts.MODEL) shouldBe None
+      unknownFacts.get(AiExecutionFacts.PROVIDER) shouldBe None
+      unknownFacts.get("ai.provider.http.request-id") shouldBe None
+      unknownFacts.get("ai.usage.total_tokens") shouldBe None
+      unknownFacts.get("ai.usage.reservation_basis") shouldBe None
+      unknownFacts.get("ai.usage.pre_dispatch_exhaustions") shouldBe None
+    }
+
+    "bound a stalled preparation and prevent a late invocation" in {
+      import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
+      import java.util.concurrent.atomic.AtomicInteger
+      given ExecutionContext = ExecutionContext.create()
+      val entered = new CountDownLatch(1)
+      val release = new CountDownLatch(1)
+      val invocations = new AtomicInteger()
+      val binding = new AiBoundedRecordBinding {
+        val limits = AiBoundedRecordLimits(200, 0, 1024)
+        def prepare(request: AiTaskRequest, deadline: AiTaskDeadline)(using ExecutionContext)
+            : Consequence[(Vector[AiTaskCandidate], AiTaskInvoker)] = {
+          entered.countDown()
+          var waiting = true
+          while (waiting) try { release.await(); waiting = false } catch { case _: InterruptedException => () }
+          val candidate = AiTaskCandidate("fixture", "model", Set("structured-record"), Set.empty, Some(1), 1, request, Some(0))
+          val invoker = new AiTaskInvoker {
+            def preflight(r: AiTaskRequest, c: AiTaskCandidate) = Right(AiTaskInvocationCapability(r, c, 1000, 1024, 0, 200, true, true, true))
+            def invoke(r: AiTaskRequest, c: AiTaskCandidate) = {
+              invocations.incrementAndGet()
+              AiTaskDispatch.Uncertain("unexpected", AiTaskReceipt(None, None, None, None, AiTaskUsage.Unknown))
+            }
+          }
+          Consequence.success(Vector(candidate) -> invoker)
+        }
+      }
+      val request = AiRecordRequest("fixture", Record.dataAuto("type" -> "object"), metadata = Map(
+        "ai.task.contract" -> "textus-ai.bounded-task.v1", "ai.task.id" -> "blocked-prepare",
+        "ai.task.kind" -> "review", "ai.task.continuation" -> "continuation", "ai.task.input-reference" -> "reference"))
+      val caller = Executors.newSingleThreadExecutor()
+      try {
+        val result = caller.submit(new java.util.concurrent.Callable[Consequence[AiRecordResponse]] {
+          def call() = AiBoundedRecordProtocol.runC(request, binding)
+        })
+        entered.await(2, TimeUnit.SECONDS) shouldBe true
+        result.get(2, TimeUnit.SECONDS).isSuccess shouldBe false
+        release.countDown()
+        invocations.get() shouldBe 0
+      } finally { release.countDown(); caller.shutdownNow() }
+    }
+
     "delegate generate and chat requests through existing Textus AI runtime bindings" in {
       Given("a component with existing generate and chat runtime bindings")
       given ExecutionContext = ExecutionContext.create()
@@ -1913,10 +2168,9 @@ final class TextusAiRunnerSpec
       }
 
       Vector(
-        "object fields" -> """{"empty":[],"nothing":null,"object":{},"nested":{"empty":[],"nothing":null,"object":{}},"values":[null,{},[]]}""",
+        "object fields" -> """{"empty":[],"object":{},"nested":{"empty":[],"object":{}},"values":[{},[]]}""",
         "empty root object" -> "{}",
-        "empty root array" -> "[]",
-        "root null" -> "null"
+        "empty root array" -> "[]"
       ).foreach { case (label, text) =>
         s"preserve explicit JSON values in $label" in {
           Given(s"a deterministic Gemma response containing $label and no required fields")
@@ -1931,6 +2185,34 @@ final class TextusAiRunnerSpec
 
           Then("all explicit values are retained, with a value envelope for a non-object root")
           encoded shouldBe candidate.asObject.map(_ => candidate).getOrElse(Json.obj("value" -> candidate))
+          driver.calls should have size 1
+        }
+      }
+
+      "omit null object properties at the root and within array items" in {
+        val candidate = parse("""{"note":null,"items":[{"note":null},{"note":"keep"}],"empty":[]}""").toOption.value
+        val driver = _record_http_driver(candidate)
+        given ExecutionContext = _context(driver)
+        val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+        val result = runner.generateRecord(AiRecordRequest("null object properties", Record.empty))
+        val encoded = RecordEncoder.jsonC(result.toOption.value.record).toOption.value
+        parse(encoded).toOption.value shouldBe parse("""{"items":[{},{"note":"keep"}],"empty":[]}""").toOption.value
+        driver.calls should have size 1
+      }
+
+      Vector(
+        ("root null", "null", "at $, found null"),
+        ("array null", """{"nested":{"a.b":[{},null,{}]}}""", """at $.nested["a.b"][1], found null""")
+      ).foreach { case (label, text, expected) =>
+        s"report the position of a $label without a declared element type" in {
+          val driver = _record_http_driver(parse(text).toOption.value)
+          given ExecutionContext = _context(driver)
+          val runner = _gemma_runner(GemmaRuntimeConfig(endpoint = URI.create("http://ollama:11434")), summon[ExecutionContext])
+
+          val result = runner.generateRecord(AiRecordRequest("explicit null", Record.empty))
+          result.isSuccess shouldBe false
+          result.toString should include (expected)
           driver.calls should have size 1
         }
       }
@@ -1952,7 +2234,7 @@ final class TextusAiRunnerSpec
       Vector("name", "field").foreach { alias =>
         Vector(
           ("absent", "{}", "missing array field: exhibitions"),
-          ("null", """{"exhibitions":null}""", "must be an array"),
+          ("null", """{"exhibitions":null}""", "missing array field: exhibitions"),
           ("object", """{"exhibitions":{}}""", "must be an array"),
           ("scalar", """{"exhibitions":"invalid"}""", "must be an array"),
           ("scalar item", """{"exhibitions":[1]}""", "exhibitions[0] must be an object"),
@@ -2009,7 +2291,7 @@ final class TextusAiRunnerSpec
       Vector(
         ("absent", "{}", true),
         ("empty", """{"notes":[]}""", true),
-        ("null", """{"notes":null}""", false),
+        ("null", """{"notes":null}""", true),
         ("non-array", """{"notes":"invalid"}""", false)
       ).foreach { case (label, text, accepted) =>
         s"distinguish $label optional standard arrays from required presence" in {
@@ -2022,11 +2304,12 @@ final class TextusAiRunnerSpec
           When("the registered binding validates the optional declared array")
           val result = runner.generateRecord(AiRecordRequest("optional notes", schema))
 
-          Then("absence or an empty array succeeds while an explicit null or scalar fails")
+          Then("null and absence have the same result, and a scalar fails")
           result.isSuccess shouldBe accepted
-          if (accepted)
-            parse(RecordEncoder.json(result.toOption.value.record)).toOption.value shouldBe parse(text).toOption.get
-          else
+          if (accepted) {
+            val expected = if (label == "null") Json.obj() else parse(text).toOption.value
+            parse(RecordEncoder.json(result.toOption.value.record)).toOption.value shouldBe expected
+          } else
             result.toString should include ("notes must be an array")
           driver.calls should have size 1
         }
@@ -2912,7 +3195,7 @@ final class TextusAiRunnerSpec
     )
 
 
-  private def _context(driver: HttpDriver): ExecutionContext = {
+  private def _context(driver: _FakeHttpDriver): ExecutionContext = {
     val base = ExecutionContext.create()
     var runtime: RuntimeContext = null
     lazy val context: ExecutionContext = ExecutionContext.withRuntimeContext(base, runtime)
@@ -2926,8 +3209,13 @@ final class TextusAiRunnerSpec
       ),
       unitofworksupplier = () => uow,
       unitofworkinterpreterfn = new (UnitOfWorkOp ~> Consequence) {
-        def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] =
-          new UnitOfWorkInterpreter(uow).interpret(fa)
+        def apply[A](fa: UnitOfWorkOp[A]): Consequence[A] = fa match {
+          // These specs exercise provider requests at the UoW boundary.
+          // Only their recording transport handles the HTTP operation.
+          case UnitOfWorkOp.HttpPost(path, body, headers, properties) =>
+            Consequence(driver.post(path, body, headers, properties))
+          case operation => new UnitOfWorkInterpreter(uow).interpret(operation)
+        }
       },
       commitaction = _ => (),
       abortaction = _ => (),

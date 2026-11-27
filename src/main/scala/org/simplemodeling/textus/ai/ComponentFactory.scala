@@ -4,7 +4,7 @@ import scala.util.Try
 import org.goldenport.Consequence
 import org.goldenport.cncf.component.{Component, ComponentCreate, ComponentInit, ComponentOrigin}
 import org.goldenport.cncf.admission.ScopedConcurrencyAdmission
-import org.goldenport.cncf.config.{ComponentParameterDecoder, ComponentParameterKey, ComponentParameterPathLeaf, ComponentParameterPathParameters, ComponentParameterPathRoute}
+import org.goldenport.cncf.config.{ComponentParameterDecoder, ComponentParameterKey, ComponentParameterPathLeaf, ComponentParameterPathParameters, ComponentParameterPathRoute, RuntimeConfig}
 import org.goldenport.cncf.context.{ScopeContext, ScopeKind}
 import org.goldenport.cncf.mcp.client.McpClientSocket
 import org.goldenport.cncf.operationtool.OperationToolSocket
@@ -13,20 +13,21 @@ import org.goldenport.cncf.spi.SpiSelection
 import org.goldenport.cncf.spi.ai.runner.AiRunnerApplicationPurposeRegistrationSocketSet
 import org.goldenport.cncf.subsystem.Subsystem
 import org.goldenport.configuration.{Configuration, ConfigurationTrace, ConfigurationValue, ResolvedConfiguration}
-import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaRuntimeConfig, OllamaManagedServiceBootstrap, OllamaManagedServiceConfig}
+import org.simplemodeling.textus.ai.provider.gemma.{GemmaConfig, GemmaRuntimeConfig, OllamaBoundedRecordBinding, OllamaManagedServiceBootstrap, OllamaManagedServiceConfig}
 import org.simplemodeling.textus.ai.provider.codex.{CodexConfig, CodexExecutionBinding, CodexExecutionProfile, CodexReasoningLevel, CodexRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.claude.{ClaudeCodeConfig, ClaudeCodeExecutionBinding, ClaudeCodeExecutionProfile, ClaudeCodeRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.antigravity.{AntigravityConfig, AntigravityExecutionBinding, AntigravityExecutionProfile, AntigravityRuntimeConfig}
 import org.simplemodeling.textus.ai.provider.anthropic.AnthropicConfig
 import org.simplemodeling.textus.ai.provider.google.GoogleConfig
-import org.simplemodeling.textus.ai.provider.openai.OpenAiConfig
-import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, AiRuntimeProfileCatalog, TextusAiRunnerProvider}
+import org.simplemodeling.textus.ai.provider.openai.{OpenAiBoundedRecordBinding, OpenAiConfig, OpenAiGroupAllocationVerifier, OpenAiHostEvidenceVerifier, OpenAiLedgerBackedAllowance, OpenAiRequestSizingVerifier, OpenAiTaskAllowanceAuthority}
+import org.simplemodeling.textus.ai.runtime.{AiApplicationPurposeCatalog, AiBoundedRecordBinding, AiBoundedRecordLimits, AiConcurrencyAdmissionState, AiProfileConfig, AiRuntimeChatBinding, AiRuntimeGenerateBinding, AiRuntimeProfileCatalog, TextusAiRunnerProvider}
 import org.simplemodeling.textus.airuntime.AiRuntimeComponent
 
 /*
  * @since   Apr.  9, 2026
  *  version Jul. 26, 2026
- * @version Aug. 21, 2026
+ *  version Aug. 21, 2026
+ * @version Nov. 23, 2026
  * @author  ASAMI, Tomoharu
  */
 class ComponentFactory extends AiRuntimeComponent.Factory:
@@ -348,7 +349,54 @@ object ComponentFactory:
       .orElse(operationtoolport)
       .orElse(Component.Port.input(registrations))
       .orElse(withchat.port)
+      .orElse(configuration.flatMap(OpenAiHostEvidenceVerifier.fromConfiguration)
+        .map(Component.Port.input(_)).getOrElse(Component.Port.empty))
+      .orElse(_bounded_record_port(withchat, configuration, gemmaconfig))
     )
+
+  private def _bounded_record_port(
+    component: Component,
+    configuration: Option[ResolvedConfiguration],
+    gemma: GemmaRuntimeConfig
+  ): Component.Port = {
+    def enabled(provider: String): Boolean =
+      configuration.flatMap(RuntimeConfig.getString(_, s"textus.ai.bounded-task.$provider")).contains("true")
+    val ollama = Option.when(enabled("local-ollama") && OllamaBoundedRecordBinding.isNativeLoopback(gemma))(
+      new OllamaBoundedRecordBinding(gemma))
+    val allocation = for {
+      config <- configuration.flatMap(OpenAiConfig.fromConfiguration)
+      raw <- configuration.flatMap(RuntimeConfig.getString(_, "textus.ai.bounded-task.openai-allocation"))
+      evidence <- OpenAiLedgerBackedAllowance.parse(raw, config)
+      margin <- OpenAiLedgerBackedAllowance.dailyMarginPercent(
+        configuration.flatMap(RuntimeConfig.getString(_, "textus.ai.bounded-task.openai-daily-margin-percent")))
+    } yield (config, evidence, margin)
+    val groupKey = "textus.ai.bounded-task.openai-groups"
+    def declared(values: Map[String, ConfigurationValue], parts: List[String]): Boolean =
+      values.contains(parts.mkString(".")) || values.exists {
+        case (key, ConfigurationValue.ObjectValue(children)) =>
+          val prefix = key.split("\\.").toList
+          parts.startsWith(prefix) && parts.size > prefix.size && declared(children, parts.drop(prefix.size))
+        case _ => false
+      }
+    val groupMode = configuration.exists(c => declared(c.configuration.values, groupKey.split("\\.").toList))
+    val grouped = Option.when(groupMode) { () =>
+      for {
+        raw <- configuration.flatMap(RuntimeConfig.getString(_, groupKey))
+        config <- configuration.flatMap(OpenAiConfig.fromConfiguration)
+        verifier <- component.port.get[OpenAiGroupAllocationVerifier]
+        evidence <- OpenAiLedgerBackedAllowance.parseGroups(raw, config, verifier)
+        margin <- OpenAiLedgerBackedAllowance.dailyMarginPercent(
+          configuration.flatMap(RuntimeConfig.getString(_, "textus.ai.bounded-task.openai-daily-margin-percent")))
+      } yield (config, evidence, margin, verifier, component.port.get[OpenAiRequestSizingVerifier])
+    }
+    val openai = Option.when(enabled("openai"))(new OpenAiBoundedRecordBinding(
+      context => component.port.get[OpenAiTaskAllowanceAuthority].orElse(
+        allocation.map((config, evidence, margin) => OpenAiLedgerBackedAllowance.create(config, evidence, context, margin, component.port.get[OpenAiRequestSizingVerifier]))),
+      AiBoundedRecordLimits(120000L, 0L, 65536), grouped
+    ))
+    AiBoundedRecordBinding.combine(Vector(ollama, openai).flatten)
+      .map(Component.Port.input(_)).getOrElse(Component.Port.empty)
+  }
 
   private[ai] def _mcp_client_port_c(
     profiles: AiProfileConfig

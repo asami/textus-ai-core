@@ -111,11 +111,11 @@ and historical evidence above remain unchanged. The scenarios below are authored
 executable specifications; this document does not claim their execution, full
 validation, or a successful live provider review.
 
-JSON normalization preserves explicit values at the root and in nested objects,
-including empty arrays, nulls, and empty objects. Arrays become vectors in the
-Record. A non-object JSON root is retained under the `value` field. Encoding the
-normalized Record with `RecordEncoder.json` retains those explicit values;
-missing fields are never fabricated.
+Structured results use a Core `Record`. Null-valued object properties are
+omitted at every depth before validation. Empty arrays, empty objects and
+non-null values are preserved. Arrays become vectors, and a non-object non-null
+root is retained under the `value` field. A null root is invalid. A null array
+element stays at its original index and fails element validation there.
 
 Required presence is separate from content. An explicitly present empty array
 satisfies a required field. A missing field or null fails required presence,
@@ -128,8 +128,8 @@ The supported array-schema subset is:
   is required, even without a root `required` entry. When its item `required`
   fields are declared, every item must be an object containing those fields.
 - Standard `properties` entries with `type: array` validate present array
-  fields. An optional array may be absent; explicit null and non-array values
-  fail. Arrays listed in `required` must be present, and may be empty.
+  fields. Null is equivalent to omission for an object property. Arrays listed
+  in `required` must be present and may be empty. A present non-array fails.
 - Standard `items` with `type: object` requires object items and recursively
   checks their required fields and declared array properties. `items` with
   `type: array` recursively checks array shape and its items. Empty arrays
@@ -159,3 +159,39 @@ no live HTTP/provider requests.
 Focused validation of `TextusAiRunnerSpec`, normal `cozyBuildCar`, independent
 review, and the separately admitted normal C4 execution remain caller-owned
 evidence. These deterministic scenarios do not establish live provider execution.
+
+### OpenAI daily reservation margin
+
+To enable the bounded OpenAI route, set `textus.ai.bounded-task.openai=true`
+in the executing Textus AI host and select the existing OpenAI connection for
+the intended organization, project and model. The host must grant managed
+HTTPS POST access to that endpoint. Supply the credential through the host's
+existing secret configuration.
+
+For the built-in authority, provide a verified allocation as a JSON object in
+`textus.ai.bounded-task.openai-allocation`. Bind `organization`, `project`,
+`origin`, `model` and `modelPool` to the selected connection and verified
+quota group. The object also records `inputTokenCeiling`, `maxOutputTokens`
+and `fullCostMicros` for the entire bounded request. A `daily` allocation
+contains the UTC `day`, gross `limitTokens`, `validFrom`, `expiresAt` and
+`provenance`. Optional monthly `credit` contains the verified
+`allocationId`, `limitMicros` and the same validity and provenance fields.
+For a credit-only allocation, also supply verified `dailyIneligible`
+evidence with its own validity and provenance.
+
+Refresh daily evidence at the UTC-day boundary. All instances using the same
+organization and model group must use the same shared reservation store.
+The allocation provenance refers to enrollment and allocation evidence
+verified by the host operator. API access alone cannot supply that evidence.
+
+For the built-in OpenAI allowance authority,
+`textus.ai.bounded-task.openai-daily-margin-percent` sets the percentage of the
+verified gross daily token allocation held in reserve. It defaults to 10 and
+accepts integers from 1 to 99. An invalid value disables the built-in
+authority. An injected authority manages its own policy.
+
+When the host loads a changed value, the new cutoff counts all reservations
+already recorded for the organization, model group and UTC day. A request
+beyond the cutoff can use monthly credit when a verified reservation covers
+the full potential charge. Traffic outside the ledger may still result in
+charges.
